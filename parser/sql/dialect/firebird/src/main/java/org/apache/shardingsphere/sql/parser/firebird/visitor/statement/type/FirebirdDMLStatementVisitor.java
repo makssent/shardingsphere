@@ -52,9 +52,6 @@ import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.Tabl
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.TableReferencesContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.UpdateContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.WhereClauseContext;
-import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.MergeContext;
-import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.IntoClauseContext;
-import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.UsingClauseContext;
 import org.apache.shardingsphere.sql.parser.sql.common.enums.JoinType;
 import org.apache.shardingsphere.sql.parser.sql.common.segment.dml.assignment.ColumnAssignmentSegment;
 import org.apache.shardingsphere.sql.parser.sql.common.segment.dml.assignment.InsertValuesSegment;
@@ -94,8 +91,12 @@ import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.dml.F
 import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.dml.FirebirdInsertStatement;
 import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.dml.FirebirdSelectStatement;
 import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.dml.FirebirdUpdateStatement;
-import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.dml.FirebirdMergeStatement;
 import org.apache.shardingsphere.sql.parser.firebird.visitor.statement.FirebirdStatementVisitor;
+
+import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.dml.FirebirdMergeStatement;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.MergeContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.IntoClauseContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.UsingClauseContext;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -482,14 +483,64 @@ public final class FirebirdDMLStatementVisitor extends FirebirdStatementVisitor 
     public ASTNode visitSubquery(final SubqueryContext ctx) {
         return visit(ctx.combineClause());
     }
-
     @Override
     public ASTNode visitMerge(final MergeContext ctx) {
         FirebirdMergeStatement result = new FirebirdMergeStatement();
         result.setTarget((TableSegment) visit(ctx.intoClause()));
-        result.setSource((TableSegment) visit(ctx.usingClause()));
-        // add mergeWhenNotMatched and mergeWhenMatched part
-        // add RETURNING part
+        result.setTarget((TableSegment) visit(ctx.usingClause()));
+
         return result;
     }
+
+    @Override
+    public ASTNode visitIntoClause(final IntoClauseContext ctx) {
+        if (null != ctx.tableName()) {
+            SimpleTableSegment result = (SimpleTableSegment) visit(ctx.tableName());
+            if (null != ctx.alias()) {
+                result.setAlias((AliasSegment) visit(ctx.alias()));
+            }
+            return result;
+        }
+        if (null != ctx.viewName()) {
+            SimpleTableSegment result = (SimpleTableSegment) visit(ctx.viewName());
+            if (null != ctx.alias()) {
+                result.setAlias((AliasSegment) visit(ctx.alias()));
+            }
+            return result;
+        }
+        FirebirdSelectStatement subquery = (FirebirdSelectStatement) visit(ctx.subquery());
+        SubquerySegment subquerySegment = new SubquerySegment(ctx.subquery().start.getStartIndex(), ctx.subquery().stop.getStopIndex(), subquery, getOriginalText(ctx.subquery()));
+        SubqueryTableSegment result = new SubqueryTableSegment(subquerySegment);
+        if (null != ctx.alias()) {
+            result.setAlias((AliasSegment) visit(ctx.alias()));
+        }
+        return result;
+    }
+
+    @Override
+    public ASTNode visitUsingClause(final UsingClauseContext ctx) {
+        if (null != ctx.tableName()) {
+            SimpleTableSegment result = (SimpleTableSegment) visit(ctx.tableName());
+            if (null != ctx.alias()) {
+                result.setAlias((AliasSegment) visit(ctx.alias()));
+            }
+            return result;
+        }
+        if (null != ctx.viewName()) {
+            SimpleTableSegment result = (SimpleTableSegment) visit(ctx.viewName());
+            if (null != ctx.alias()) {
+                result.setAlias((AliasSegment) visit(ctx.alias()));
+            }
+            return result;
+        }
+        FirebirdSelectStatement subquery = (FirebirdSelectStatement) visit(ctx.subquery());
+        SubquerySegment subquerySegment = new SubquerySegment(ctx.subquery().start.getStartIndex(), ctx.subquery().stop.getStopIndex(), subquery, getOriginalText(ctx.subquery()));
+        subquerySegment.getSelect().getParameterMarkerSegments().addAll(popAllStatementParameterMarkerSegments());
+        SubqueryTableSegment result = new SubqueryTableSegment(subquerySegment);
+        if (null != ctx.alias()) {
+            result.setAlias((AliasSegment) visit(ctx.alias()));
+        }
+        return result;
+    }
+
 }

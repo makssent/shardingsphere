@@ -27,6 +27,7 @@ import org.apache.shardingsphere.sql.parser.sql.common.segment.generic.WithSegme
 import org.apache.shardingsphere.sql.parser.sql.common.segment.generic.table.TableSegment;
 import org.apache.shardingsphere.sql.parser.sql.common.statement.dml.SelectStatement;
 import org.apache.shardingsphere.sql.parser.sql.dialect.handler.SQLStatementHandler;
+import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.dml.FirebirdSelectStatement;
 import org.apache.shardingsphere.sql.parser.sql.dialect.statement.mysql.dml.MySQLSelectStatement;
 import org.apache.shardingsphere.sql.parser.sql.dialect.statement.opengauss.dml.OpenGaussSelectStatement;
 import org.apache.shardingsphere.sql.parser.sql.dialect.statement.oracle.dml.OracleSelectStatement;
@@ -217,6 +218,9 @@ public final class SelectStatementHandler implements SQLStatementHandler {
     public static Optional<ModelSegment> getModelSegment(final SelectStatement selectStatement) {
         if (selectStatement instanceof OracleSelectStatement) {
             return ((OracleSelectStatement) selectStatement).getModelSegment();
+        }
+        if (selectStatement instanceof FirebirdSelectStatement) {
+            return ((FirebirdSelectStatement) selectStatement).getModelSegment();
         }
         return Optional.empty();
     }

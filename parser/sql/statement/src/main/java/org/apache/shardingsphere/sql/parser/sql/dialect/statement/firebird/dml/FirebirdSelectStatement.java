@@ -18,26 +18,50 @@
 package org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.dml;
 
 import lombok.Setter;
-import org.apache.shardingsphere.sql.parser.sql.common.segment.dml.pagination.limit.LimitSegment;
+import org.apache.shardingsphere.sql.parser.sql.common.segment.dml.predicate.LockSegment;
+import org.apache.shardingsphere.sql.parser.sql.common.segment.generic.ModelSegment;
+import org.apache.shardingsphere.sql.parser.sql.common.segment.generic.WithSegment;
 import org.apache.shardingsphere.sql.parser.sql.common.statement.dml.SelectStatement;
 import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.FirebirdStatement;
 
 import java.util.Optional;
 
 /**
- * SQL92 select statement.
+ * Firebird select statement.
  */
 @Setter
 public final class FirebirdSelectStatement extends SelectStatement implements FirebirdStatement {
-    
-    private LimitSegment limit;
-    
+
+    private LockSegment lock;
+
+    private ModelSegment modelSegment;
+
+    private WithSegment withSegment;
+
     /**
-     * Get order by segment.
+     * Get lock segment.
      *
-     * @return order by segment
+     * @return lock segment
      */
-    public Optional<LimitSegment> getLimit() {
-        return Optional.ofNullable(limit);
+    public Optional<LockSegment> getLock() {
+        return Optional.ofNullable(lock);
+    }
+
+    /**
+     * Get model segment.
+     *
+     * @return model segment
+     */
+    public Optional<ModelSegment> getModelSegment() {
+        return Optional.ofNullable(modelSegment);
+    }
+
+    /**
+     * Get with segment.
+     *
+     * @return with segment.
+     */
+    public Optional<WithSegment> getWithSegment() {
+        return Optional.ofNullable(withSegment);
     }
 }

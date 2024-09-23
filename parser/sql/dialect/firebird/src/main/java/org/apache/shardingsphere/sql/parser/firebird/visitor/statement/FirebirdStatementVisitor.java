@@ -112,6 +112,8 @@ public abstract class FirebirdStatementVisitor extends FirebirdStatementBaseVisi
 
     private final Collection<ParameterMarkerSegment> parameterMarkerSegments = new LinkedList<>();
 
+    private final Collection<ParameterMarkerSegment> statementParameterMarkerSegments = new LinkedList<>();
+
     @Override
     public final ASTNode visitParameterMarker(final ParameterMarkerContext ctx) {
         return new ParameterMarkerValue(parameterMarkerSegments.size(), ParameterMarkerType.QUESTION);
@@ -571,5 +573,11 @@ public abstract class FirebirdStatementVisitor extends FirebirdStatementBaseVisi
      */
     protected String getOriginalText(final ParserRuleContext ctx) {
         return ctx.start.getInputStream().getText(new Interval(ctx.start.getStartIndex(), ctx.stop.getStopIndex()));
+    }
+
+    protected Collection<ParameterMarkerSegment> popAllStatementParameterMarkerSegments() {
+        Collection<ParameterMarkerSegment> result = new LinkedList<>(statementParameterMarkerSegments);
+        statementParameterMarkerSegments.clear();
+        return result;
     }
 }

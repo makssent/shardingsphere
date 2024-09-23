@@ -161,42 +161,75 @@ cteClause
 
 merge
     : MERGE intoClause usingClause
-    mergeWhen (mergeWhen)*
-    (RETURNING returnExprListClause (INTO variableListClause)?)?
+    (mergeUpdateClause? mergeInsertClause? | mergeInsertClause? mergeUpdateClause?)
     ;
 
 intoClause
-    : INTO (tableName | viewName | subquery) (AS? alias)?
+    : INTO (tableName | viewName | subquery) alias? // (AS? alias)?
     ;
 
 usingClause
-    : USING ((tableName | viewName) | subquery) (AS? alias)? ON predicate
+    : USING ((tableName | viewName) | subquery) alias? ON LP_ expr RP_ //(AS? alias)? ON predicate
     ;
 
-mergeWhen
-    : mergeWhenMatched | mergeWhenNotMatched
+mergeUpdateClause
+    : WHEN MATCHED (AND predicate)? THEN (UPDATE SET mergeSetAssignmentsClause | DELETE )
     ;
 
-mergeWhenMatched
-    : WHEN MATCHED (AND predicate)? THEN (UPDATE SET columnName EQ_ expr (COMMA_ (columnName EQ_ expr))* | DELETE )
+mergeSetAssignmentsClause
+    : mergeAssignment (COMMA_ mergeAssignment)*
     ;
 
-mergeWhenNotMatched
-    : WHEN NOT MATCHED (AND predicate)? THEN INSERT columnNames? VALUES LP_ expr RP_
+mergeAssignment
+    : columnName EQ_ mergeAssignmentValue
     ;
 
-returnExpr
-    : expr (AS? alias)
+mergeAssignmentValue
+    : expr | DEFAULT
     ;
 
-returnExprListClause
-    : returnExpr (COMMA_ returnExpr)*
+mergeInsertClause
+    : WHEN NOT MATCHED (AND predicate)? THEN INSERT mergeInsertColumn? mergeColumnValue
     ;
 
-variableList
-    : LBT_ COLON_ RBT_ variableName
+mergeInsertColumn
+    : LP_ columnName (COMMA_ columnName)* RP_
     ;
 
-variableListClause
-    : variableList (COMMA_ variableList)*
+mergeColumnValue
+    : VALUES LP_ (expr | DEFAULT) (COMMA_ (expr | DEFAULT))* RP_
     ;
+
+//merge
+//    : MERGE intoClause usingClause
+//    mergeWhen*
+//    (RETURNING returnExprListClause (INTO variableListClause)?)?
+//    ;
+//
+//mergeWhen
+//    : mergeWhenMatched | mergeWhenNotMatched
+//    ;
+//
+//mergeWhenMatched
+//    : WHEN MATCHED (AND predicate)? THEN (UPDATE SET columnName EQ_ expr (COMMA_ (columnName EQ_ expr))* | DELETE )
+//    ;
+//
+//mergeWhenNotMatched
+//    : WHEN NOT MATCHED (AND predicate)? THEN INSERT columnNames? VALUES LP_ expr RP_
+//    ;
+
+//returnExpr
+//    : expr (AS? alias)
+//    ;
+//
+//returnExprListClause
+//    : returnExpr (COMMA_ returnExpr)*
+//    ;
+//
+//variableList
+//    : LBT_ COLON_ RBT_ variableName
+//    ;
+//
+//variableListClause
+//    : variableList (COMMA_ variableList)*
+//    ;
