@@ -60,6 +60,7 @@ import org.apache.shardingsphere.sql.parser.sql.common.segment.dml.column.Column
 import org.apache.shardingsphere.sql.parser.sql.common.segment.dml.column.InsertColumnsSegment;
 import org.apache.shardingsphere.sql.parser.sql.common.segment.dml.expr.BinaryOperationExpression;
 import org.apache.shardingsphere.sql.parser.sql.common.segment.dml.expr.ExpressionSegment;
+import org.apache.shardingsphere.sql.parser.sql.common.segment.dml.expr.ExpressionWithParamsSegment;
 import org.apache.shardingsphere.sql.parser.sql.common.segment.dml.expr.FunctionSegment;
 import org.apache.shardingsphere.sql.parser.sql.common.segment.dml.expr.complex.CommonExpressionSegment;
 import org.apache.shardingsphere.sql.parser.sql.common.segment.dml.expr.simple.LiteralExpressionSegment;
@@ -84,6 +85,8 @@ import org.apache.shardingsphere.sql.parser.sql.common.segment.generic.table.Joi
 import org.apache.shardingsphere.sql.parser.sql.common.segment.generic.table.SimpleTableSegment;
 import org.apache.shardingsphere.sql.parser.sql.common.segment.generic.table.SubqueryTableSegment;
 import org.apache.shardingsphere.sql.parser.sql.common.segment.generic.table.TableSegment;
+import org.apache.shardingsphere.sql.parser.sql.common.statement.dml.InsertStatement;
+import org.apache.shardingsphere.sql.parser.sql.common.statement.dml.UpdateStatement;
 import org.apache.shardingsphere.sql.parser.sql.common.value.collection.CollectionValue;
 import org.apache.shardingsphere.sql.parser.sql.common.value.identifier.IdentifierValue;
 import org.apache.shardingsphere.sql.parser.sql.common.value.literal.impl.BooleanLiteralValue;
@@ -97,11 +100,19 @@ import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.dml.F
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.MergeContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.IntoClauseContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.UsingClauseContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.ExecuteContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.MergeAssignmentContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.MergeAssignmentValueContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.MergeColumnValueContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.MergeContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.MergeInsertClauseContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.MergeInsertColumnContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.MergeSetAssignmentsClauseContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.MergeUpdateClauseContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.ColumnNameContext;
+import org.apache.shardingsphere.sql.parser.sql.dialect.statement.oracle.dml.OracleUpdateStatement;
 
-import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -488,10 +499,93 @@ public final class FirebirdDMLStatementVisitor extends FirebirdStatementVisitor 
         FirebirdMergeStatement result = new FirebirdMergeStatement();
         result.setTarget((TableSegment) visit(ctx.intoClause()));
         result.setTarget((TableSegment) visit(ctx.usingClause()));
-
+        ExpressionWithParamsSegment onExpression = new ExpressionWithParamsSegment(ctx.usingClause().expr().start.getStartIndex(), ctx.usingClause().expr().stop.getStopIndex(),
+                (ExpressionSegment) visit(ctx.usingClause().expr()));
+        onExpression.getParameterMarkerSegments().addAll(popAllStatementParameterMarkerSegments());
+        result.setExpression(onExpression);
+//        if (null != ctx.mergeUpdateClause() && null != ctx.mergeInsertClause() && ctx.mergeUpdateClause().start.getStartIndex() > ctx.mergeInsertClause().start.getStartIndex()) {
+//            result.setInsert((InsertStatement) visitMergeInsertClause(ctx.mergeInsertClause()));
+//            result.setUpdate((UpdateStatement) visitMergeUpdateClause(ctx.mergeUpdateClause()));
+//            result.addParameterMarkerSegments(ctx.getParent() instanceof ExecuteContext ? getGlobalParameterMarkerSegments() : popAllStatementParameterMarkerSegments());
+//            return result;
+//        }
+//        if (null != ctx.mergeUpdateClause()) {
+//            result.setUpdate((UpdateStatement) visitMergeUpdateClause(ctx.mergeUpdateClause()));
+//        }
+//        if (null != ctx.mergeInsertClause()) {
+//            result.setInsert((InsertStatement) visitMergeInsertClause(ctx.mergeInsertClause()));
+//        }
+        result.addParameterMarkerSegments(ctx.getParent() instanceof ExecuteContext ? getGlobalParameterMarkerSegments() : popAllStatementParameterMarkerSegments());
         return result;
     }
 
+    @SuppressWarnings("unchecked")
+    @Override
+    public ASTNode visitMergeInsertClause(final MergeInsertClauseContext ctx) {
+        FirebirdInsertStatement result = new FirebirdInsertStatement();
+        if (null != ctx.mergeInsertColumn()) {
+            result.setInsertColumns((InsertColumnsSegment) visit(ctx.mergeInsertColumn()));
+        }
+        if (null != ctx.mergeColumnValue()) {
+            result.getValues().addAll(((CollectionValue<InsertValuesSegment>) visit(ctx.mergeColumnValue())).getValue());
+        }
+        result.getParameterMarkerSegments().addAll(popAllStatementParameterMarkerSegments());
+        return result;
+    }
+
+    @Override
+    public ASTNode visitMergeInsertColumn(final MergeInsertColumnContext ctx) {
+        Collection<ColumnSegment> columnSegments = new ArrayList<>(ctx.columnName().size());
+        for (ColumnNameContext each : ctx.columnName()) {
+            if (null != each.name()) {
+                columnSegments.add((ColumnSegment) visit(each));
+            }
+        }
+        return new InsertColumnsSegment(ctx.start.getStartIndex(), ctx.stop.getStopIndex(), columnSegments);
+    }
+
+    @Override
+    public ASTNode visitMergeColumnValue(final MergeColumnValueContext ctx) {
+        CollectionValue<InsertValuesSegment> result = new CollectionValue<>();
+        List<ExpressionSegment> segments = new LinkedList<>();
+        for (ExprContext each : ctx.expr()) {
+            segments.add(null == each ? new CommonExpressionSegment(ctx.getStart().getStartIndex(), ctx.getStop().getStopIndex(), ctx.getText()) : (ExpressionSegment) visit(each));
+        }
+        result.getValue().add(new InsertValuesSegment(ctx.LP_().getSymbol().getStartIndex(), ctx.RP_().getSymbol().getStopIndex(), segments));
+        return result;
+    }
+
+    @Override
+    public ASTNode visitMergeSetAssignmentsClause(final MergeSetAssignmentsClauseContext ctx) {
+        Collection<ColumnAssignmentSegment> assignments = new LinkedList<>();
+        for (MergeAssignmentContext each : ctx.mergeAssignment()) {
+            assignments.add((ColumnAssignmentSegment) visit(each));
+        }
+        return new SetAssignmentSegment(ctx.getStart().getStartIndex(), ctx.getStop().getStopIndex(), assignments);
+    }
+
+    @Override
+    public ASTNode visitMergeAssignment(final MergeAssignmentContext ctx) {
+        ColumnSegment column = (ColumnSegment) visitColumnName(ctx.columnName());
+        ExpressionSegment value = (ExpressionSegment) visit(ctx.mergeAssignmentValue());
+        List<ColumnSegment> columnSegments = new LinkedList<>();
+        columnSegments.add(column);
+        return new ColumnAssignmentSegment(ctx.getStart().getStartIndex(), ctx.getStop().getStopIndex(), columnSegments, value);
+    }
+
+    @Override
+    public ASTNode visitMergeAssignmentValue(final MergeAssignmentValueContext ctx) {
+        ExprContext expr = ctx.expr();
+        return null == expr ? new CommonExpressionSegment(ctx.getStart().getStartIndex(), ctx.getStop().getStopIndex(), ctx.getText()) : visit(expr);
+    }
+
+    @Override
+    public ASTNode visitMergeUpdateClause(final MergeUpdateClauseContext ctx) {
+        FirebirdUpdateStatement result = new FirebirdUpdateStatement();
+        result.setSetAssignment((SetAssignmentSegment) visit(ctx.mergeSetAssignmentsClause()));
+        result.getParameterMarkerSegments().addAll(popAllStatementParameterMarkerSegments());
+        return result;
+    }
     @Override
     public ASTNode visitIntoClause(final IntoClauseContext ctx) {
         if (null != ctx.tableName()) {

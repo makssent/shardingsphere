@@ -114,6 +114,8 @@ public abstract class FirebirdStatementVisitor extends FirebirdStatementBaseVisi
 
     private final Collection<ParameterMarkerSegment> statementParameterMarkerSegments = new LinkedList<>();
 
+    private final Collection<ParameterMarkerSegment> globalParameterMarkerSegments = new LinkedList<>();
+
     @Override
     public final ASTNode visitParameterMarker(final ParameterMarkerContext ctx) {
         return new ParameterMarkerValue(parameterMarkerSegments.size(), ParameterMarkerType.QUESTION);
