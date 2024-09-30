@@ -141,8 +141,7 @@ columnName
     ;
 
 viewName
-    : identifier
-    | (owner DOT_)? identifier
+    : (owner DOT_)? identifier
     ;
 
 functionName

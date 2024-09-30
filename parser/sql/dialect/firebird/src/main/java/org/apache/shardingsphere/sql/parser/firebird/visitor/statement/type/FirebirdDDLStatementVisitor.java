@@ -60,6 +60,7 @@ import org.apache.shardingsphere.sql.parser.sql.common.segment.ddl.constraint.al
 import org.apache.shardingsphere.sql.parser.sql.common.segment.dml.column.ColumnSegment;
 import org.apache.shardingsphere.sql.parser.sql.common.segment.generic.DataTypeSegment;
 import org.apache.shardingsphere.sql.parser.sql.common.segment.generic.table.SimpleTableSegment;
+import org.apache.shardingsphere.sql.parser.sql.common.statement.dml.SelectStatement;
 import org.apache.shardingsphere.sql.parser.sql.common.value.collection.CollectionValue;
 import org.apache.shardingsphere.sql.parser.sql.common.value.identifier.IdentifierValue;
 import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.ddl.FirebirdAlterTableStatement;
@@ -78,6 +79,10 @@ import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.ddl.F
 import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.ddl.FirebirdCommentStatement;
 import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.ddl.FirebirdExecuteStatement;
 import org.apache.shardingsphere.sql.parser.firebird.visitor.statement.FirebirdStatementVisitor;
+import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.ddl.FirebirdCreateViewStatement;
+import org.apache.shardingsphere.sql.parser.sql.common.statement.dml.SelectStatement;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.CreateViewContext;
+import org.apache.shardingsphere.sql.parser.sql.dialect.statement.firebird.ddl.FirebirdCreateViewStatement;
 
 import java.util.Collections;
 
@@ -313,6 +318,15 @@ public final class FirebirdDDLStatementVisitor extends FirebirdStatementVisitor 
         if (null != ctx.columnName()) {
             result.setColumn((ColumnSegment) visit(ctx.columnName()));
         }
+        return result;
+    }
+
+    @Override
+    public ASTNode visitCreateView(final CreateViewContext ctx) {
+        FirebirdCreateViewStatement result = new FirebirdCreateViewStatement();
+        result.setView((SimpleTableSegment) visit(ctx.viewName()));
+        result.setViewDefinition(getOriginalText(ctx.select()));
+        result.setSelect((SelectStatement) visit(ctx.select()));
         return result;
     }
 }

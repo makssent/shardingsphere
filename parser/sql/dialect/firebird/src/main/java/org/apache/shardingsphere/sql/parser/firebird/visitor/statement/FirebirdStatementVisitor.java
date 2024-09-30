@@ -57,6 +57,7 @@ import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.Stri
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.TableNameContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.TableNamesContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.UnreservedWordContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.ViewNameContext;
 import org.apache.shardingsphere.sql.parser.sql.common.enums.AggregationType;
 import org.apache.shardingsphere.sql.parser.sql.common.enums.OrderDirection;
 import org.apache.shardingsphere.sql.parser.sql.common.enums.ParameterMarkerType;
@@ -572,4 +573,16 @@ public abstract class FirebirdStatementVisitor extends FirebirdStatementBaseVisi
     protected String getOriginalText(final ParserRuleContext ctx) {
         return ctx.start.getInputStream().getText(new Interval(ctx.start.getStartIndex(), ctx.stop.getStopIndex()));
     }
+
+    @Override
+    public final ASTNode visitViewName(final ViewNameContext ctx) {
+        SimpleTableSegment result = new SimpleTableSegment(new TableNameSegment(ctx.identifier().getStart().getStartIndex(),
+                ctx.identifier().getStop().getStopIndex(), new IdentifierValue(ctx.identifier().getText())));
+        OwnerContext owner = ctx.owner();
+        if (null != owner) {
+            result.setOwner((OwnerSegment) visit(owner));
+        }
+        return result;
+    }
+
 }
