@@ -169,7 +169,7 @@ intoClause
     ;
 
 usingClause
-    : USING ((tableName | viewName) | subquery) alias? ON LP_ predicate RP_ //(AS? alias)? ON predicate
+    : USING ((tableName | viewName) | subquery) alias? ON LP_ expr RP_ //(AS? alias)? ON predicate
     ;
 
 mergeUpdateClause
