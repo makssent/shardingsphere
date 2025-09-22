@@ -53,7 +53,7 @@ class FirebirdGenericResponsePacketTest {
     
     @Test
     void assertGetHandleAndId() {
-        FirebirdGenericResponsePacket packet = FirebirdGenericResponsePacket.getPacket().setHandle(1).setId(2);
+        FirebirdGenericResponsePacket packet = FirebirdGenericResponsePacket.getPacket().setHandle(1).setId(2L);
         assertThat(packet.getHandle(), is(1));
         assertThat(packet.getId(), is(2L));
     }
@@ -69,7 +69,7 @@ class FirebirdGenericResponsePacketTest {
     @Test
     void assertWriteWithoutData() {
         when(payload.getByteBuf()).thenReturn(byteBuf);
-        new FirebirdGenericResponsePacket().setHandle(3).setId(4).write(payload);
+        new FirebirdGenericResponsePacket().setHandle(3).setId(4L).write(payload);
         verify(payload).writeInt4(FirebirdCommandPacketType.RESPONSE.getValue());
         verify(payload).writeInt4(3);
         verify(payload).writeInt8(4L);
@@ -82,7 +82,7 @@ class FirebirdGenericResponsePacketTest {
         when(payload.getByteBuf()).thenReturn(byteBuf);
         when(byteBuf.writeZero(4)).thenReturn(byteBuf);
         when(byteBuf.readableBytes()).thenReturn(4, 8);
-        FirebirdGenericResponsePacket packet = new FirebirdGenericResponsePacket().setHandle(1).setId(2).setData(data);
+        FirebirdGenericResponsePacket packet = new FirebirdGenericResponsePacket().setHandle(1).setId(2L).setData(data);
         Field field = FirebirdGenericResponsePacket.class.getDeclaredField("statusVector");
         field.setAccessible(true);
         field.set(packet, vector);

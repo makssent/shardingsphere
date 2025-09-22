@@ -21,6 +21,12 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.FirebirdCommandPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.FirebirdInfoPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdBatchBlobStreamCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdBatchRegBlobCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdCloseBlobCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdCreateBlobCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdOpenBlobCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdPutSegmentCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdAllocateStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFetchStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFreeStatementPacket;
@@ -35,6 +41,12 @@ import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor
 import org.apache.shardingsphere.proxy.frontend.firebird.command.admin.FirebirdUnsupportedCommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.info.FirebirdDatabaseInfoExecutor;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.info.FirebirdSQLInfoExecutor;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdBatchBlobStreamCommandExecutor;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdBatchRegBlobCommandExecutor;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdCloseBlobCommandExecutor;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdCreateBlobCommandExecutor;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdOpenBlobCommandExecutor;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdPutSegmentCommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdAllocateStatementCommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdFetchStatementCommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdFreeStatementCommandExecutor;
@@ -68,6 +80,16 @@ public final class FirebirdCommandExecutorFactory {
                 return new FirebirdDatabaseInfoExecutor((FirebirdInfoPacket) commandPacket, connectionSession);
             case TRANSACTION:
                 return new FirebirdStartTransactionCommandExecutor((FirebirdStartTransactionPacket) commandPacket, connectionSession);
+            case CREATE_BLOB:
+            case CREATE_BLOB2:
+                return new FirebirdCreateBlobCommandExecutor((FirebirdCreateBlobCommandPacket) commandPacket, connectionSession);
+            case OPEN_BLOB:
+            case OPEN_BLOB2:
+                return new FirebirdOpenBlobCommandExecutor((FirebirdOpenBlobCommandPacket) commandPacket, connectionSession);
+            case PUT_SEGMENT:
+                return new FirebirdPutSegmentCommandExecutor((FirebirdPutSegmentCommandPacket) commandPacket, connectionSession);
+            case CLOSE_BLOB:
+                return new FirebirdCloseBlobCommandExecutor((FirebirdCloseBlobCommandPacket) commandPacket, connectionSession);
             case ALLOCATE_STATEMENT:
                 return new FirebirdAllocateStatementCommandExecutor((FirebirdAllocateStatementPacket) commandPacket, connectionSession);
             case PREPARE_STATEMENT:
@@ -79,6 +101,10 @@ public final class FirebirdCommandExecutorFactory {
                 return new FirebirdFetchStatementCommandExecutor((FirebirdFetchStatementPacket) commandPacket, connectionSession);
             case INFO_SQL:
                 return new FirebirdSQLInfoExecutor((FirebirdInfoPacket) commandPacket, connectionSession);
+            case BATCH_REGBLOB:
+                return new FirebirdBatchRegBlobCommandExecutor((FirebirdBatchRegBlobCommandPacket) commandPacket, connectionSession);
+            case BATCH_BLOB_STREAM:
+                return new FirebirdBatchBlobStreamCommandExecutor((FirebirdBatchBlobStreamCommandPacket) commandPacket, connectionSession);
             case COMMIT:
                 return new FirebirdCommitTransactionCommandExecutor((FirebirdCommitTransactionPacket) commandPacket, connectionSession);
             case ROLLBACK:

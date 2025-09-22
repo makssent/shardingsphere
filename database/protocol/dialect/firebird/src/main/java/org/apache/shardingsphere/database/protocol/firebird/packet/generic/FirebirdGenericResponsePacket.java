@@ -65,7 +65,7 @@ public final class FirebirdGenericResponsePacket extends FirebirdPacket {
      * @param objectId ID value to set
      * @return this instance with updated ID
      */
-    public FirebirdGenericResponsePacket setId(final int objectId) {
+    public FirebirdGenericResponsePacket setId(final long objectId) {
         id = objectId;
         return this;
     }

@@ -24,6 +24,12 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.admin
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.FirebirdInfoPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.database.FirebirdDatabaseInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoPacketType;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdBatchBlobStreamCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdBatchRegBlobCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdCloseBlobCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdCreateBlobCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdOpenBlobCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdPutSegmentCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdAllocateStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFetchStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFreeStatementPacket;
@@ -54,6 +60,16 @@ public final class FirebirdCommandPacketFactory {
                 return FirebirdDatabaseInfoPacketType.createPacket(payload);
             case TRANSACTION:
                 return new FirebirdStartTransactionPacket(payload);
+            case CREATE_BLOB:
+            case CREATE_BLOB2:
+                return new FirebirdCreateBlobCommandPacket(commandPacketType, payload);
+            case OPEN_BLOB:
+            case OPEN_BLOB2:
+                return new FirebirdOpenBlobCommandPacket(commandPacketType, payload);
+            case PUT_SEGMENT:
+                return new FirebirdPutSegmentCommandPacket(payload);
+            case CLOSE_BLOB:
+                return new FirebirdCloseBlobCommandPacket(payload);
             case ALLOCATE_STATEMENT:
                 return new FirebirdAllocateStatementPacket(payload);
             case PREPARE_STATEMENT:
@@ -65,6 +81,10 @@ public final class FirebirdCommandPacketFactory {
                 return new FirebirdFetchStatementPacket(payload);
             case INFO_SQL:
                 return FirebirdSQLInfoPacketType.createPacket(payload);
+            case BATCH_REGBLOB:
+                return new FirebirdBatchRegBlobCommandPacket(payload);
+            case BATCH_BLOB_STREAM:
+                return new FirebirdBatchBlobStreamCommandPacket(payload);
             case COMMIT:
                 return new FirebirdCommitTransactionPacket(payload);
             case ROLLBACK:
@@ -102,6 +122,20 @@ public final class FirebirdCommandPacketFactory {
                 return FirebirdInfoPacket.getLength(payload);
             case TRANSACTION:
                 return FirebirdStartTransactionPacket.getLength(payload);
+            case CREATE_BLOB:
+            case CREATE_BLOB2:
+                new FirebirdCreateBlobCommandPacket(commandPacketType, payload);
+                break;
+            case OPEN_BLOB:
+            case OPEN_BLOB2:
+                new FirebirdOpenBlobCommandPacket(commandPacketType, payload);
+                break;
+            case PUT_SEGMENT:
+                new FirebirdPutSegmentCommandPacket(payload);
+                break;
+            case CLOSE_BLOB:
+                new FirebirdCloseBlobCommandPacket(payload);
+                break;
             case ALLOCATE_STATEMENT:
                 return FirebirdAllocateStatementPacket.getLength();
             case PREPARE_STATEMENT:
@@ -111,6 +145,12 @@ public final class FirebirdCommandPacketFactory {
                 return FirebirdExecuteStatementPacket.getLength(payload, protocolVersion);
             case FETCH:
                 return FirebirdFetchStatementPacket.getLength(payload);
+            case BATCH_REGBLOB:
+                new FirebirdBatchRegBlobCommandPacket(payload);
+                break;
+            case BATCH_BLOB_STREAM:
+                new FirebirdBatchBlobStreamCommandPacket(payload);
+                break;
             case COMMIT:
                 return FirebirdCommitTransactionPacket.getLength();
             case ROLLBACK:
@@ -120,5 +160,8 @@ public final class FirebirdCommandPacketFactory {
             default:
                 return 0;
         }
+        int length = payload.getByteBuf().readerIndex();
+        payload.getByteBuf().resetReaderIndex();
+        return length;
     }
 }

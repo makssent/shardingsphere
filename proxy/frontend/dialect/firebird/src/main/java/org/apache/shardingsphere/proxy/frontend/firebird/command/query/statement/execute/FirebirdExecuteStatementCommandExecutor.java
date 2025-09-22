@@ -19,6 +19,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statemen
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import io.netty.buffer.ByteBuf;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.protocol.binary.BinaryCell;
 import org.apache.shardingsphere.database.protocol.binary.BinaryRow;
@@ -43,6 +44,7 @@ import org.apache.shardingsphere.proxy.backend.response.header.query.QueryRespon
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.command.executor.QueryCommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.command.executor.ResponseType;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdBlobManager;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 
 import java.sql.SQLException;
@@ -70,6 +72,7 @@ public final class FirebirdExecuteStatementCommandExecutor implements QueryComma
     public Collection<DatabasePacket> execute() throws SQLException {
         FirebirdServerPreparedStatement preparedStatement = updateAndGetPreparedStatement();
         List<Object> params = packet.getParameterValues();
+        populateBlobParameters(preparedStatement, params);
         preparedStatement.getLongData().forEach(params::set);
         SQLStatementContext sqlStatementContext = preparedStatement.getSqlStatementContext();
         if (sqlStatementContext instanceof ParameterAware) {
@@ -90,6 +93,51 @@ public final class FirebirdExecuteStatementCommandExecutor implements QueryComma
             result.add(getSQLResponse());
         }
         result.add(new FirebirdGenericResponsePacket());
+        return result;
+    }
+
+    private void populateBlobParameters(final FirebirdServerPreparedStatement preparedStatement, final List<Object> params) {
+        if (packet.getParameterTypes().isEmpty()) {
+            preparedStatement.getLongData().clear();
+            return;
+        }
+        FirebirdBlobManager blobManager = FirebirdBlobManager.get(connectionSession);
+        preparedStatement.getLongData().clear();
+        for (int index = 0; index < packet.getParameterTypes().size(); index++) {
+            if (FirebirdBinaryColumnType.BLOB != packet.getParameterTypes().get(index)) {
+                continue;
+            }
+            byte[] data = extractBlobData(params.get(index), blobManager);
+            if (null != data) {
+                preparedStatement.getLongData().put(index, data);
+            }
+        }
+    }
+
+    private byte[] extractBlobData(final Object value, final FirebirdBlobManager blobManager) {
+        if (value instanceof byte[]) {
+            return (byte[]) value;
+        }
+        if (!(value instanceof ByteBuf)) {
+            return null;
+        }
+        ByteBuf buffer = ((ByteBuf) value).duplicate();
+        int readableBytes = buffer.readableBytes();
+        if (8 == readableBytes) {
+            buffer.readerIndex(0);
+            long high = buffer.readInt();
+            long low = buffer.readInt() & 0xFFFFFFFFL;
+            long blobId = (high << 32) | low;
+            byte[] data = blobManager.consumeBlob(blobId).orElse(null);
+            if (null != data) {
+                return data;
+            }
+            buffer.readerIndex(0);
+        } else {
+            buffer.readerIndex(0);
+        }
+        byte[] result = new byte[readableBytes];
+        buffer.readBytes(result);
         return result;
     }
     
