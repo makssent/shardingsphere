@@ -56,8 +56,8 @@ public final class FirebirdBlobHandleGenerator {
      * Generate next BLOB handle for connection.
      *
      * <p>Firebird carries object handles as 16 bit values, and {@code 0xFFFF} is reserved as the deferred
-     * placeholder handle, so generated handles wrap within the range 1 to {@code 0xFFFE}. Handle 0 is never
-     * issued because it marks a connection that has not generated a handle yet.</p>
+     * placeholder handle. The search wraps within the range 1 to {@code 0xFFFE}, skips active handles and fails
+     * when no free handle remains. Handle 0 is never issued.</p>
      *
      * @param connectionId connection ID
      * @return generated BLOB handle
@@ -87,7 +87,7 @@ public final class FirebirdBlobHandleGenerator {
             throw new FirebirdProtocolException("No free BLOB handles are available for connection %d.", connectionId);
         }
     }
-
+    
     /**
      * Resolve a BLOB handle, mapping the deferred placeholder handle to the most recently generated one.
      *

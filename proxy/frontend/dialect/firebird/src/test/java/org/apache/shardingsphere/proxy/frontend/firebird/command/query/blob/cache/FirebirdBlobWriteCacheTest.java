@@ -70,8 +70,8 @@ class FirebirdBlobWriteCacheTest {
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("missingWriteProvider")
-    void assertMissingWriteReturnsEmpty(final String caseName, final BooleanSupplier invocation) {
-        assertFalse(invocation.getAsBoolean(), caseName);
+    void assertMissingWriteReturnsEmpty(final String name, final BooleanSupplier invocation) {
+        assertFalse(invocation.getAsBoolean(), name);
     }
     
     @Test
@@ -90,6 +90,7 @@ class FirebirdBlobWriteCacheTest {
         OptionalInt actualSizeAfterClose = CACHE.closeWrite(connectionId, blobHandle);
         assertTrue(actualSizeAfterClose.isPresent());
         assertThat(actualSizeAfterClose.getAsInt(), is(3));
+        assertFalse(CACHE.getBlobId(connectionId, blobHandle).isPresent());
         assertTrue(CACHE.isClosed(connectionId, blobId));
         Optional<byte[]> actualBlobData = CACHE.getBlobData(connectionId, blobId);
         assertTrue(actualBlobData.isPresent());
@@ -100,12 +101,53 @@ class FirebirdBlobWriteCacheTest {
     }
     
     @Test
-    void assertRemoveWriteWhenWriteMissing() {
+    void assertRemoveWriteDoesNotRemoveReusedHandle() {
         int connectionId = 7;
+        int blobHandle = 8;
+        long oldBlobId = 9L;
+        long expectedBlobId = 10L;
+        CACHE.registerConnection(connectionId);
+        CACHE.registerBlob(connectionId, blobHandle, oldBlobId);
+        CACHE.closeWrite(connectionId, blobHandle);
+        CACHE.registerBlob(connectionId, blobHandle, expectedBlobId);
+        CACHE.removeWrite(connectionId, oldBlobId);
+        OptionalLong actualBlobId = CACHE.getBlobId(connectionId, blobHandle);
+        assertTrue(actualBlobId.isPresent());
+        assertThat(actualBlobId.getAsLong(), is(expectedBlobId));
+    }
+    
+    @Test
+    void assertRemoveWriteWhenWriteMissing() {
+        int connectionId = 8;
         CACHE.registerConnection(connectionId);
         CACHE.removeWrite(connectionId, 11L);
         assertTrue(getHandleCache().get(connectionId).isEmpty());
         assertTrue(getIdCache().get(connectionId).isEmpty());
+    }
+    
+    @Test
+    void assertAppendSegmentWhenWriteIsClosed() {
+        int connectionId = 9;
+        int blobHandle = 10;
+        CACHE.registerBlob(connectionId, blobHandle, 11L);
+        getHandleCache().get(connectionId).get(blobHandle).markClosed();
+        assertFalse(CACHE.appendSegment(connectionId, blobHandle, new byte[]{1}).isPresent());
+    }
+    
+    @Test
+    void assertGetBlobSizeByHandle() {
+        int connectionId = 10;
+        int blobHandle = 11;
+        CACHE.registerBlob(connectionId, blobHandle, 12L);
+        CACHE.appendSegment(connectionId, blobHandle, new byte[]{1, 2, 3});
+        OptionalInt actual = CACHE.getBlobSizeByHandle(connectionId, blobHandle);
+        assertTrue(actual.isPresent());
+        assertThat(actual.getAsInt(), is(3));
+    }
+    
+    @Test
+    void assertGetBlobSizeByHandleWhenWriteIsMissing() {
+        assertFalse(CACHE.getBlobSizeByHandle(11, 12).isPresent());
     }
     
     @SuppressWarnings("unchecked")
