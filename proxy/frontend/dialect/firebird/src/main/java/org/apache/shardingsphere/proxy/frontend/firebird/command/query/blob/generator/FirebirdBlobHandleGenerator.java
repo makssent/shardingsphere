@@ -64,21 +64,23 @@ public final class FirebirdBlobHandleGenerator {
      */
     public int nextBlobHandle(final int connectionId) {
         ConnectionBlobHandles connectionBlobHandles = connectionRegistry.get(connectionId);
-        for (int i = connectionBlobHandles.lastBlobHandle; i < connectionBlobHandles.handles.length; i++) {
-            if (0 == connectionBlobHandles.handles[i]) {
-                connectionBlobHandles.handles[i] = 1;
-                connectionBlobHandles.lastBlobHandle = i + 1;
-                return connectionBlobHandles.lastBlobHandle;
+        synchronized (connectionBlobHandles) {
+            for (int i = connectionBlobHandles.lastBlobHandle; i < connectionBlobHandles.handles.length; i++) {
+                if (0 == connectionBlobHandles.handles[i]) {
+                    connectionBlobHandles.handles[i] = 1;
+                    connectionBlobHandles.lastBlobHandle = i + 1;
+                    return connectionBlobHandles.lastBlobHandle;
+                }
             }
-        }
-        for (int i = 0; i < connectionBlobHandles.lastBlobHandle; i++) {
-            if (0 == connectionBlobHandles.handles[i]) {
-                connectionBlobHandles.handles[i] = 1;
-                connectionBlobHandles.lastBlobHandle = i + 1;
-                return connectionBlobHandles.lastBlobHandle;
+            for (int i = 0; i < connectionBlobHandles.lastBlobHandle; i++) {
+                if (0 == connectionBlobHandles.handles[i]) {
+                    connectionBlobHandles.handles[i] = 1;
+                    connectionBlobHandles.lastBlobHandle = i + 1;
+                    return connectionBlobHandles.lastBlobHandle;
+                }
             }
+            throw new FirebirdProtocolException("No free BLOB handles are available for connection %d.", connectionId);
         }
-        throw new FirebirdProtocolException("No free BLOB handles are available for connection %d.", connectionId);
     }
 
     /**
@@ -99,7 +101,12 @@ public final class FirebirdBlobHandleGenerator {
             return blobHandle;
         }
         ConnectionBlobHandles connectionBlobHandles = connectionRegistry.get(connectionId);
-        return null == connectionBlobHandles || 0 == connectionBlobHandles.lastBlobHandle ? blobHandle : connectionBlobHandles.lastBlobHandle;
+        if (null == connectionBlobHandles) {
+            return blobHandle;
+        }
+        synchronized (connectionBlobHandles) {
+            return 0 == connectionBlobHandles.lastBlobHandle ? blobHandle : connectionBlobHandles.lastBlobHandle;
+        }
     }
     
     /**
@@ -109,7 +116,10 @@ public final class FirebirdBlobHandleGenerator {
      * @param blobHandle BLOB handle
      */
     public void releaseBlobHandle(final int connectionId, final int blobHandle) {
-        connectionRegistry.get(connectionId).handles[blobHandle - 1] = 0;
+        ConnectionBlobHandles connectionBlobHandles = connectionRegistry.get(connectionId);
+        synchronized (connectionBlobHandles) {
+            connectionBlobHandles.handles[blobHandle - 1] = 0;
+        }
     }
     
     /**
