@@ -19,10 +19,10 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.gen
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import org.apache.shardingsphere.database.protocol.firebird.exception.FirebirdProtocolException;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * BLOB handle (p_resp_object) generator for Firebird.
@@ -36,7 +36,7 @@ public final class FirebirdBlobHandleGenerator {
     
     private static final int MAX_OBJECT_HANDLE = INVALID_OBJECT_HANDLE - 1;
     
-    private final Map<Integer, AtomicInteger> connectionRegistry = new ConcurrentHashMap<>();
+    private final Map<Integer, ConnectionBlobHandles> connectionRegistry = new ConcurrentHashMap<>();
     
     public static FirebirdBlobHandleGenerator getInstance() {
         return INSTANCE;
@@ -48,7 +48,7 @@ public final class FirebirdBlobHandleGenerator {
      * @param connectionId connection ID
      */
     public void registerConnection(final int connectionId) {
-        connectionRegistry.put(connectionId, new AtomicInteger());
+        connectionRegistry.put(connectionId, new ConnectionBlobHandles());
     }
     
     /**
@@ -60,11 +60,27 @@ public final class FirebirdBlobHandleGenerator {
      *
      * @param connectionId connection ID
      * @return generated BLOB handle
+     * @throws FirebirdProtocolException when no free BLOB handle is available
      */
     public int nextBlobHandle(final int connectionId) {
-        return connectionRegistry.get(connectionId).updateAndGet(current -> MAX_OBJECT_HANDLE <= current ? 1 : current + 1);
+        ConnectionBlobHandles connectionBlobHandles = connectionRegistry.get(connectionId);
+        for (int i = connectionBlobHandles.lastBlobHandle; i < connectionBlobHandles.handles.length; i++) {
+            if (0 == connectionBlobHandles.handles[i]) {
+                connectionBlobHandles.handles[i] = 1;
+                connectionBlobHandles.lastBlobHandle = i + 1;
+                return connectionBlobHandles.lastBlobHandle;
+            }
+        }
+        for (int i = 0; i < connectionBlobHandles.lastBlobHandle; i++) {
+            if (0 == connectionBlobHandles.handles[i]) {
+                connectionBlobHandles.handles[i] = 1;
+                connectionBlobHandles.lastBlobHandle = i + 1;
+                return connectionBlobHandles.lastBlobHandle;
+            }
+        }
+        throw new FirebirdProtocolException("No free BLOB handles are available for connection %d.", connectionId);
     }
-    
+
     /**
      * Resolve a BLOB handle, mapping the deferred placeholder handle to the most recently generated one.
      *
@@ -82,8 +98,18 @@ public final class FirebirdBlobHandleGenerator {
         if (INVALID_OBJECT_HANDLE != blobHandle) {
             return blobHandle;
         }
-        AtomicInteger lastGenerated = connectionRegistry.get(connectionId);
-        return null == lastGenerated || 0 == lastGenerated.get() ? blobHandle : lastGenerated.get();
+        ConnectionBlobHandles connectionBlobHandles = connectionRegistry.get(connectionId);
+        return null == connectionBlobHandles || 0 == connectionBlobHandles.lastBlobHandle ? blobHandle : connectionBlobHandles.lastBlobHandle;
+    }
+    
+    /**
+     * Release BLOB handle for connection.
+     *
+     * @param connectionId connection ID
+     * @param blobHandle BLOB handle
+     */
+    public void releaseBlobHandle(final int connectionId, final int blobHandle) {
+        connectionRegistry.get(connectionId).handles[blobHandle - 1] = 0;
     }
     
     /**
@@ -93,5 +119,12 @@ public final class FirebirdBlobHandleGenerator {
      */
     public void unregisterConnection(final int connectionId) {
         connectionRegistry.remove(connectionId);
+    }
+    
+    private static final class ConnectionBlobHandles {
+        
+        private final int[] handles = new int[MAX_OBJECT_HANDLE];
+        
+        private int lastBlobHandle;
     }
 }
