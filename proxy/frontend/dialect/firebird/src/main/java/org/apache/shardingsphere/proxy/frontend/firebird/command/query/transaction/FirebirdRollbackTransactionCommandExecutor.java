@@ -25,6 +25,7 @@ import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.connector.jdbc.transaction.ProxyBackendTransactionManager;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
 
 import java.sql.SQLException;
 import java.util.Collection;
@@ -49,6 +50,7 @@ public final class FirebirdRollbackTransactionCommandExecutor implements Command
             transactionManager.rollback();
         }
         FirebirdTransactionIdGenerator.getInstance().closeTransaction(connectionSession.getConnectionId(), transactionHandle);
+        FirebirdBlobWriteCache.getInstance().clearTransaction(connectionSession.getConnectionId(), transactionHandle);
         return Collections.singleton(new FirebirdGenericResponsePacket());
     }
     

@@ -18,6 +18,7 @@
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache;
 
 import lombok.SneakyThrows;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobHandleGenerator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -128,6 +129,26 @@ class FirebirdBlobWriteCacheTest {
         CACHE.registerBlob(1, 11, 21L, 31, false);
         CACHE.closeWrite(1, 11);
         assertFalse(CACHE.useBlobData(1, 21L, 32).isPresent());
+    }
+    
+    @Test
+    void assertClearTransaction() {
+        FirebirdBlobHandleGenerator.getInstance().registerConnection(1);
+        try {
+            int openBlobHandle = FirebirdBlobHandleGenerator.getInstance().nextBlobHandle(1);
+            CACHE.registerBlob(1, 11, 21L, 31, false);
+            CACHE.closeWrite(1, 11);
+            CACHE.registerBlob(1, openBlobHandle, 22L, 31, false);
+            CACHE.registerBlob(1, 13, 23L, 32, false);
+            CACHE.closeWrite(1, 13);
+            CACHE.clearTransaction(1, 31);
+            assertFalse(CACHE.getBlobData(1, 21L).isPresent());
+            assertFalse(CACHE.getBlobId(1, openBlobHandle).isPresent());
+            assertFalse(FirebirdBlobHandleGenerator.getInstance().isAllocated(1, openBlobHandle));
+            assertTrue(CACHE.getBlobData(1, 23L).isPresent());
+        } finally {
+            FirebirdBlobHandleGenerator.getInstance().unregisterConnection(1);
+        }
     }
     
     @Test

@@ -56,7 +56,6 @@ import java.sql.SQLException;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * Firebird execute statement command executor.
@@ -108,24 +107,19 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
     }
     
     private ResponseHeader executePreparedStatement(final FirebirdServerPreparedStatement preparedStatement, final List<Object> params) throws SQLException {
-        List<Long> blobIdsToRemove = bindBlobParameters(params);
-        try {
-            SQLStatementContext sqlStatementContext = preparedStatement.getSqlStatementContext();
-            if (sqlStatementContext instanceof ParameterAware) {
-                ((ParameterAware) sqlStatementContext).bindParameters(params);
-            }
-            QueryContext queryContext = new QueryContext(sqlStatementContext, preparedStatement.getSql(), params, preparedStatement.getHintValueContext(), connectionSession.getConnectionContext(),
-                    ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData(), true);
-            proxyBackendHandler = ProxyBackendHandlerFactory.newInstance(TypedSPILoader.getService(DatabaseType.class, "Firebird"), queryContext, connectionSession, true);
-            return proxyBackendHandler.execute();
-        } finally {
-            clearBlobUploads(blobIdsToRemove);
+        bindBlobParameters(params);
+        SQLStatementContext sqlStatementContext = preparedStatement.getSqlStatementContext();
+        if (sqlStatementContext instanceof ParameterAware) {
+            ((ParameterAware) sqlStatementContext).bindParameters(params);
         }
+        QueryContext queryContext = new QueryContext(sqlStatementContext, preparedStatement.getSql(), params, preparedStatement.getHintValueContext(), connectionSession.getConnectionContext(),
+                ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData(), true);
+        proxyBackendHandler = ProxyBackendHandlerFactory.newInstance(TypedSPILoader.getService(DatabaseType.class, "Firebird"), queryContext, connectionSession, true);
+        return proxyBackendHandler.execute();
     }
     
-    private List<Long> bindBlobParameters(final List<Object> params) {
+    private void bindBlobParameters(final List<Object> params) {
         List<FirebirdBinaryColumnType> parameterTypes = packet.getParameterTypes();
-        List<Long> blobIds = new LinkedList<>();
         int paramCount = Math.min(parameterTypes.size(), params.size());
         for (int i = 0; i < paramCount; i++) {
             if (parameterTypes.get(i) != FirebirdBinaryColumnType.BLOB) {
@@ -147,18 +141,8 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
                 params.set(i, resultBlobContent);
                 continue;
             }
-            ShardingSpherePreconditions.checkState(FirebirdBlobWriteCache.getInstance().isClosed(connectionSession.getConnectionId(), blobId), () -> new InvalidSegstrIdException(blobId));
-            Optional<byte[]> blobData = FirebirdBlobWriteCache.getInstance().getBlobData(connectionSession.getConnectionId(), blobId);
-            byte[] bytes = blobData.get();
-            params.set(i, bytes);
-            blobIds.add(blobId);
-        }
-        return blobIds;
-    }
-    
-    private void clearBlobUploads(final List<Long> blobIds) {
-        for (Long each : blobIds) {
-            FirebirdBlobWriteCache.getInstance().removeWrite(connectionSession.getConnectionId(), each);
+            params.set(i,
+                    FirebirdBlobWriteCache.getInstance().useBlobData(connectionSession.getConnectionId(), blobId, packet.getTransactionId()).orElseThrow(() -> new InvalidSegstrIdException(blobId)));
         }
     }
     

@@ -20,6 +20,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cac
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobHandleGenerator;
 
 import java.util.Map;
 import java.util.Optional;
@@ -222,6 +223,25 @@ public final class FirebirdBlobWriteCache {
         FirebirdBlobWrite write = getIdMap(connectionId).remove(blobId);
         if (null != write) {
             getHandleMap(connectionId).remove(write.getBlobHandle(), write);
+        }
+    }
+    
+    /**
+     * Clear BLOB writes of finished transaction.
+     *
+     * <p>Firebird releases temporary BLOBs of a transaction and the handles of BLOBs still open for write when the transaction is committed or rolled back.</p>
+     *
+     * @param connectionId connection id
+     * @param transactionId finished transaction id
+     */
+    public void clearTransaction(final int connectionId, final int transactionId) {
+        for (FirebirdBlobWrite each : getIdMap(connectionId).values()) {
+            if (each.getTransactionId() == transactionId) {
+                removeWrite(connectionId, each.getBlobId());
+                if (!each.isClosed()) {
+                    FirebirdBlobHandleGenerator.getInstance().releaseBlobHandle(connectionId, each.getBlobHandle());
+                }
+            }
         }
     }
     
