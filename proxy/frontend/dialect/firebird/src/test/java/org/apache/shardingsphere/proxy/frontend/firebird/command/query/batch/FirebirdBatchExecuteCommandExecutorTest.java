@@ -177,6 +177,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(packet.getTransactionHandle()).thenReturn(transactionId);
         when(batchStatement.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(batchStatement.isRecordCounts()).thenReturn(true);
+        when(batchStatement.getDetailedErrors()).thenReturn(64);
         when(batchStatement.getParameterValues()).thenReturn(Arrays.asList(Arrays.asList(1, "foo_1"), Arrays.asList(2, "foo_2"), Arrays.asList(3, "foo_3")));
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
@@ -204,6 +205,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
         when(batchStatement.getStatementHandle()).thenReturn(STATEMENT_ID);
+        when(batchStatement.getDetailedErrors()).thenReturn(64);
         when(batchStatement.getParameterValues()).thenReturn(Arrays.asList(Arrays.asList(1, "foo_1"), Arrays.asList(2, "foo_2")));
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
@@ -222,6 +224,32 @@ class FirebirdBatchExecuteCommandExecutorTest {
             assertThat(detailedErrors.size(), is(1));
             assertThat(detailedErrors.get(0).getElement(), is(0));
             verify(batchStatement).reset();
+        }
+    }
+    
+    @Test
+    void assertExecuteWithFailedMessagesOverDetailedErrorsLimit() throws ReflectiveOperationException, SQLException {
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
+        when(packet.getTransactionHandle()).thenReturn(transactionId);
+        when(batchStatement.getStatementHandle()).thenReturn(STATEMENT_ID);
+        when(batchStatement.getDetailedErrors()).thenReturn(1);
+        when(batchStatement.getParameterValues()).thenReturn(Arrays.asList(Arrays.asList(1, "foo_1"), Arrays.asList(2, "foo_2"), Arrays.asList(3, "foo_3")));
+        when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        SQLException failureCause = new SQLException("violation", "23000", 335544665);
+        FirebirdBatchCompletion completion = new FirebirdBatchCompletion(3, new int[]{FirebirdBatchCompletion.EXECUTE_FAILED, 1, FirebirdBatchCompletion.EXECUTE_FAILED},
+                Arrays.asList(new FirebirdBatchCompletion.Failure(0, failureCause), new FirebirdBatchCompletion.Failure(2, failureCause)));
+        try (
+                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
+                MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class,
+                        (mock, context) -> when(mock.executeBatch()).thenReturn(completion))) {
+            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
+            FirebirdBatchCompletionStateResponse actual = (FirebirdBatchCompletionStateResponse) new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute().iterator().next();
+            List<DetailedError> detailedErrors = getDetailedErrors(actual);
+            assertThat(detailedErrors.size(), is(1));
+            assertThat(detailedErrors.get(0).getElement(), is(0));
+            assertThat(getSimplifiedErrors(actual), is(Collections.singletonList(2)));
         }
     }
     
@@ -293,5 +321,10 @@ class FirebirdBatchExecuteCommandExecutorTest {
     @SuppressWarnings("unchecked")
     private List<DetailedError> getDetailedErrors(final FirebirdBatchCompletionStateResponse response) throws ReflectiveOperationException {
         return (List<DetailedError>) Plugins.getMemberAccessor().get(FirebirdBatchCompletionStateResponse.class.getDeclaredField("detailedErrors"), response);
+    }
+    
+    @SuppressWarnings("unchecked")
+    private List<Integer> getSimplifiedErrors(final FirebirdBatchCompletionStateResponse response) throws ReflectiveOperationException {
+        return (List<Integer>) Plugins.getMemberAccessor().get(FirebirdBatchCompletionStateResponse.class.getDeclaredField("simplifiedErrors"), response);
     }
 }

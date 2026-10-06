@@ -57,6 +57,12 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
     
     private static final int TAG_BLOB_POLICY = 4;
     
+    private static final int TAG_DETAILED_ERRORS = 5;
+    
+    private static final int DEFAULT_DETAILED_ERRORS = 64;
+    
+    private static final int MAX_DETAILED_ERRORS = 256;
+    
     // private static final int BLOB_STREAM = 3;
     
     private static final int WIDE_CLUMPLET_LENGTH_SIZE = 4;
@@ -89,8 +95,8 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
         }
         ByteBuf batchParametersBuffer = packet.getBatchParametersBuffer();
         BatchParameters batchParameters = BatchParameters.parse(batchParametersBuffer);
-        FirebirdBatchStatementManager.getInstance().registerBatchStatement(
-                connectionId, statementId, messageFormat.getFields(), batchParameters.getBufferSize(), batchParameters.isRecordCounts(), batchParameters.isMultiError());
+        FirebirdBatchStatementManager.getInstance().registerBatchStatement(connectionId, statementId, messageFormat.getFields(), batchParameters.getBufferSize(),
+                batchParameters.isRecordCounts(), batchParameters.isMultiError(), batchParameters.getDetailedErrors());
         return Collections.singleton(new FirebirdGenericResponsePacket().setHandle(statementId));
     }
     
@@ -106,12 +112,14 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
         
         private final boolean multiError;
         
+        private final int detailedErrors;
+        
         // private final int blobPolicy;
         
         static BatchParameters parse(final ByteBuf batchParametersBuffer) {
             if (null == batchParametersBuffer || !batchParametersBuffer.isReadable()) {
                 // return new BatchParameters(BATCH_VERSION_1, DEFAULT_BUFFER_SIZE, false, false, BLOB_STREAM);
-                return new BatchParameters(BATCH_VERSION_1, DEFAULT_BUFFER_SIZE, false, false);
+                return new BatchParameters(BATCH_VERSION_1, DEFAULT_BUFFER_SIZE, false, false, DEFAULT_DETAILED_ERRORS);
             }
             ByteBuf reader = batchParametersBuffer.duplicate();
             int version = reader.readUnsignedByte();
@@ -121,6 +129,7 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
             long bufferSize = DEFAULT_BUFFER_SIZE;
             boolean recordCounts = false;
             boolean multiError = false;
+            int detailedErrors = DEFAULT_DETAILED_ERRORS;
             // int blobPolicy = BLOB_STREAM;
             while (reader.isReadable()) {
                 ensureClumpletHeaderReadable(reader);
@@ -138,17 +147,23 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
                     // blobPolicy = BLOB_STREAM == requestedBlobPolicy ? requestedBlobPolicy : BLOB_STREAM;
                     // TODO Support BLOB policy after implementing the Firebird batch BLOB subprotocol.
                     throw new DatabaseProtocolException("BLOB policy is not supported in Firebird batch operations");
+                } else if (TAG_DETAILED_ERRORS == tag) {
+                    detailedErrors = getDetailedErrors(readIntegerValue(reader, tag, valueLength));
                 } else {
                     reader.skipBytes(valueLength);
                 }
             }
             // return new BatchParameters(version, bufferSize, recordCounts, multiError, blobPolicy);
-            return new BatchParameters(version, bufferSize, recordCounts, multiError);
+            return new BatchParameters(version, bufferSize, recordCounts, multiError, detailedErrors);
         }
         
         private static long getBufferSize(final int requestedBufferSize) {
             long result = Integer.toUnsignedLong(requestedBufferSize);
             return 0L == result ? MAX_BUFFER_SIZE : Math.min(result, MAX_BUFFER_SIZE);
+        }
+        
+        private static int getDetailedErrors(final int requestedDetailedErrors) {
+            return (int) Math.min(Integer.toUnsignedLong(requestedDetailedErrors), MAX_DETAILED_ERRORS);
         }
         
         private static void ensureClumpletHeaderReadable(final ByteBuf reader) {

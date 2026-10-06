@@ -31,6 +31,8 @@ import java.util.List;
 @Getter
 public final class FirebirdBatchStatement {
     
+    private static final int DEFAULT_DETAILED_ERRORS = 64;
+    
     private final int statementHandle;
     
     private final List<FirebirdBatchColumnDescriptor> columnDescriptors;
@@ -41,16 +43,18 @@ public final class FirebirdBatchStatement {
     
     private final boolean multiError;
     
+    private final int detailedErrors;
+    
     private final List<List<Object>> parameterValues = new ArrayList<>();
     
     private long accumulatedSize;
     
     public FirebirdBatchStatement(final int statementHandle) {
-        this(statementHandle, Collections.emptyList(), 0L, false, false);
+        this(statementHandle, Collections.emptyList(), 0L, false, false, DEFAULT_DETAILED_ERRORS);
     }
     
     public FirebirdBatchStatement(final int statementHandle, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final long bufferSize) {
-        this(statementHandle, columnDescriptors, bufferSize, false, false);
+        this(statementHandle, columnDescriptors, bufferSize, false, false, DEFAULT_DETAILED_ERRORS);
     }
     
     /**

@@ -38,12 +38,16 @@ import org.firebirdsql.gds.BlrConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.sql.SQLException;
 import java.util.Collection;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -78,6 +82,8 @@ class FirebirdBatchCreateCommandExecutorTest {
     private static final int TAG_BUFFER_BYTES_SIZE = 3;
     
     private static final int TAG_BLOB_POLICY = 4;
+    
+    private static final int TAG_DETAILED_ERRORS = 5;
     
     private static final int BLOB_NONE = 0;
     
@@ -222,6 +228,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertThat(actual.getBufferSize(), is(DEFAULT_BUFFER_SIZE));
         assertFalse(actual.isRecordCounts());
         assertFalse(actual.isMultiError());
+        assertThat(actual.getDetailedErrors(), is(64));
     }
     
     @Test
@@ -260,6 +267,13 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertFalse(actual.isMultiError());
     }
     
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("detailedErrorsCases")
+    void assertParseBatchParametersWithDetailedErrors(final String name, final int value, final int expectedDetailedErrors) {
+        FirebirdBatchCreateCommandExecutor.BatchParameters actual = FirebirdBatchCreateCommandExecutor.BatchParameters.parse(createBatchParametersBuffer(TAG_DETAILED_ERRORS, value));
+        assertThat(actual.getDetailedErrors(), is(expectedDetailedErrors));
+    }
+    
     @Test
     void assertParseBatchParametersWithBlobPolicy() {
         DatabaseProtocolException actual = assertThrows(DatabaseProtocolException.class,
@@ -296,6 +310,10 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertThat(actual.getVersion(), is(BATCH_VERSION_1));
         assertThat(actual.getBufferSize(), is(DEFAULT_BUFFER_SIZE));
         assertFalse(actual.isRecordCounts());
+    }
+    
+    private static Stream<Arguments> detailedErrorsCases() {
+        return Stream.of(Arguments.of("one", 1, 1), Arguments.of("zero", 0, 0), Arguments.of("over limit", 1000, 256), Arguments.of("negative", -1, 256));
     }
     
     private ByteBuf createBatchBlr() {

@@ -84,11 +84,12 @@ public final class FirebirdBatchStatementManager {
      * @param bufferSize buffer size
      * @param recordCounts whether record counts are requested
      * @param multiError whether multiple errors are requested
+     * @param detailedErrors number of failed messages whose status vectors are kept
      */
     public void registerBatchStatement(final int connectionId, final int statementId, final List<FirebirdBatchColumnDescriptor> columnDescriptors,
-                                       final long bufferSize, final boolean recordCounts, final boolean multiError) {
+                                       final long bufferSize, final boolean recordCounts, final boolean multiError, final int detailedErrors) {
         FirebirdBatchRegistry.getInstance().registerBatchStatement(connectionId, statementId,
-                new FirebirdBatchStatement(statementId, columnDescriptors, bufferSize, recordCounts, multiError));
+                new FirebirdBatchStatement(statementId, columnDescriptors, bufferSize, recordCounts, multiError, detailedErrors));
     }
     
     /**

@@ -64,4 +64,15 @@ class FirebirdBatchCompletionStateResponseTest {
                 is(Arrays.asList(FirebirdCommandPacketType.BATCH_CS.getValue(), 7, 3, 1, 1, 0, 1, 0)));
         verify(statusVector).write(payload);
     }
+    
+    @Test
+    void assertWriteWithSimplifiedError() {
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
+        FirebirdStatusVector statusVector = mock(FirebirdStatusVector.class);
+        new FirebirdBatchCompletionStateResponse().setHandle(7).setRecordsCount(3L).setUpdateCounts(new int[]{-1, 1, -1}).addDetailedError(0, statusVector).addSimplifiedError(2).write(payload);
+        ArgumentCaptor<Integer> argumentCaptor = ArgumentCaptor.forClass(Integer.class);
+        verify(payload, atLeastOnce()).writeInt4(argumentCaptor.capture());
+        assertThat(argumentCaptor.getAllValues(), is(Arrays.asList(FirebirdCommandPacketType.BATCH_CS.getValue(), 7, 3, 3, 1, 1, -1, 1, -1, 0, 2)));
+        verify(statusVector).write(payload);
+    }
 }

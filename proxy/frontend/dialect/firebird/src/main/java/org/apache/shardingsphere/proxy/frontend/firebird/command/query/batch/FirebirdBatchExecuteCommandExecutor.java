@@ -62,7 +62,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
         FirebirdBatchedStatementsExecutor executor = new FirebirdBatchedStatementsExecutor(connectionSession, preparedStatement, batchStatement.getParameterValues(), batchStatement.isMultiError());
         FirebirdBatchCompletion completion = executor.executeBatch();
         batchStatementManager.resetBatchStatement(batchStatement);
-        return Collections.singleton(createResponse(completion, batchStatement.isRecordCounts()));
+        return Collections.singleton(createResponse(completion, batchStatement));
     }
     
     private void validateTransactionHandle() {
@@ -70,13 +70,19 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
                 () -> new InvalidTransactionHandleException(packet.getTransactionHandle()));
     }
     
-    private FirebirdBatchCompletionStateResponse createResponse(final FirebirdBatchCompletion completion, final boolean recordCounts) {
+    private FirebirdBatchCompletionStateResponse createResponse(final FirebirdBatchCompletion completion, final FirebirdBatchStatement batchStatement) {
         FirebirdBatchCompletionStateResponse result = new FirebirdBatchCompletionStateResponse()
                 .setHandle(packet.getStatementHandle())
                 .setRecordsCount(completion.getRecordsCount())
-                .setUpdateCounts(recordCounts ? completion.getUpdateCounts() : new int[0]);
+                .setUpdateCounts(batchStatement.isRecordCounts() ? completion.getUpdateCounts() : new int[0]);
+        int detailedErrorCount = 0;
         for (FirebirdBatchCompletion.Failure each : completion.getFailures()) {
-            result.addDetailedError(each.getMessageIndex(), new FirebirdStatusVector(each.getCause()));
+            if (detailedErrorCount < batchStatement.getDetailedErrors()) {
+                result.addDetailedError(each.getMessageIndex(), new FirebirdStatusVector(each.getCause()));
+                detailedErrorCount++;
+            } else {
+                result.addSimplifiedError(each.getMessageIndex());
+            }
         }
         return result;
     }

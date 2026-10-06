@@ -30,9 +30,8 @@ import java.util.List;
 /**
  * Batch completion state response (op_batch_cs) for Firebird.
  *
- * <p>Failures are reported as detailed errors (record number plus status vector). The simplified-errors list
- * (p_batch_errors, record numbers without a status vector) is always empty: the proxy holds the full status vector for
- * the failure, so it never needs the record-number-only fallback that Firebird uses to cap server-side memory.</p>
+ * <p>Failures are reported as detailed errors (record number plus status vector) and, after the detailed errors limit of the batch,
+ * as simplified errors (p_batch_errors, record numbers without a status vector), the way Firebird reports them.</p>
  */
 public class FirebirdBatchCompletionStateResponse extends FirebirdPacket {
     
@@ -43,6 +42,8 @@ public class FirebirdBatchCompletionStateResponse extends FirebirdPacket {
     private int[] updateCounts = new int[0];
     
     private final List<DetailedError> detailedErrors = new ArrayList<>();
+    
+    private final List<Integer> simplifiedErrors = new ArrayList<>();
     
     /**
      * Set statement handle.
@@ -89,6 +90,17 @@ public class FirebirdBatchCompletionStateResponse extends FirebirdPacket {
         return this;
     }
     
+    /**
+     * Add simplified error for a failed batch message whose status vector is not kept.
+     *
+     * @param element zero-based index of the failed batch message
+     * @return this response
+     */
+    public FirebirdBatchCompletionStateResponse addSimplifiedError(final int element) {
+        simplifiedErrors.add(element);
+        return this;
+    }
+    
     @Override
     protected void write(final FirebirdPacketPayload payload) {
         payload.writeInt4(FirebirdCommandPacketType.BATCH_CS.getValue());
@@ -96,13 +108,16 @@ public class FirebirdBatchCompletionStateResponse extends FirebirdPacket {
         payload.writeInt4(Math.toIntExact(recordsCount));
         payload.writeInt4(updateCounts.length);
         payload.writeInt4(detailedErrors.size());
-        payload.writeInt4(0);
+        payload.writeInt4(simplifiedErrors.size());
         for (int c : updateCounts) {
             payload.writeInt4(c);
         }
         for (DetailedError each : detailedErrors) {
             payload.writeInt4(each.element);
             each.statusVector.write(payload);
+        }
+        for (int each : simplifiedErrors) {
+            payload.writeInt4(each);
         }
     }
     

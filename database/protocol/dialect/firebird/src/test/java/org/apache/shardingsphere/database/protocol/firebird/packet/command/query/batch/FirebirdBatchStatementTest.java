@@ -42,7 +42,7 @@ class FirebirdBatchStatementTest {
     
     @Test
     void assertCreateWithRecordCounts() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 1024L, true, false);
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 1024L, true, false, 64);
         assertTrue(batchStatement.isRecordCounts());
         assertFalse(batchStatement.isMultiError());
         assertThat(batchStatement.getBufferSize(), is(1024L));
@@ -50,7 +50,7 @@ class FirebirdBatchStatementTest {
     
     @Test
     void assertCreateWithMultiError() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 1024L, false, true);
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 1024L, false, true, 64);
         assertTrue(batchStatement.isMultiError());
         assertFalse(batchStatement.isRecordCounts());
     }
