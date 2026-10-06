@@ -28,6 +28,8 @@ import org.apache.shardingsphere.database.exception.core.exception.syntax.databa
 import org.apache.shardingsphere.database.exception.core.exception.syntax.sql.DialectSQLParsingException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.table.TableExistsException;
 import org.apache.shardingsphere.database.exception.core.mapper.SQLDialectExceptionMapper;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException.StatusVectorEntry;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
@@ -40,15 +42,23 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlrVersionException;
 import org.apache.shardingsphere.database.exception.firebird.vendor.FirebirdVendorError;
 import org.apache.shardingsphere.infra.exception.external.sql.vendor.VendorError;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
+import org.firebirdsql.gds.ISCConstants;
 import org.junit.jupiter.api.Test;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.isA;
 import static org.mockito.Mockito.mock;
 
 class FirebirdDialectExceptionMapperTest {
@@ -115,7 +125,17 @@ class FirebirdDialectExceptionMapperTest {
     
     @Test
     void assertConvertWithInvalidBatchMessageFormat() {
-        assertSQLException(mapper.convert(new InvalidBatchMessageFormatException("invalid message length")), FirebirdVendorError.SQLDA_ERROR);
+        SQLException actual = mapper.convert(new InvalidBatchMessageFormatException("invalid message length"));
+        assertSQLException(actual, FirebirdVendorError.SQLDA_ERROR);
+        assertStatusVector(actual, Arrays.asList(Arrays.asList(ISCConstants.isc_sqlerr, -804), Collections.singletonList(ISCConstants.isc_dsql_sqlda_err)));
+    }
+    
+    @Test
+    void assertConvertWithUnsupportedBlrVersion() {
+        SQLException actual = mapper.convert(new UnsupportedBlrVersionException(4, 5, 3));
+        assertSQLException(actual, FirebirdVendorError.UNSUPPORTED_BLR_VERSION, 4, 5, 3);
+        assertStatusVector(actual, Arrays.asList(Collections.singletonList(ISCConstants.isc_dsql_error), Arrays.asList(ISCConstants.isc_sqlerr, -804),
+                Arrays.asList(ISCConstants.isc_wroblrver2, 4, 5, 3)));
     }
     
     @Test
@@ -163,5 +183,18 @@ class FirebirdDialectExceptionMapperTest {
         assertThat(actual.getSQLState(), is(vendorError.getSqlState().getValue()));
         assertThat(actual.getErrorCode(), is(vendorError.getVendorCode()));
         assertThat(actual.getMessage(), is(String.format(vendorError.getReason(), messageArgs)));
+    }
+    
+    private void assertStatusVector(final SQLException actual, final List<List<?>> expectedStatusVector) {
+        assertThat(actual, isA(FirebirdException.class));
+        Collection<StatusVectorEntry> statusVector = ((FirebirdException) actual).getStatusVector();
+        List<List<Object>> actualStatusVector = new ArrayList<>(statusVector.size());
+        for (StatusVectorEntry each : statusVector) {
+            List<Object> entry = new ArrayList<>(each.getArguments().size() + 1);
+            entry.add(each.getGdsCode());
+            entry.addAll(each.getArguments());
+            actualStatusVector.add(entry);
+        }
+        assertThat(actualStatusVector, is(expectedStatusVector));
     }
 }

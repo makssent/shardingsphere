@@ -26,6 +26,8 @@ import org.apache.shardingsphere.database.exception.core.exception.syntax.databa
 import org.apache.shardingsphere.database.exception.core.exception.syntax.sql.DialectSQLParsingException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.table.TableExistsException;
 import org.apache.shardingsphere.database.exception.core.mapper.SQLDialectExceptionMapper;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException.StatusVectorEntry;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
@@ -38,16 +40,24 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlrVersionException;
 import org.apache.shardingsphere.database.exception.firebird.vendor.FirebirdVendorError;
 import org.apache.shardingsphere.infra.exception.external.sql.vendor.VendorError;
 import org.apache.shardingsphere.infra.exception.generic.UnknownSQLException;
+import org.firebirdsql.gds.ISCConstants;
 
 import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.Collections;
 
 /**
  * Firebird dialect exception mapper.
  */
 public final class FirebirdDialectExceptionMapper implements SQLDialectExceptionMapper {
+    
+    private static final StatusVectorEntry DYNAMIC_SQL_ERROR = new StatusVectorEntry(ISCConstants.isc_dsql_error, Collections.emptyList());
+    
+    private static final StatusVectorEntry SQLDA_SQL_ERROR_CODE = new StatusVectorEntry(ISCConstants.isc_sqlerr, Collections.singletonList(-804));
     
     @Override
     public SQLException convert(final SQLDialectException sqlDialectException) {
@@ -80,7 +90,11 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
             return toSQLException(FirebirdVendorError.BATCH_PARAMETERS_REQUIRED);
         }
         if (sqlDialectException instanceof InvalidBatchMessageFormatException) {
-            return toSQLException(FirebirdVendorError.SQLDA_ERROR);
+            return toSQLDAException();
+        }
+        if (sqlDialectException instanceof UnsupportedBlrVersionException) {
+            UnsupportedBlrVersionException ex = (UnsupportedBlrVersionException) sqlDialectException;
+            return toUnsupportedBlrVersionException(ex.getMinVersion(), ex.getMaxVersion(), ex.getVersion());
         }
         if (sqlDialectException instanceof InvalidStatementHandleException) {
             return toSQLException(FirebirdVendorError.INVALID_STATEMENT_HANDLE);
@@ -115,6 +129,18 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
     
     private SQLException toSQLException(final VendorError vendorError, final Object... messageArgs) {
         return new SQLException(String.format(vendorError.getReason(), messageArgs), vendorError.getSqlState().getValue(), vendorError.getVendorCode());
+    }
+    
+    private SQLException toSQLDAException() {
+        FirebirdVendorError vendorError = FirebirdVendorError.SQLDA_ERROR;
+        return new FirebirdException(vendorError.getReason(), vendorError.getSqlState().getValue(), vendorError.getVendorCode(),
+                Arrays.asList(SQLDA_SQL_ERROR_CODE, new StatusVectorEntry(vendorError.getVendorCode(), Collections.emptyList())));
+    }
+    
+    private SQLException toUnsupportedBlrVersionException(final int minVersion, final int maxVersion, final int version) {
+        FirebirdVendorError vendorError = FirebirdVendorError.UNSUPPORTED_BLR_VERSION;
+        return new FirebirdException(String.format(vendorError.getReason(), minVersion, maxVersion, version), vendorError.getSqlState().getValue(), vendorError.getVendorCode(),
+                Arrays.asList(DYNAMIC_SQL_ERROR, SQLDA_SQL_ERROR_CODE, new StatusVectorEntry(vendorError.getVendorCode(), Arrays.<Object>asList(minVersion, maxVersion, version))));
     }
     
     @Override

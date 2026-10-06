@@ -22,6 +22,7 @@ import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlrVersionException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.firebirdsql.gds.BlrConstants;
 
@@ -49,13 +50,25 @@ public final class FirebirdParseBatchBlr {
      * @param blr BLR buffer
      * @param blrLength BLR length
      * @return parsed message format
+     * @throws UnsupportedBlrVersionException when BLR version is neither 4 nor 5
      * @throws IllegalArgumentException when BLR format is structurally invalid
      * @throws DatabaseProtocolException when BLR contains a field type that batch operations do not support yet
      */
     public static FirebirdParseBatchBlr parse(final ByteBuf blr, final int blrLength) {
+        validateVersion(blr, blrLength);
         FirebirdParseBatchBlr result = parseForFraming(blr, blrLength);
         validateSupported(result.fields);
         return result;
+    }
+    
+    private static void validateVersion(final ByteBuf blr, final int blrLength) {
+        if (0 == blrLength) {
+            return;
+        }
+        int version = blr.getUnsignedByte(blr.readerIndex());
+        if (BlrConstants.blr_version4 != version && BlrConstants.blr_version5 != version) {
+            throw new UnsupportedBlrVersionException(BlrConstants.blr_version4, BlrConstants.blr_version5, version);
+        }
     }
     
     /**
