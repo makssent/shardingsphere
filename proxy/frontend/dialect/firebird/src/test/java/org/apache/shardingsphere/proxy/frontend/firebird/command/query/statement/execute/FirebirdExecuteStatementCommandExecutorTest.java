@@ -20,10 +20,13 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statemen
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.CursorAlreadyOpenedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchRegistry;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStatement;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.FirebirdExecuteStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.protocol.FirebirdBlobBinaryProtocolValue;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
@@ -172,6 +175,20 @@ class FirebirdExecuteStatementCommandExecutorTest {
         executor = new FirebirdExecuteStatementCommandExecutor(packet, connectionSession);
         assertThrows(InvalidTransactionHandleException.class, executor::execute);
         verify(connectionSession).finishPreparedStatementCache();
+    }
+    
+    @Test
+    void assertExecuteWithOpenBatch() {
+        when(packet.getStatementId()).thenReturn(2);
+        FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
+        try {
+            FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, 2, new FirebirdBatchStatement(2));
+            executor = new FirebirdExecuteStatementCommandExecutor(packet, connectionSession);
+            assertThrows(CursorAlreadyOpenedException.class, executor::execute);
+            verify(connectionSession).finishPreparedStatementCache();
+        } finally {
+            FirebirdBatchRegistry.getInstance().unregisterConnection(CONNECTION_ID);
+        }
     }
     
     @Test

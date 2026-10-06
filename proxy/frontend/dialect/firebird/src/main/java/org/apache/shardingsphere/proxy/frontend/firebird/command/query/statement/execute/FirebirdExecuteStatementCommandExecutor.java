@@ -20,6 +20,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statemen
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.CursorAlreadyOpenedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
@@ -46,6 +47,7 @@ import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.command.executor.ResponseType;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch.FirebirdBatchStatementManager;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdBinaryRowBuilder;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementResourceCleaner;
@@ -82,6 +84,7 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
                 throw new InvalidStatementHandleException(packet.getStatementId());
             }
             validateTransactionHandle();
+            validateNoOpenBatch();
             ResponseHeader responseHeader = executePreparedStatement(preparedStatement, packet.getParameterValues());
             if (responseHeader instanceof QueryResponseHeader) {
                 responseType = ResponseType.QUERY;
@@ -105,6 +108,11 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
     private void validateTransactionHandle() {
         ShardingSpherePreconditions.checkState(FirebirdTransactionIdGenerator.getInstance().isTransactionActive(connectionSession.getConnectionId(), packet.getTransactionId()),
                 () -> new InvalidTransactionHandleException(packet.getTransactionId()));
+    }
+    
+    private void validateNoOpenBatch() {
+        ShardingSpherePreconditions.checkState(null == FirebirdBatchStatementManager.getInstance().getBatchStatement(connectionSession.getConnectionId(), packet.getStatementId()),
+                () -> new CursorAlreadyOpenedException(packet.getStatementId()));
     }
     
     private ResponseHeader executePreparedStatement(final FirebirdServerPreparedStatement preparedStatement, final List<Object> params) throws SQLException {

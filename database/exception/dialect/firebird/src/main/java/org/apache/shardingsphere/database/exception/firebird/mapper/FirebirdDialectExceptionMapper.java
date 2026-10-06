@@ -26,10 +26,13 @@ import org.apache.shardingsphere.database.exception.core.exception.syntax.databa
 import org.apache.shardingsphere.database.exception.core.exception.syntax.sql.DialectSQLParsingException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.table.TableExistsException;
 import org.apache.shardingsphere.database.exception.core.mapper.SQLDialectExceptionMapper;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException.StatusVectorEntry;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.CannotUpdateOldBlobException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.CursorAlreadyOpenedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchMessageFormatException;
@@ -41,8 +44,11 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.vendor.FirebirdVendorError;
 import org.apache.shardingsphere.infra.exception.external.sql.vendor.VendorError;
 import org.apache.shardingsphere.infra.exception.generic.UnknownSQLException;
+import org.firebirdsql.gds.ISCConstants;
 
 import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.Collections;
 
 /**
  * Firebird dialect exception mapper.
@@ -88,6 +94,9 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
         if (sqlDialectException instanceof InvalidTransactionHandleException) {
             return toSQLException(FirebirdVendorError.INVALID_TRANSACTION_HANDLE);
         }
+        if (sqlDialectException instanceof CursorAlreadyOpenedException) {
+            return toCursorAlreadyOpenedException();
+        }
         if (sqlDialectException instanceof ExcessTransactionsException) {
             return toSQLException(FirebirdVendorError.EXCESS_TRANSACTIONS, ((ExcessTransactionsException) sqlDialectException).getMaxTransactions());
         }
@@ -115,6 +124,12 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
     
     private SQLException toSQLException(final VendorError vendorError, final Object... messageArgs) {
         return new SQLException(String.format(vendorError.getReason(), messageArgs), vendorError.getSqlState().getValue(), vendorError.getVendorCode());
+    }
+    
+    private SQLException toCursorAlreadyOpenedException() {
+        FirebirdVendorError vendorError = FirebirdVendorError.CURSOR_ALREADY_OPENED;
+        return new FirebirdException(vendorError.getReason(), vendorError.getSqlState().getValue(), vendorError.getVendorCode(),
+                Arrays.asList(new StatusVectorEntry(ISCConstants.isc_sqlerr, Collections.singletonList(-502)), new StatusVectorEntry(vendorError.getVendorCode(), Collections.emptyList())));
     }
     
     @Override

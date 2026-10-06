@@ -58,6 +58,8 @@ public enum FirebirdVendorError implements VendorError {
     
     INVALID_TRANSACTION_HANDLE(FirebirdState.INVALID_TRANSACTION_HANDLE, ISCConstants.isc_bad_trans_handle, ""),
     
+    CURSOR_ALREADY_OPENED(FirebirdState.INVALID_CURSOR_STATE, ISCConstants.isc_dsql_cursor_open_err, "Attempt to reopen an open cursor"),
+    
     EXCESS_TRANSACTIONS(XOpenSQLState.GENERAL_ERROR, ISCConstants.isc_excess_trans, "attempt to start more than %d transactions"),
     
     BATCH_ALREADY_OPENED(FirebirdState.BATCH_ALREADY_OPENED, ISCConstants.isc_batch_open, ""),

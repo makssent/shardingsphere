@@ -15,40 +15,23 @@
  * limitations under the License.
  */
 
-package org.apache.shardingsphere.database.exception.firebird.sqlstate;
+package org.apache.shardingsphere.database.exception.firebird.exception.protocol;
 
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
-import org.apache.shardingsphere.infra.exception.external.sql.sqlstate.SQLState;
+import org.apache.shardingsphere.database.exception.core.exception.SQLDialectException;
 
 /**
- * Firebird SQL state.
- *
- * <p>Holds SQL states that Jaybird derives from a GDSCODE but that are not defined in {@code XOpenSQLState}.</p>
+ * Cursor already opened exception for Firebird.
  */
-@RequiredArgsConstructor
 @Getter
-public enum FirebirdState implements SQLState {
+public final class CursorAlreadyOpenedException extends SQLDialectException {
     
-    UNAVAILABLE_DATABASE("08001"),
+    private static final long serialVersionUID = -4170287163552640913L;
     
-    INVALID_BATCH_HANDLE("08003"),
+    private final int statementHandle;
     
-    BATCH_TOO_BIG("54000"),
-    
-    CHARSET_NOT_FOUND("2C000"),
-    
-    INVALID_STATEMENT_HANDLE("26000"),
-    
-    INVALID_TRANSACTION_HANDLE("08003"),
-    
-    INVALID_CURSOR_STATE("24000"),
-    
-    BATCH_ALREADY_OPENED("08002"),
-    
-    BATCH_PARAMETERS_REQUIRED("07001"),
-    
-    SQLDA_ERROR("07002");
-    
-    private final String value;
+    public CursorAlreadyOpenedException(final int statementHandle) {
+        super(String.format("Cursor or batch already opened for statement handle %d", statementHandle));
+        this.statementHandle = statementHandle;
+    }
 }
