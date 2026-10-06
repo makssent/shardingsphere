@@ -430,6 +430,33 @@ class FirebirdPacketCodecEngineTest {
     }
     
     @Test
+    void assertDecodeBatchMessageAfterBatchCreateOfPreviousRead() {
+        codecEngine.decode(context, buildBatchCreate(), new LinkedList<>());
+        List<Object> out = new LinkedList<>();
+        codecEngine.decode(context, buildBatchMessage(BATCH_STATEMENT_HANDLE, 100), out);
+        assertThat(out.size(), is(1));
+        assertThat(createBatchSendMessagePacket((ByteBuf) out.get(0)).getMessageCount(), is(1L));
+        verify(context.channel(), never()).writeAndFlush(any());
+    }
+    
+    @Test
+    void assertDecodeBatchMessageAfterBatchCreateWithInvalidMessageLength() {
+        FirebirdBatchRegistry.getInstance().registerConnection(BATCH_CONNECTION_ID);
+        try {
+            codecEngine.decode(context, buildBatchCreate(Unpooled.buffer()
+                    .writeByte(BlrConstants.blr_version5).writeByte(BlrConstants.blr_begin).writeByte(BlrConstants.blr_message).writeByte(0)
+                    .writeShortLE(2).writeByte(BlrConstants.blr_long).writeByte(0).writeByte(BlrConstants.blr_short).writeByte(0)
+                    .writeByte(BlrConstants.blr_end).writeByte(BlrConstants.blr_eoc), 8), new LinkedList<>());
+            List<Object> out = new LinkedList<>();
+            codecEngine.decode(context, buildBatchMessage(BATCH_STATEMENT_HANDLE, 100), out);
+            assertTrue(out.isEmpty());
+            assertThat(captureErrorResponse().getErrorCode(), is(335545159));
+        } finally {
+            FirebirdBatchRegistry.getInstance().unregisterConnection(BATCH_CONNECTION_ID);
+        }
+    }
+    
+    @Test
     void assertDecodeStandaloneBatchCreateWithBlobBlrDefersToCommandPath() {
         ByteBuf in = buildBlobBatchCreate();
         List<Object> out = new LinkedList<>();
@@ -439,6 +466,14 @@ class FirebirdPacketCodecEngineTest {
         assertThat(((ByteBuf) out.get(0)).getInt(0), is(FirebirdCommandPacketType.BATCH_CREATE.getValue()));
         assertNull(getPendingPacketType());
         assertTrue(getPendingMessages().isEmpty());
+    }
+    
+    @Test
+    void assertDecodeStandaloneBatchCreateWithoutBlrDefersToCommandPath() {
+        List<Object> out = new LinkedList<>();
+        codecEngine.decode(context, buildBatchCreate(Unpooled.buffer(), 0), out);
+        assertThat(out.size(), is(1));
+        verify(context.channel(), never()).writeAndFlush(any());
     }
     
     @Test
@@ -459,7 +494,7 @@ class FirebirdPacketCodecEngineTest {
                 .writeByte(BlrConstants.blr_version5).writeByte(BlrConstants.blr_begin).writeByte(BlrConstants.blr_message).writeByte(0)
                 .writeShortLE(2).writeByte(BlrConstants.blr_blob2).writeZero(4).writeByte(BlrConstants.blr_short).writeByte(0)
                 .writeByte(BlrConstants.blr_end).writeByte(BlrConstants.blr_eoc);
-        return buildBatchCreate(blr, 8);
+        return buildBatchCreate(blr, 10);
     }
     
     private ByteBuf buildBlobBatchMessage() {
@@ -488,7 +523,7 @@ class FirebirdPacketCodecEngineTest {
         codecEngine.decode(context, in, out);
         assertTrue(out.isEmpty());
         assertThat(in.readableBytes(), is(0));
-        assertThat(captureErrorResponse().getErrorCode(), is(335544382));
+        assertThat(captureErrorResponse().getErrorCode(), is(335545159));
         verify(errorResponseFuture).addListener(ChannelFutureListener.CLOSE);
     }
     
