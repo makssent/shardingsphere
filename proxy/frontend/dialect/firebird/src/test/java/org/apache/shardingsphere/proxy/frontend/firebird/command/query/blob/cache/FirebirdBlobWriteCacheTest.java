@@ -159,12 +159,17 @@ class FirebirdBlobWriteCacheTest {
     
     @Test
     void assertUseBlobDataReleasedByGarbageCollector() {
-        CACHE.registerBlob(1, 11, 21L, 31, false);
-        CACHE.appendSegment(1, 11, new byte[]{1, 2, 3});
-        CACHE.closeWrite(1, 11);
-        CACHE.useBlobData(1, 21L, 31);
-        releaseSoftlyReachableData(getIdCache().get(1).get(21L));
-        assertFalse(CACHE.useBlobData(1, 21L, 31).isPresent());
+        CACHE.registerConnection(1);
+        try {
+            CACHE.registerBlob(1, 11, 21L, 31, false);
+            CACHE.appendSegment(1, 11, new byte[]{1, 2, 3});
+            CACHE.closeWrite(1, 11);
+            CACHE.useBlobData(1, 21L, 31);
+            releaseSoftlyReachableData(getIdCache().get(1).get(21L));
+            assertThat(CACHE.useBlobData(1, 21L, 31).orElse(null), is(new byte[]{1, 2, 3}));
+        } finally {
+            CACHE.unregisterConnection(1);
+        }
     }
     
     @SneakyThrows(ReflectiveOperationException.class)

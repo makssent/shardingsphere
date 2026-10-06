@@ -47,6 +47,8 @@ public final class FirebirdBlobWriteCache {
     
     private final Map<Integer, Map<Long, FirebirdBlobWrite>> writesById = new ConcurrentHashMap<>(16);
     
+    private final Map<Integer, FirebirdBlobTempSpace> tempSpaces = new ConcurrentHashMap<>(16);
+    
     public static FirebirdBlobWriteCache getInstance() {
         return INSTANCE;
     }
@@ -59,6 +61,7 @@ public final class FirebirdBlobWriteCache {
     public void registerConnection(final int connectionId) {
         writesByHandle.put(connectionId, new ConcurrentHashMap<>(4));
         writesById.put(connectionId, new ConcurrentHashMap<>(4));
+        tempSpaces.put(connectionId, new FirebirdBlobTempSpace());
     }
     
     /**
@@ -69,6 +72,10 @@ public final class FirebirdBlobWriteCache {
     public void unregisterConnection(final int connectionId) {
         writesByHandle.remove(connectionId);
         writesById.remove(connectionId);
+        FirebirdBlobTempSpace tempSpace = tempSpaces.remove(connectionId);
+        if (null != tempSpace) {
+            tempSpace.close();
+        }
     }
     
     /**
@@ -145,10 +152,7 @@ public final class FirebirdBlobWriteCache {
      */
     public Optional<byte[]> getBlobData(final int connectionId, final long blobId) {
         FirebirdBlobWrite write = getIdMap(connectionId).get(blobId);
-        if (null == write) {
-            return Optional.empty();
-        }
-        return write.getBytes();
+        return null == write ? Optional.empty() : Optional.of(write.getBytes());
     }
     
     /**
@@ -178,21 +182,21 @@ public final class FirebirdBlobWriteCache {
     /**
      * Use data of a closed BLOB write in a statement of transaction.
      *
-     * <p>After the first use the data stays available for reuse in the transaction only until the garbage collector releases it, see {@link FirebirdBlobWrite}.</p>
+     * <p>After the first use the data stays available for reuse in the transaction in the temporary space of the connection, see {@link FirebirdBlobWrite}.</p>
      *
      * @param connectionId connection id
      * @param blobId blob id
      * @param transactionId transaction id of the statement
-     * @return BLOB data, or empty if the BLOB cannot be used by transaction or its data was released
+     * @return BLOB data, or empty if the BLOB cannot be used by transaction
      */
     public Optional<byte[]> useBlobData(final int connectionId, final long blobId, final int transactionId) {
         if (!isAvailable(connectionId, blobId, transactionId)) {
             return Optional.empty();
         }
         FirebirdBlobWrite write = getIdMap(connectionId).get(blobId);
-        Optional<byte[]> result = write.getBytes();
-        write.markUsed();
-        return result;
+        byte[] result = write.getBytes();
+        write.markUsed(getTempSpace(connectionId));
+        return Optional.of(result);
     }
     
     private boolean isAvailable(final int connectionId, final long blobId, final int transactionId) {
@@ -243,6 +247,7 @@ public final class FirebirdBlobWriteCache {
                 }
             }
         }
+        getTempSpace(connectionId).clear();
     }
     
     private Map<Integer, FirebirdBlobWrite> getHandleMap(final int connectionId) {
@@ -253,5 +258,10 @@ public final class FirebirdBlobWriteCache {
     private Map<Long, FirebirdBlobWrite> getIdMap(final int connectionId) {
         Map<Long, FirebirdBlobWrite> result = writesById.get(connectionId);
         return null == result ? writesById.computeIfAbsent(connectionId, key -> new ConcurrentHashMap<>(4)) : result;
+    }
+    
+    private FirebirdBlobTempSpace getTempSpace(final int connectionId) {
+        FirebirdBlobTempSpace result = tempSpaces.get(connectionId);
+        return null == result ? tempSpaces.computeIfAbsent(connectionId, key -> new FirebirdBlobTempSpace()) : result;
     }
 }

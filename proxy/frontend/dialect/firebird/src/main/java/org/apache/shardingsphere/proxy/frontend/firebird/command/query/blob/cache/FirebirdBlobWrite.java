@@ -22,13 +22,13 @@ import lombok.RequiredArgsConstructor;
 
 import java.io.ByteArrayOutputStream;
 import java.lang.ref.SoftReference;
-import java.util.Optional;
 
 /**
  * Firebird BLOB data written by the client and buffered by the proxy.
  *
  * <p>Firebird keeps the BLOB ID of a temporary BLOB used by a statement valid until the transaction ends, but stores its data in the database instead of memory.
- * That is why the proxy keeps the data of a used BLOB only softly reachable: it stays available for reuse until the garbage collector needs the memory.</p>
+ * That is why the proxy writes the data of a used BLOB to the temporary space of the connection and keeps its in-memory copy only softly reachable:
+ * after the garbage collector releases the copy, the data is read back from the temporary space.</p>
  */
 @RequiredArgsConstructor
 public final class FirebirdBlobWrite {
@@ -51,6 +51,12 @@ public final class FirebirdBlobWrite {
     
     private SoftReference<byte[]> usedContent;
     
+    private int size;
+    
+    private FirebirdBlobTempSpace tempSpace;
+    
+    private long tempSpaceOffset;
+    
     @Getter
     private boolean closed;
     
@@ -69,7 +75,7 @@ public final class FirebirdBlobWrite {
      * @return size of BLOB data in bytes
      */
     public int getSize() {
-        return closed ? content.length : buffer.size();
+        return closed ? size : buffer.size();
     }
     
     /**
@@ -77,13 +83,21 @@ public final class FirebirdBlobWrite {
      *
      * <p>The data of a closed write is shared by every caller without copying and must not be modified.</p>
      *
-     * @return BLOB data, or empty if the garbage collector released the data of a used write
+     * @return BLOB data
      */
-    public Optional<byte[]> getBytes() {
+    public byte[] getBytes() {
         if (!closed) {
-            return Optional.of(buffer.toByteArray());
+            return buffer.toByteArray();
         }
-        return Optional.ofNullable(null == content ? usedContent.get() : content);
+        if (null != content) {
+            return content;
+        }
+        byte[] result = usedContent.get();
+        if (null == result) {
+            result = tempSpace.read(tempSpaceOffset, size);
+            usedContent = new SoftReference<>(result);
+        }
+        return result;
     }
     
     /**
@@ -91,15 +105,20 @@ public final class FirebirdBlobWrite {
      */
     public void markClosed() {
         content = buffer.toByteArray();
+        size = content.length;
         buffer = null;
         closed = true;
     }
     
     /**
-     * Mark this closed BLOB write as used by a statement and keep its data only softly reachable.
+     * Mark this closed BLOB write as used by a statement: write its data to the temporary space and keep the in-memory copy only softly reachable.
+     *
+     * @param tempSpace temporary space of the connection
      */
-    void markUsed() {
+    void markUsed(final FirebirdBlobTempSpace tempSpace) {
         if (null != content) {
+            tempSpaceOffset = tempSpace.write(content);
+            this.tempSpace = tempSpace;
             usedContent = new SoftReference<>(content);
             content = null;
         }
