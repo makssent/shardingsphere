@@ -35,6 +35,7 @@ import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cach
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobHandleGenerator;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobIdGenerator;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -73,6 +74,7 @@ class FirebirdOpenBlobCommandExecutorTest {
         FirebirdBlobReadCache.getInstance().registerConnection(CONNECTION_ID);
         FirebirdBlobWriteCache.getInstance().registerConnection(CONNECTION_ID);
         FirebirdBlobIdGenerator.getInstance().registerConnection(CONNECTION_ID);
+        FirebirdTransactionIdGenerator.getInstance().registerConnection(CONNECTION_ID);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
     }
     
@@ -83,6 +85,7 @@ class FirebirdOpenBlobCommandExecutorTest {
         FirebirdBlobReadCache.getInstance().unregisterConnection(CONNECTION_ID);
         FirebirdBlobWriteCache.getInstance().unregisterConnection(CONNECTION_ID);
         FirebirdBlobIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
+        FirebirdTransactionIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
         FirebirdBlobBinaryProtocolValue.unregisterConnection(CONNECTION_ID);
     }
     
@@ -149,8 +152,9 @@ class FirebirdOpenBlobCommandExecutorTest {
     }
     
     private FirebirdGenericResponsePacket createBlobWithSegment(final byte[] segment) {
-        FirebirdGenericResponsePacket result = (FirebirdGenericResponsePacket) new FirebirdCreateBlobCommandExecutor(
-                mock(FirebirdCreateBlobCommandPacket.class), connectionSession).execute().iterator().next();
+        FirebirdCreateBlobCommandPacket createPacket = mock(FirebirdCreateBlobCommandPacket.class);
+        when(createPacket.getTransactionId()).thenReturn(FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID));
+        FirebirdGenericResponsePacket result = (FirebirdGenericResponsePacket) new FirebirdCreateBlobCommandExecutor(createPacket, connectionSession).execute().iterator().next();
         FirebirdPutBlobSegmentCommandPacket putPacket = mock(FirebirdPutBlobSegmentCommandPacket.class);
         when(putPacket.getBlobHandle()).thenReturn(result.getHandle());
         when(putPacket.getSegment()).thenReturn(segment);

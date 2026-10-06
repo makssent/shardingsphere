@@ -17,6 +17,7 @@
 
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob;
 
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdCreateBlobCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
@@ -25,6 +26,7 @@ import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cach
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobHandleGenerator;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobIdGenerator;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +40,8 @@ import java.util.Collection;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -57,6 +61,7 @@ class FirebirdCreateBlobCommandExecutorTest {
         FirebirdBlobIdGenerator.getInstance().registerConnection(CONNECTION_ID);
         FirebirdBlobHandleGenerator.getInstance().registerConnection(CONNECTION_ID);
         FirebirdBlobWriteCache.getInstance().registerConnection(CONNECTION_ID);
+        FirebirdTransactionIdGenerator.getInstance().registerConnection(CONNECTION_ID);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
     }
     
@@ -66,10 +71,12 @@ class FirebirdCreateBlobCommandExecutorTest {
         FirebirdBlobIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
         FirebirdBlobHandleGenerator.getInstance().unregisterConnection(CONNECTION_ID);
         FirebirdBlobWriteCache.getInstance().unregisterConnection(CONNECTION_ID);
+        FirebirdTransactionIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
     }
     
     @Test
     void assertExecute() {
+        when(packet.getTransactionId()).thenReturn(FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID));
         FirebirdCreateBlobCommandExecutor executor = new FirebirdCreateBlobCommandExecutor(packet, connectionSession);
         Collection<DatabasePacket> actual = executor.execute();
         assertThat(actual.size(), is(1));
@@ -77,5 +84,12 @@ class FirebirdCreateBlobCommandExecutorTest {
         assertThat(response, isA(FirebirdGenericResponsePacket.class));
         assertThat(((FirebirdGenericResponsePacket) response).getHandle(), is(1));
         assertThat(((FirebirdGenericResponsePacket) response).getId(), is(1L));
+    }
+    
+    @Test
+    void assertExecuteWithInactiveTransaction() {
+        when(packet.getTransactionId()).thenReturn(23);
+        assertThrows(InvalidTransactionHandleException.class, () -> new FirebirdCreateBlobCommandExecutor(packet, connectionSession).execute());
+        assertFalse(FirebirdBlobHandleGenerator.getInstance().isAllocated(CONNECTION_ID, 1));
     }
 }
