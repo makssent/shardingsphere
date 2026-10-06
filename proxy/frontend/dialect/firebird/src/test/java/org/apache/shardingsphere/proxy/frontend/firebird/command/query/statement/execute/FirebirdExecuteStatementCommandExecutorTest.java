@@ -311,7 +311,7 @@ class FirebirdExecuteStatementCommandExecutorTest {
     }
     
     @Test
-    void assertBindBlobParameterAndClearUpload() throws SQLException {
+    void assertBindBlobParameterAndKeepUploadForTransaction() throws SQLException {
         int blobHandle = 13;
         long blobId = 17L;
         byte[] expectedBytes = new byte[]{3, 4};
@@ -330,7 +330,20 @@ class FirebirdExecuteStatementCommandExecutorTest {
         List<Object> actualParams = queryContextCaptor.getValue().getParameters();
         assertThat(actualParams.size(), is(1));
         assertThat(actualParams.get(0), is(expectedBytes));
-        assertFalse(FirebirdBlobWriteCache.getInstance().getBlobData(CONNECTION_ID, blobId).isPresent());
+        assertThat(FirebirdBlobWriteCache.getInstance().useBlobData(CONNECTION_ID, blobId, transactionId).orElse(null), is(expectedBytes));
+    }
+    
+    @Test
+    void assertRejectBlobParameterOfOtherTransaction() {
+        int blobHandle = 13;
+        long blobId = 17L;
+        FirebirdBlobWriteCache.getInstance().registerBlob(CONNECTION_ID, blobHandle, blobId, transactionId + 1);
+        FirebirdBlobWriteCache.getInstance().closeWrite(CONNECTION_ID, blobHandle);
+        when(packet.getStatementId()).thenReturn(2);
+        when(packet.getParameterTypes()).thenReturn(Collections.singletonList(FirebirdBinaryColumnType.BLOB));
+        when(packet.getParameterValues()).thenReturn(new ArrayList<>(Collections.singletonList(blobId)));
+        executor = new FirebirdExecuteStatementCommandExecutor(packet, connectionSession);
+        assertThrows(InvalidSegstrIdException.class, () -> executor.execute());
     }
     
     @Test
