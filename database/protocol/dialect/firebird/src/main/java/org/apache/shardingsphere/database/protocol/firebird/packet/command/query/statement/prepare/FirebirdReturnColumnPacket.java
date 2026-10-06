@@ -57,6 +57,7 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
     @Getter
     private final Integer blobSubType;
     
+    @Getter
     private final int blobCharsetId;
     
     /**

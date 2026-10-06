@@ -26,6 +26,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.FirebirdExecuteStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.protocol.FirebirdBlobBinaryProtocolValue;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdReturnColumnPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdSQLResponsePacket;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
@@ -38,6 +39,8 @@ import org.apache.shardingsphere.infra.hint.HintValueContext;
 import org.apache.shardingsphere.infra.metadata.ShardingSphereMetaData;
 import org.apache.shardingsphere.infra.metadata.database.resource.ResourceMetaData;
 import org.apache.shardingsphere.infra.metadata.database.rule.RuleMetaData;
+import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereColumn;
+import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereTable;
 import org.apache.shardingsphere.infra.session.connection.ConnectionContext;
 import org.apache.shardingsphere.infra.session.query.QueryContext;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
@@ -65,6 +68,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -80,6 +86,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Properties;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -89,6 +96,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -310,6 +318,26 @@ class FirebirdExecuteStatementCommandExecutorTest {
         assertThat((byte[]) queryContextCaptor.getValue().getParameters().get(0), is(new byte[]{5, 6}));
     }
     
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("blobParameterValueCases")
+    void assertBindBlobParameterByDescribedCharset(final String name, final int blobSubType, final int blobCharsetId, final byte[] content, final Object expectedValue) throws SQLException {
+        int blobHandle = 13;
+        long blobId = 17L;
+        FirebirdBlobWriteCache.getInstance().registerBlob(CONNECTION_ID, blobHandle, blobId);
+        FirebirdBlobWriteCache.getInstance().appendSegment(CONNECTION_ID, blobHandle, content);
+        FirebirdBlobWriteCache.getInstance().closeWrite(CONNECTION_ID, blobHandle);
+        connectionSession.getServerPreparedStatementRegistry().<FirebirdServerPreparedStatement>getPreparedStatement(2).getParameterColumns().add(new FirebirdReturnColumnPacket(
+                Collections.emptyList(), 1, mock(ShardingSphereTable.class), mock(ShardingSphereColumn.class), "", "", "", null, true, blobSubType, blobCharsetId));
+        when(packet.getStatementId()).thenReturn(2);
+        when(packet.getParameterTypes()).thenReturn(Collections.singletonList(FirebirdBinaryColumnType.BLOB));
+        when(packet.getParameterValues()).thenReturn(new ArrayList<>(Collections.singletonList(blobId)));
+        ArgumentCaptor<QueryContext> queryContextCaptor = ArgumentCaptor.forClass(QueryContext.class);
+        when(proxyBackendHandler.execute()).thenReturn(new UpdateResponseHeader(UpdateStatement.builder().databaseType(DATABASE_TYPE).build()));
+        when(ProxyBackendHandlerFactory.newInstance(eq(DATABASE_TYPE), queryContextCaptor.capture(), eq(connectionSession), eq(true))).thenReturn(proxyBackendHandler);
+        new FirebirdExecuteStatementCommandExecutor(packet, connectionSession).execute();
+        assertThat(queryContextCaptor.getValue().getParameters().get(0), is(expectedValue));
+    }
+    
     @Test
     void assertBindBlobParameterAndClearUpload() throws SQLException {
         int blobHandle = 13;
@@ -348,5 +376,16 @@ class FirebirdExecuteStatementCommandExecutorTest {
         assertThat(iterator.next(), isA(FirebirdGenericResponsePacket.class));
         assertFalse(iterator.hasNext());
         assertThat(FirebirdFetchStatementCache.getInstance().getFetchBackendHandler(CONNECTION_ID, STATEMENT_ID), is(proxyBackendHandler));
+    }
+    
+    private static Stream<Arguments> blobParameterValueCases() {
+        byte[] bytes = {(byte) 0xE0, (byte) 0xE1, (byte) 0xE2, (byte) 0x88};
+        return Stream.of(
+                Arguments.of("text_win1251", 1, 52, bytes, String.valueOf(new char[]{0x430, 0x431, 0x432, 0x20AC})),
+                Arguments.of("text_utf8", 1, 4, "foo".getBytes(StandardCharsets.UTF_8), "foo"),
+                Arguments.of("text_none", 1, 0, bytes, bytes),
+                Arguments.of("text_octets", 1, 1, bytes, bytes),
+                Arguments.of("binary", 0, 0, bytes, bytes),
+                Arguments.of("text_malformed_utf8", 1, 4, new byte[]{(byte) 0xFF}, new byte[]{(byte) 0xFF}));
     }
 }
