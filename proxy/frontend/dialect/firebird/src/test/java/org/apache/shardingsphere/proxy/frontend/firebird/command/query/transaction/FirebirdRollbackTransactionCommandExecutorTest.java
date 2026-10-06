@@ -23,6 +23,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.generic.Fireb
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.connector.jdbc.transaction.ProxyBackendTransactionManager;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,7 @@ import java.util.Collection;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.isA;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mockConstruction;
@@ -74,6 +76,21 @@ class FirebirdRollbackTransactionCommandExecutorTest {
             Collection<DatabasePacket> actual = new FirebirdRollbackTransactionCommandExecutor(packet, connectionSession).execute();
             assertThat(actual.iterator().next(), isA(FirebirdGenericResponsePacket.class));
             verify(mocked.constructed().get(0)).rollback();
+        }
+    }
+    
+    @Test
+    void assertExecuteClearsBlobWritesOfTransaction() throws SQLException {
+        FirebirdBlobWriteCache.getInstance().registerConnection(CONNECTION_ID);
+        try {
+            FirebirdBlobWriteCache.getInstance().registerBlob(CONNECTION_ID, 11, 21L, 1);
+            FirebirdBlobWriteCache.getInstance().closeWrite(CONNECTION_ID, 11);
+            when(packet.getTransactionId()).thenReturn(1);
+            when(connectionSession.isAutoCommit()).thenReturn(true);
+            new FirebirdRollbackTransactionCommandExecutor(packet, connectionSession).execute();
+            assertFalse(FirebirdBlobWriteCache.getInstance().getBlobData(CONNECTION_ID, 21L).isPresent());
+        } finally {
+            FirebirdBlobWriteCache.getInstance().unregisterConnection(CONNECTION_ID);
         }
     }
     
