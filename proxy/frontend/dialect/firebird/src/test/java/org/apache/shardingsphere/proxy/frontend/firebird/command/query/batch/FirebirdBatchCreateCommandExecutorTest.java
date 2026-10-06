@@ -38,12 +38,16 @@ import org.firebirdsql.gds.BlrConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.sql.SQLException;
 import java.util.Collection;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -286,7 +290,15 @@ class FirebirdBatchCreateCommandExecutorTest {
     @Test
     void assertParseBatchParametersWhenIntegerLengthInvalid() {
         assertThrows(DatabaseProtocolException.class,
-                () -> FirebirdBatchCreateCommandExecutor.BatchParameters.parse(Unpooled.buffer().writeByte(BATCH_VERSION_1).writeByte(TAG_BUFFER_BYTES_SIZE).writeIntLE(1).writeByte(1)));
+                () -> FirebirdBatchCreateCommandExecutor.BatchParameters.parse(Unpooled.buffer().writeByte(BATCH_VERSION_1).writeByte(TAG_BUFFER_BYTES_SIZE).writeIntLE(5).writeZero(5)));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("shortIntegerValueCases")
+    void assertParseBatchParametersWithShortIntegerValue(final String name, final byte[] value, final long expectedBufferSize) {
+        FirebirdBatchCreateCommandExecutor.BatchParameters actual =
+                FirebirdBatchCreateCommandExecutor.BatchParameters.parse(Unpooled.buffer().writeByte(BATCH_VERSION_1).writeByte(TAG_BUFFER_BYTES_SIZE).writeIntLE(value.length).writeBytes(value));
+        assertThat(actual.getBufferSize(), is(expectedBufferSize));
     }
     
     @Test
@@ -296,6 +308,13 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertThat(actual.getVersion(), is(BATCH_VERSION_1));
         assertThat(actual.getBufferSize(), is(DEFAULT_BUFFER_SIZE));
         assertFalse(actual.isRecordCounts());
+    }
+    
+    private static Stream<Arguments> shortIntegerValueCases() {
+        return Stream.of(
+                Arguments.of("empty value", new byte[0], MAX_BUFFER_SIZE),
+                Arguments.of("two bytes", new byte[]{0, 4}, 1024L),
+                Arguments.of("negative last byte", new byte[]{(byte) 0xFF}, MAX_BUFFER_SIZE));
     }
     
     private ByteBuf createBatchBlr() {

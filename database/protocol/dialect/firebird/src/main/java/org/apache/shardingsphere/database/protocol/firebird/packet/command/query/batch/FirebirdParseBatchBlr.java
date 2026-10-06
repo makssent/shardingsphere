@@ -96,12 +96,6 @@ public final class FirebirdParseBatchBlr {
         if (remainingWithinBlr(buffer, startReaderIndex, blrLength) < 1 || BlrConstants.blr_end != buffer.readUnsignedByte()) {
             throw new IllegalArgumentException("Expected blr_end");
         }
-        if (remainingWithinBlr(buffer, startReaderIndex, blrLength) < 1 || BlrConstants.blr_eoc != buffer.readUnsignedByte()) {
-            throw new IllegalArgumentException("Expected blr_eoc");
-        }
-        if (0 != remainingWithinBlr(buffer, startReaderIndex, blrLength)) {
-            throw new IllegalArgumentException("Unexpected trailing bytes in BLR");
-        }
     }
     
     private static int remainingWithinBlr(final ByteBuf buffer, final int startReaderIndex, final int blrLength) {

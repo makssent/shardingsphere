@@ -30,6 +30,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdParseBatchBlr;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
+import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor;
 
@@ -61,7 +62,7 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
     
     private static final int WIDE_CLUMPLET_LENGTH_SIZE = 4;
     
-    private static final int INTEGER_VALUE_LENGTH = 4;
+    private static final int MAX_INTEGER_VALUE_LENGTH = 4;
     
     private final FirebirdBatchCreateCommandPacket packet;
     
@@ -128,11 +129,11 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
                 int valueLength = reader.readIntLE();
                 ensureClumpletValueReadable(reader, tag, valueLength);
                 if (TAG_MULTIERROR == tag) {
-                    multiError = 0 != readIntegerValue(reader, tag, valueLength);
+                    multiError = 0 != readIntegerValue(reader, valueLength);
                 } else if (TAG_RECORD_COUNTS == tag) {
-                    recordCounts = 0 != readIntegerValue(reader, tag, valueLength);
+                    recordCounts = 0 != readIntegerValue(reader, valueLength);
                 } else if (TAG_BUFFER_BYTES_SIZE == tag) {
-                    bufferSize = getBufferSize(readIntegerValue(reader, tag, valueLength));
+                    bufferSize = getBufferSize(readIntegerValue(reader, valueLength));
                 } else if (TAG_BLOB_POLICY == tag) {
                     // int requestedBlobPolicy = readIntegerValue(reader, tag, valueLength);
                     // blobPolicy = BLOB_STREAM == requestedBlobPolicy ? requestedBlobPolicy : BLOB_STREAM;
@@ -163,11 +164,16 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
             }
         }
         
-        private static int readIntegerValue(final ByteBuf reader, final int tag, final int valueLength) {
-            if (INTEGER_VALUE_LENGTH != valueLength) {
-                throw new DatabaseProtocolException("Invalid batch parameter integer length for tag %d: %d", tag, valueLength);
+        private static int readIntegerValue(final ByteBuf reader, final int valueLength) {
+            ShardingSpherePreconditions.checkState(valueLength <= MAX_INTEGER_VALUE_LENGTH, () -> new DatabaseProtocolException("Invalid batch parameter integer length: %d", valueLength));
+            if (0 == valueLength) {
+                return 0;
             }
-            return reader.readIntLE();
+            int result = 0;
+            for (int i = 0; i < valueLength - 1; i++) {
+                result += reader.readUnsignedByte() << (Byte.SIZE * i);
+            }
+            return result + (reader.readByte() << (Byte.SIZE * (valueLength - 1)));
         }
     }
 }

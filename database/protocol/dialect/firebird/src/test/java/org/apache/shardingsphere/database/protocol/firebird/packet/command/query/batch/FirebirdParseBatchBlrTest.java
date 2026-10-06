@@ -104,6 +104,14 @@ class FirebirdParseBatchBlrTest {
     }
     
     @Test
+    void assertParseWithoutBlrEoc() {
+        ByteBuf blr = Unpooled.wrappedBuffer(longFieldBlr(BlrConstants.blr_end));
+        FirebirdParseBatchBlr actual = FirebirdParseBatchBlr.parse(blr, blr.readableBytes());
+        assertThat(actual.getFields().size(), is(1));
+        assertThat(actual.getMessageLength(), is(6));
+    }
+    
+    @Test
     void assertParseUnsupportedType() {
         ByteBuf blr = createBlr(BlrConstants.blr_version5, new byte[]{(byte) BlrConstants.blr_dec64, (byte) BlrConstants.blr_short, 0}, 2);
         assertThrows(IllegalArgumentException.class, () -> FirebirdParseBatchBlr.parse(blr, blr.readableBytes()));
@@ -154,10 +162,7 @@ class FirebirdParseBatchBlrTest {
     private static Stream<Arguments> invalidTerminatorArguments() {
         return Stream.of(
                 Arguments.of("missing_terminators", longFieldBlr(), "Expected blr_end"),
-                Arguments.of("wrong_blr_end", longFieldBlr(BlrConstants.blr_message, BlrConstants.blr_eoc), "Expected blr_end"),
-                Arguments.of("truncated_terminator", longFieldBlr(BlrConstants.blr_end), "Expected blr_eoc"),
-                Arguments.of("wrong_blr_eoc", longFieldBlr(BlrConstants.blr_end, BlrConstants.blr_end), "Expected blr_eoc"),
-                Arguments.of("trailing_bytes", longFieldBlr(BlrConstants.blr_end, BlrConstants.blr_eoc, 0), "Unexpected trailing bytes in BLR"));
+                Arguments.of("wrong_blr_end", longFieldBlr(BlrConstants.blr_message, BlrConstants.blr_eoc), "Expected blr_end"));
     }
     
     private static byte[] longFieldBlr(final int... terminator) {
