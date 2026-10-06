@@ -39,12 +39,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FirebirdBlobInfoRegistryTest {
     
-    private Map<String, Map<String, Integer>> blobColumns;
+    private Map<String, Map<String, FirebirdBlobColumn>> blobColumns;
     
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() throws ReflectiveOperationException {
-        blobColumns = (Map<String, Map<String, Integer>>) Plugins.getMemberAccessor().get(FirebirdBlobInfoRegistry.class.getDeclaredField("BLOB_COLUMNS"), FirebirdBlobInfoRegistry.class);
+        blobColumns = (Map<String, Map<String, FirebirdBlobColumn>>) Plugins.getMemberAccessor().get(FirebirdBlobInfoRegistry.class.getDeclaredField("BLOB_COLUMNS"), FirebirdBlobInfoRegistry.class);
         blobColumns.clear();
     }
     
@@ -55,43 +55,43 @@ class FirebirdBlobInfoRegistryTest {
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("refreshTableRemoveCases")
-    void assertRefreshTableRemovesEntry(final String name, final Map<String, Integer> newColumns) {
-        blobColumns.put("SCHEMA_A.TABLE_A", Collections.singletonMap("EXISTING_COL", 1));
+    void assertRefreshTableRemovesEntry(final String name, final Map<String, FirebirdBlobColumn> newColumns) {
+        blobColumns.put("SCHEMA_A.TABLE_A", Collections.singletonMap("EXISTING_COL", createBlobColumn(1)));
         FirebirdBlobInfoRegistry.refreshTable("schema_a", "table_a", newColumns);
         assertFalse(blobColumns.containsKey("SCHEMA_A.TABLE_A"));
     }
     
     @Test
     void assertRefreshTableWhenTableNameIsNull() {
-        registerBlobColumns("SENTINEL", Collections.singletonMap("EXISTING_COL", 9));
-        FirebirdBlobInfoRegistry.refreshTable("schema_a", null, Collections.singletonMap("blob_col", 1));
+        registerBlobColumns("SENTINEL", Collections.singletonMap("EXISTING_COL", createBlobColumn(9)));
+        FirebirdBlobInfoRegistry.refreshTable("schema_a", null, Collections.singletonMap("blob_col", createBlobColumn(1)));
         assertTrue(blobColumns.containsKey("SENTINEL"));
-        assertThat(blobColumns.get("SENTINEL").get("EXISTING_COL"), is(9));
+        assertThat(blobColumns.get("SENTINEL").get("EXISTING_COL").getSubtype(), is(9));
     }
     
     @Test
     void assertRefreshTable() {
-        Map<String, Integer> newColumns = createColumnsWithMixedNames();
+        Map<String, FirebirdBlobColumn> newColumns = createColumnsWithMixedNames();
         FirebirdBlobInfoRegistry.refreshTable(null, "table_1", newColumns);
-        Map<String, Integer> actual = blobColumns.get(".TABLE");
+        Map<String, FirebirdBlobColumn> actual = blobColumns.get(".TABLE");
         assertTrue(actual.containsKey("BLOB_COL"));
-        assertThat(actual.get("BLOB_COL"), is(2));
+        assertThat(actual.get("BLOB_COL").getSubtype(), is(2));
         assertThat(actual.size(), is(1));
-        assertThrows(UnsupportedOperationException.class, () -> actual.put("ANOTHER_COL", 3));
+        assertThrows(UnsupportedOperationException.class, () -> actual.put("ANOTHER_COL", createBlobColumn(3)));
     }
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("notBlobColumnCases")
     void assertIsBlobColumnWhenNotMatched(final String name, final String tableName, final String columnName, final boolean registerTable, final boolean registerColumn) {
         if (registerTable) {
-            blobColumns.put("SCHEMA_A.TABLE_A", registerColumn ? Collections.singletonMap("BLOB_COL", 1) : Collections.singletonMap("OTHER_COL", 1));
+            blobColumns.put("SCHEMA_A.TABLE_A", registerColumn ? Collections.singletonMap("BLOB_COL", createBlobColumn(1)) : Collections.singletonMap("OTHER_COL", createBlobColumn(1)));
         }
         assertFalse(FirebirdBlobInfoRegistry.isBlobColumn("schema_a", tableName, columnName));
     }
     
     @Test
     void assertIsBlobColumn() {
-        registerBlobColumns("SCHEMA_A.123", Collections.singletonMap("BLOB_COL", 1));
+        registerBlobColumns("SCHEMA_A.123", Collections.singletonMap("BLOB_COL", createBlobColumn(1)));
         boolean actual = FirebirdBlobInfoRegistry.isBlobColumn("schema_a", "123", "blob_col");
         assertTrue(actual);
     }
@@ -100,7 +100,7 @@ class FirebirdBlobInfoRegistryTest {
     @MethodSource("findBlobSubtypeEmptyCases")
     void assertFindBlobSubtypeWhenAbsent(final String name, final String tableName, final String columnName, final boolean registerTable, final boolean registerColumn) {
         if (registerTable) {
-            blobColumns.put("SCHEMA_A.TABLE_A", registerColumn ? Collections.singletonMap("BLOB_COL", 5) : Collections.singletonMap("OTHER_COL", 5));
+            blobColumns.put("SCHEMA_A.TABLE_A", registerColumn ? Collections.singletonMap("BLOB_COL", createBlobColumn(5)) : Collections.singletonMap("OTHER_COL", createBlobColumn(5)));
         }
         OptionalInt actual = FirebirdBlobInfoRegistry.findBlobSubtype("schema_a", tableName, columnName);
         assertFalse(actual.isPresent());
@@ -108,17 +108,31 @@ class FirebirdBlobInfoRegistryTest {
     
     @Test
     void assertFindBlobSubtype() {
-        registerBlobColumns("SCHEMA_A.TABLE_A", Collections.singletonMap("BLOB_COL", 7));
+        registerBlobColumns("SCHEMA_A.TABLE_A", Collections.singletonMap("BLOB_COL", createBlobColumn(7)));
         OptionalInt actual = FirebirdBlobInfoRegistry.findBlobSubtype("schema_a", "table_a", "blob_col");
         assertTrue(actual.isPresent());
         assertThat(actual.getAsInt(), is(7));
+    }
+    
+    @Test
+    void assertFindBlobCharsetId() {
+        registerBlobColumns("SCHEMA_A.TABLE_A", Collections.singletonMap("BLOB_COL", new FirebirdBlobColumn(1, 4)));
+        OptionalInt actual = FirebirdBlobInfoRegistry.findBlobCharsetId("schema_a", "table_a", "blob_col");
+        assertTrue(actual.isPresent());
+        assertThat(actual.getAsInt(), is(4));
+    }
+    
+    @Test
+    void assertFindBlobCharsetIdWhenColumnAbsent() {
+        registerBlobColumns("SCHEMA_A.TABLE_A", Collections.singletonMap("OTHER_COL", new FirebirdBlobColumn(1, 4)));
+        assertFalse(FirebirdBlobInfoRegistry.findBlobCharsetId("schema_a", "table_a", "blob_col").isPresent());
     }
     
     private static Stream<Arguments> refreshTableRemoveCases() {
         return Stream.of(
                 Arguments.of("null_blob_columns", null),
                 Arguments.of("empty_blob_columns", Collections.emptyMap()),
-                Arguments.of("all_column_names_are_null", Collections.singletonMap(null, 1)));
+                Arguments.of("all_column_names_are_null", Collections.singletonMap(null, createBlobColumn(1))));
     }
     
     private static Stream<Arguments> notBlobColumnCases() {
@@ -137,14 +151,18 @@ class FirebirdBlobInfoRegistryTest {
                 Arguments.of("column_not_registered", "table_a", "blob_col", true, false));
     }
     
-    private static Map<String, Integer> createColumnsWithMixedNames() {
-        Map<String, Integer> result = new HashMap<>(2, 1F);
-        result.put("blob_col", 2);
-        result.put(null, 9);
+    private static Map<String, FirebirdBlobColumn> createColumnsWithMixedNames() {
+        Map<String, FirebirdBlobColumn> result = new HashMap<>(2, 1F);
+        result.put("blob_col", createBlobColumn(2));
+        result.put(null, createBlobColumn(9));
         return result;
     }
     
-    private void registerBlobColumns(final String tableKey, final Map<String, Integer> columns) {
+    private static FirebirdBlobColumn createBlobColumn(final int subtype) {
+        return new FirebirdBlobColumn(subtype, 0);
+    }
+    
+    private void registerBlobColumns(final String tableKey, final Map<String, FirebirdBlobColumn> columns) {
         blobColumns.put(tableKey, columns);
     }
 }

@@ -20,6 +20,7 @@ package org.apache.shardingsphere.database.connector.firebird.metadata.data.load
 import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.connector.core.metadata.data.loader.MetaDataLoaderConnection;
 import org.apache.shardingsphere.database.connector.core.metadata.data.loader.MetaDataLoaderMaterial;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobColumn;
 
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -36,7 +37,7 @@ import java.util.Map;
 final class FirebirdBlobColumnLoader {
     
     private static final String SELECT_BLOB_COLUMNS_SQL =
-            "SELECT TRIM(rf.RDB$FIELD_NAME) AS COLUMN_NAME, f.RDB$FIELD_SUB_TYPE AS SUB_TYPE "
+            "SELECT TRIM(rf.RDB$FIELD_NAME) AS COLUMN_NAME, f.RDB$FIELD_SUB_TYPE AS SUB_TYPE, f.RDB$CHARACTER_SET_ID AS CHARSET_ID "
                     + "FROM RDB$RELATION_FIELDS rf "
                     + "JOIN RDB$FIELDS f ON rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME "
                     + "WHERE TRIM(UPPER(rf.RDB$RELATION_NAME)) = ? "
@@ -44,31 +45,31 @@ final class FirebirdBlobColumnLoader {
     
     private final MetaDataLoaderMaterial material;
     
-    Map<String, Map<String, Integer>> load() throws SQLException {
+    Map<String, Map<String, FirebirdBlobColumn>> load() throws SQLException {
         if (material.getActualTableNames().isEmpty()) {
             return Collections.emptyMap();
         }
-        Map<String, Map<String, Integer>> result = new HashMap<>(material.getActualTableNames().size(), 1F);
+        Map<String, Map<String, FirebirdBlobColumn>> result = new HashMap<>(material.getActualTableNames().size(), 1F);
         try (
                 MetaDataLoaderConnection connection = new MetaDataLoaderConnection(
                         material.getStorageType(), material.getDataSource().getConnection())) {
             for (String each : material.getActualTableNames()) {
-                Map<String, Integer> blobColumns = loadTableBlobColumns(connection, each);
+                Map<String, FirebirdBlobColumn> blobColumns = loadTableBlobColumns(connection, each);
                 result.put(each, blobColumns);
             }
         }
         return result;
     }
     
-    private Map<String, Integer> loadTableBlobColumns(final MetaDataLoaderConnection connection, final String formattedTableName) throws SQLException {
-        Map<String, Integer> result = new HashMap<>();
+    private Map<String, FirebirdBlobColumn> loadTableBlobColumns(final MetaDataLoaderConnection connection, final String formattedTableName) throws SQLException {
+        Map<String, FirebirdBlobColumn> result = new HashMap<>();
         try (PreparedStatement preparedStatement = connection.prepareStatement(SELECT_BLOB_COLUMNS_SQL)) {
             preparedStatement.setString(1, formattedTableName.toUpperCase(Locale.ENGLISH));
             try (ResultSet resultSet = preparedStatement.executeQuery()) {
                 while (resultSet.next()) {
                     String normalizedColumnName = normalizeColumnName(resultSet.getString("COLUMN_NAME"));
                     if (null != normalizedColumnName) {
-                        result.put(normalizedColumnName, getColumnSubtype(resultSet));
+                        result.put(normalizedColumnName, new FirebirdBlobColumn(getColumnSubtype(resultSet), getColumnCharsetId(resultSet)));
                     }
                 }
             }
@@ -87,5 +88,10 @@ final class FirebirdBlobColumnLoader {
     private Integer getColumnSubtype(final ResultSet resultSet) throws SQLException {
         Object subTypeValue = resultSet.getObject("SUB_TYPE");
         return null == subTypeValue ? null : ((Number) subTypeValue).intValue();
+    }
+    
+    private int getColumnCharsetId(final ResultSet resultSet) throws SQLException {
+        Object charsetIdValue = resultSet.getObject("CHARSET_ID");
+        return null == charsetIdValue ? 0 : ((Number) charsetIdValue).intValue();
     }
 }

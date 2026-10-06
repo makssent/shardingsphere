@@ -22,6 +22,7 @@ import org.apache.shardingsphere.database.connector.core.metadata.data.loader.Me
 import org.apache.shardingsphere.database.connector.core.metadata.data.loader.type.TableMetaDataLoader;
 import org.apache.shardingsphere.database.connector.core.metadata.data.model.SchemaMetaData;
 import org.apache.shardingsphere.database.connector.core.metadata.data.model.TableMetaData;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobColumn;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobInfoRegistry;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNonFixedLengthColumnSizeRegistry;
 
@@ -56,9 +57,9 @@ public final class FirebirdMetaDataLoader implements DialectMetaDataLoader {
     }
     
     private void loadBlobColumns(final MetaDataLoaderMaterial material) throws SQLException {
-        Map<String, Map<String, Integer>> blobColumns = new FirebirdBlobColumnLoader(material).load();
+        Map<String, Map<String, FirebirdBlobColumn>> blobColumns = new FirebirdBlobColumnLoader(material).load();
         for (String each : material.getActualTableNames()) {
-            Map<String, Integer> tableColumns = blobColumns.getOrDefault(each, Collections.emptyMap());
+            Map<String, FirebirdBlobColumn> tableColumns = blobColumns.getOrDefault(each, Collections.emptyMap());
             FirebirdBlobInfoRegistry.refreshTable(material.getDefaultSchemaName(), each, tableColumns);
         }
     }

@@ -54,6 +54,8 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
     
     private final Integer blobSubType;
     
+    private final int blobCharsetId;
+    
     @Override
     protected void write(final FirebirdPacketPayload payload) {
         FirebirdBinaryColumnType columnType = blobColumn ? FirebirdBinaryColumnType.BLOB : FirebirdBinaryColumnType.valueOfJDBCType(column.getDataType());
@@ -74,7 +76,7 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
                     FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.SUB_TYPE, subType, payload);
                     break;
                 case SCALE:
-                    FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.SCALE, 0, payload);
+                    FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.SCALE, columnType == FirebirdBinaryColumnType.BLOB ? blobCharsetId : 0, payload);
                     break;
                 case LENGTH:
                     if (columnType == FirebirdBinaryColumnType.VARYING

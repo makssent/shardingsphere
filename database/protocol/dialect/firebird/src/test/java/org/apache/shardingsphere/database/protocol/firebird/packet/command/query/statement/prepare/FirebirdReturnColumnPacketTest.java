@@ -65,7 +65,7 @@ class FirebirdReturnColumnPacketTest {
                 FirebirdSQLInfoPacketType.RELATION,
                 FirebirdSQLInfoPacketType.RELATION_ALIAS,
                 FirebirdSQLInfoPacketType.OWNER,
-                FirebirdSQLInfoPacketType.DESCRIBE_END), Types.VARCHAR, 99, false, null);
+                FirebirdSQLInfoPacketType.DESCRIBE_END), Types.VARCHAR, 99, false, null, 0);
         when(payload.getCharset()).thenReturn(StandardCharsets.UTF_8);
         packet.write(payload);
         verify(payload).writeInt1(FirebirdSQLInfoPacketType.SQLDA_SEQ.getCode());
@@ -76,7 +76,7 @@ class FirebirdReturnColumnPacketTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("assertWriteLengthArguments")
     void assertWriteLength(final String name, final FirebirdBinaryColumnType columnType, final int expectedLength) {
-        FirebirdReturnColumnPacket packet = createPacket(Collections.singletonList(FirebirdSQLInfoPacketType.LENGTH), Types.INTEGER, 99, false, null);
+        FirebirdReturnColumnPacket packet = createPacket(Collections.singletonList(FirebirdSQLInfoPacketType.LENGTH), Types.INTEGER, 99, false, null, 0);
         try (MockedStatic<FirebirdBinaryColumnType> mocked = mockStatic(FirebirdBinaryColumnType.class)) {
             mocked.when(() -> FirebirdBinaryColumnType.valueOfJDBCType(Types.INTEGER)).thenReturn(columnType);
             packet.write(payload);
@@ -87,23 +87,30 @@ class FirebirdReturnColumnPacketTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("assertWriteSubTypeArguments")
     void assertWriteSubType(final String name, final boolean blobColumn, final Integer blobSubType, final int expectedSubType) {
-        createPacket(Collections.singletonList(FirebirdSQLInfoPacketType.SUB_TYPE), Types.INTEGER, null, blobColumn, blobSubType).write(payload);
+        createPacket(Collections.singletonList(FirebirdSQLInfoPacketType.SUB_TYPE), Types.INTEGER, null, blobColumn, blobSubType, 0).write(payload);
         verify(payload).writeInt4LE(expectedSubType);
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("assertWriteScaleArguments")
+    void assertWriteScale(final String name, final boolean blobColumn, final int expectedScale) {
+        createPacket(Collections.singletonList(FirebirdSQLInfoPacketType.SCALE), Types.INTEGER, null, blobColumn, 1, 4).write(payload);
+        verify(payload).writeInt4LE(expectedScale);
     }
     
     @Test
     void assertWriteWithUnsupportedRequestedItem() {
-        FirebirdReturnColumnPacket packet = createPacket(Collections.singletonList(FirebirdSQLInfoPacketType.SELECT), Types.INTEGER, null, false, null);
+        FirebirdReturnColumnPacket packet = createPacket(Collections.singletonList(FirebirdSQLInfoPacketType.SELECT), Types.INTEGER, null, false, null, 0);
         try (MockedConstruction<DatabaseProtocolException> ignored = mockConstruction(DatabaseProtocolException.class)) {
             assertThrows(DatabaseProtocolException.class, () -> packet.write(payload));
         }
     }
     
     private FirebirdReturnColumnPacket createPacket(final Collection<FirebirdSQLInfoPacketType> requestedItems, final int dataType, final Integer columnLength,
-                                                    final boolean blobColumn, final Integer blobSubType) {
+                                                    final boolean blobColumn, final Integer blobSubType, final int blobCharsetId) {
         ShardingSphereColumn column = new ShardingSphereColumn("col", dataType, false, false, false, true, false, true);
         ShardingSphereTable table = new ShardingSphereTable("tbl", Collections.singleton(column), Collections.emptyList(), Collections.emptyList());
-        return new FirebirdReturnColumnPacket(requestedItems, 1, table, column, "t", "c", "o", columnLength, blobColumn, blobSubType);
+        return new FirebirdReturnColumnPacket(requestedItems, 1, table, column, "t", "c", "o", columnLength, blobColumn, blobSubType, blobCharsetId);
     }
     
     private static Stream<Arguments> assertWriteLengthArguments() {
@@ -113,6 +120,10 @@ class FirebirdReturnColumnPacketTest {
                 Arguments.of("length_text", FirebirdBinaryColumnType.TEXT, 99),
                 Arguments.of("length_legacy_text", FirebirdBinaryColumnType.LEGACY_TEXT, 99),
                 Arguments.of("length_long", FirebirdBinaryColumnType.LONG, FirebirdBinaryColumnType.LONG.getLength()));
+    }
+    
+    private static Stream<Arguments> assertWriteScaleArguments() {
+        return Stream.of(Arguments.of("blob_charset", true, 4), Arguments.of("not_blob", false, 0));
     }
     
     private static Stream<Arguments> assertWriteSubTypeArguments() {

@@ -19,6 +19,7 @@ package org.apache.shardingsphere.database.connector.firebird.metadata.data.load
 
 import org.apache.shardingsphere.database.connector.core.metadata.data.loader.MetaDataLoaderMaterial;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobColumn;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -64,19 +65,22 @@ class FirebirdBlobColumnLoaderTest {
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("loadWithBlobColumnArguments")
-    void assertLoadWithBlobColumn(final String name, final String columnName, final Object subType, final Integer expectedSubType) throws SQLException {
+    void assertLoadWithBlobColumn(final String name, final String columnName, final Object subType, final Integer expectedSubType, final Object charsetId,
+                                  final int expectedCharsetId) throws SQLException {
         when(resultSet.next()).thenReturn(true, false);
         when(resultSet.getString("COLUMN_NAME")).thenReturn(columnName);
         when(resultSet.getObject("SUB_TYPE")).thenReturn(subType);
+        when(resultSet.getObject("CHARSET_ID")).thenReturn(charsetId);
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         when(dataSource.getConnection()).thenReturn(connection);
         MetaDataLoaderMaterial material = new MetaDataLoaderMaterial(Collections.singleton("FOO_TBL"), "foo_ds", dataSource, databaseType, "schema");
-        Map<String, Map<String, Integer>> actual = new FirebirdBlobColumnLoader(material).load();
+        Map<String, Map<String, FirebirdBlobColumn>> actual = new FirebirdBlobColumnLoader(material).load();
         assertThat(actual, hasKey("FOO_TBL"));
-        Map<String, Integer> actualTableColumns = actual.get("FOO_TBL");
+        Map<String, FirebirdBlobColumn> actualTableColumns = actual.get("FOO_TBL");
         assertThat(actualTableColumns.size(), is(1));
-        assertThat(actualTableColumns.get("BLOB_COL"), is(expectedSubType));
+        assertThat(actualTableColumns.get("BLOB_COL").getSubtype(), is(expectedSubType));
+        assertThat(actualTableColumns.get("BLOB_COL").getCharsetId(), is(expectedCharsetId));
         verify(preparedStatement).setString(1, "FOO_TBL");
     }
     
@@ -88,7 +92,7 @@ class FirebirdBlobColumnLoaderTest {
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         when(dataSource.getConnection()).thenReturn(connection);
         MetaDataLoaderMaterial material = new MetaDataLoaderMaterial(Collections.singleton("FOO_TBL"), "foo_ds", dataSource, databaseType, "schema");
-        Map<String, Map<String, Integer>> actual = new FirebirdBlobColumnLoader(material).load();
+        Map<String, Map<String, FirebirdBlobColumn>> actual = new FirebirdBlobColumnLoader(material).load();
         assertThat(actual, hasKey("FOO_TBL"));
         assertTrue(actual.get("FOO_TBL").isEmpty());
         verify(preparedStatement).setString(1, "FOO_TBL");
@@ -102,8 +106,9 @@ class FirebirdBlobColumnLoaderTest {
     
     private static Stream<Arguments> loadWithBlobColumnArguments() {
         return Stream.of(
-                Arguments.of("trimmed column with integer subtype", " blob_col ", 2, 2),
-                Arguments.of("upper case column with null subtype", "BLOB_COL", null, null),
-                Arguments.of("lower case column with negative subtype", "blob_col", -1, -1));
+                Arguments.of("trimmed column with integer subtype", " blob_col ", 2, 2, null, 0),
+                Arguments.of("upper case column with null subtype", "BLOB_COL", null, null, null, 0),
+                Arguments.of("lower case column with negative subtype", "blob_col", -1, -1, null, 0),
+                Arguments.of("text column with character set", "blob_col", 1, 1, 4, 4));
     }
 }

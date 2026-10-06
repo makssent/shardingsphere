@@ -18,8 +18,10 @@
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.prepare;
 
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobColumn;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobInfoRegistry;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.database.NoDatabaseSelectedException;
+import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdConstant;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoReturnValue;
@@ -62,6 +64,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -73,6 +78,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -80,6 +86,7 @@ import static org.hamcrest.Matchers.isA;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
@@ -209,7 +216,7 @@ class FirebirdPrepareStatementCommandExecutorTest {
     
     @Test
     void assertDescribeBlobColumnRegisteredInBlobInfoRegistryReturnsBlobTypeAndSubtype() throws Exception {
-        FirebirdBlobInfoRegistry.refreshTable("foo_db", "foo_tbl", Collections.singletonMap("id", 7));
+        FirebirdBlobInfoRegistry.refreshTable("foo_db", "foo_tbl", Collections.singletonMap("id", new FirebirdBlobColumn(7, 0)));
         FirebirdReturnColumnPacket columnPacket = describeSingleColumn("SELECT id FROM foo_tbl");
         FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class, RETURNS_DEEP_STUBS);
         columnPacket.write(payload);
@@ -224,6 +231,26 @@ class FirebirdPrepareStatementCommandExecutorTest {
         columnPacket.write(payload);
         verify(payload).writeInt4LE(FirebirdBinaryColumnType.BLOB.getValue() + 1);
         verify(payload).writeInt4LE(FirebirdBinaryColumnType.BLOB.getSubtype());
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("describeBindBlobCharsetArguments")
+    void assertDescribeBindBlobParameterCharset(final String name, final int blobSubtype, final int columnCharsetId, final int connectionCharsetId, final int expectedCharsetId) throws Exception {
+        FirebirdBlobInfoRegistry.refreshTable("foo_db", "foo_tbl", Collections.singletonMap("content", new FirebirdBlobColumn(blobSubtype, columnCharsetId)));
+        lenient().when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(connectionCharsetId);
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id, content) VALUES (?, ?)");
+        when(packet.nextItem()).thenReturn(true, true, true, true, true, false);
+        when(packet.getCurrentItem()).thenReturn(
+                FirebirdSQLInfoPacketType.STMT_TYPE,
+                FirebirdSQLInfoPacketType.BIND,
+                FirebirdSQLInfoPacketType.SCALE,
+                FirebirdSQLInfoPacketType.SCALE,
+                FirebirdSQLInfoPacketType.DESCRIBE_END,
+                FirebirdSQLInfoPacketType.DESCRIBE_END);
+        Collection<DatabasePacket> actual = new FirebirdPrepareStatementCommandExecutor(packet, connectionSession).execute();
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
+        ((FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) actual.iterator().next()).getData()).getDescribeBind().get(1).write(payload);
+        verify(payload).writeInt4LE(expectedCharsetId);
     }
     
     @Test
@@ -247,6 +274,16 @@ class FirebirdPrepareStatementCommandExecutorTest {
         FirebirdReturnColumnPacket columnPacket = returnPacket.getDescribeSelect().get(0);
         columnPacket.write(payload);
         verify(payload).writeInt4LE(FirebirdBinaryColumnType.LONG.getValue() + 1);
+    }
+    
+    private static Stream<Arguments> describeBindBlobCharsetArguments() {
+        return Stream.of(
+                Arguments.of("text_column_charset_of_connection", 1, 4, 4, 4),
+                Arguments.of("text_column_other_connection_charset", 1, 4, 52, 52),
+                Arguments.of("text_column_none", 1, 0, 52, 0),
+                Arguments.of("text_column_octets", 1, 1, 52, 1),
+                Arguments.of("connection_none", 1, 4, 0, 4),
+                Arguments.of("binary_column", 0, 0, 52, 0));
     }
     
     private FirebirdReturnColumnPacket describeSingleColumn(final String sql) throws Exception {

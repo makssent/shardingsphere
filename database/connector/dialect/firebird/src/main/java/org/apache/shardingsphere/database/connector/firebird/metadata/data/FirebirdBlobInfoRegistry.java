@@ -34,16 +34,16 @@ import java.util.concurrent.ConcurrentHashMap;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class FirebirdBlobInfoRegistry {
     
-    private static final Map<String, Map<String, Integer>> BLOB_COLUMNS = new ConcurrentHashMap<>();
+    private static final Map<String, Map<String, FirebirdBlobColumn>> BLOB_COLUMNS = new ConcurrentHashMap<>();
     
     /**
      * Refresh blob column metadata for a table.
      *
      * @param schemaName schema name
      * @param tableName table name
-     * @param blobColumns blob column name to subtype mapping
+     * @param blobColumns blob column name to blob column mapping
      */
-    public static void refreshTable(final String schemaName, final String tableName, final Map<String, Integer> blobColumns) {
+    public static void refreshTable(final String schemaName, final String tableName, final Map<String, FirebirdBlobColumn> blobColumns) {
         if (null == tableName) {
             return;
         }
@@ -52,8 +52,8 @@ public final class FirebirdBlobInfoRegistry {
             BLOB_COLUMNS.remove(tableKey);
             return;
         }
-        Map<String, Integer> normalizedColumns = new HashMap<>(blobColumns.size(), 1F);
-        for (Entry<String, Integer> entry : blobColumns.entrySet()) {
+        Map<String, FirebirdBlobColumn> normalizedColumns = new HashMap<>(blobColumns.size(), 1F);
+        for (Entry<String, FirebirdBlobColumn> entry : blobColumns.entrySet()) {
             if (null != entry.getKey()) {
                 normalizedColumns.put(toKey(entry.getKey()), entry.getValue());
             }
@@ -77,7 +77,7 @@ public final class FirebirdBlobInfoRegistry {
         if (null == tableName || null == columnName) {
             return false;
         }
-        Map<String, Integer> blobColumns = BLOB_COLUMNS.get(buildTableKey(schemaName, tableName));
+        Map<String, FirebirdBlobColumn> blobColumns = BLOB_COLUMNS.get(buildTableKey(schemaName, tableName));
         return null != blobColumns && blobColumns.containsKey(toKey(columnName));
     }
     
@@ -90,15 +90,29 @@ public final class FirebirdBlobInfoRegistry {
      * @return blob subtype if present
      */
     public static OptionalInt findBlobSubtype(final String schemaName, final String tableName, final String columnName) {
+        FirebirdBlobColumn blobColumn = findBlobColumn(schemaName, tableName, columnName);
+        return null == blobColumn || null == blobColumn.getSubtype() ? OptionalInt.empty() : OptionalInt.of(blobColumn.getSubtype());
+    }
+    
+    /**
+     * Find character set ID of a blob column.
+     *
+     * @param schemaName schema name
+     * @param tableName table name
+     * @param columnName column name
+     * @return character set ID if blob column is present
+     */
+    public static OptionalInt findBlobCharsetId(final String schemaName, final String tableName, final String columnName) {
+        FirebirdBlobColumn blobColumn = findBlobColumn(schemaName, tableName, columnName);
+        return null == blobColumn ? OptionalInt.empty() : OptionalInt.of(blobColumn.getCharsetId());
+    }
+    
+    private static FirebirdBlobColumn findBlobColumn(final String schemaName, final String tableName, final String columnName) {
         if (null == tableName || null == columnName) {
-            return OptionalInt.empty();
+            return null;
         }
-        Map<String, Integer> blobColumns = BLOB_COLUMNS.get(buildTableKey(schemaName, tableName));
-        if (null == blobColumns) {
-            return OptionalInt.empty();
-        }
-        Integer subtype = blobColumns.get(toKey(columnName));
-        return null == subtype ? OptionalInt.empty() : OptionalInt.of(subtype);
+        Map<String, FirebirdBlobColumn> blobColumns = BLOB_COLUMNS.get(buildTableKey(schemaName, tableName));
+        return null == blobColumns ? null : blobColumns.get(toKey(columnName));
     }
     
     private static String buildTableKey(final String schemaName, final String tableName) {

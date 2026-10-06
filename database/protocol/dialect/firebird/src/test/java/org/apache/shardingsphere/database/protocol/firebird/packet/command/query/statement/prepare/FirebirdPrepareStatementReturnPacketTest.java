@@ -87,7 +87,7 @@ class FirebirdPrepareStatementReturnPacketTest {
                                                           final String tableAlias, final String columnAlias, final String owner) {
         ShardingSphereColumn column = new ShardingSphereColumn("col", Types.INTEGER, false, false, false, true, false, true);
         ShardingSphereTable table = new ShardingSphereTable("tbl", Collections.singleton(column), Collections.emptyList(), Collections.emptyList());
-        return new FirebirdReturnColumnPacket(requestedItems, 1, table, column, tableAlias, columnAlias, owner, null, false, null);
+        return new FirebirdReturnColumnPacket(requestedItems, 1, table, column, tableAlias, columnAlias, owner, null, false, null, 0);
     }
     
     private static Stream<Arguments> assertWriteWithNullStringMetadataArguments() {

@@ -24,6 +24,7 @@ import org.apache.shardingsphere.database.connector.core.metadata.data.model.Sch
 import org.apache.shardingsphere.database.connector.core.metadata.data.model.TableMetaData;
 import org.apache.shardingsphere.database.connector.core.spi.DatabaseTypedSPILoader;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobColumn;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobInfoRegistry;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNonFixedLengthColumnSizeRegistry;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
@@ -60,8 +61,8 @@ class FirebirdMetaDataLoaderTest {
         TableMetaData tableMetaData = new TableMetaData("TEST_TABLE", Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
         Map<String, Integer> tableSizes = Collections.singletonMap("COLUMN", 16);
         Map<String, Map<String, Integer>> allSizes = Collections.singletonMap("TEST_TABLE", tableSizes);
-        Map<String, Integer> tableBlobColumns = Collections.singletonMap("BLOB_COL", 1);
-        Map<String, Map<String, Integer>> allBlobColumns = Collections.singletonMap("TEST_TABLE", tableBlobColumns);
+        Map<String, FirebirdBlobColumn> tableBlobColumns = Collections.singletonMap("BLOB_COL", new FirebirdBlobColumn(1, 4));
+        Map<String, Map<String, FirebirdBlobColumn>> allBlobColumns = Collections.singletonMap("TEST_TABLE", tableBlobColumns);
         try (
                 MockedStatic<TableMetaDataLoader> tableLoaderMocked = mockStatic(TableMetaDataLoader.class);
                 MockedStatic<FirebirdNonFixedLengthColumnSizeRegistry> sizeRegistryMocked = mockStatic(FirebirdNonFixedLengthColumnSizeRegistry.class);
