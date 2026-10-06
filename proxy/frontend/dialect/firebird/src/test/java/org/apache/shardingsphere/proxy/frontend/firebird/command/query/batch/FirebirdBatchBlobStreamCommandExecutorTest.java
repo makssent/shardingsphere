@@ -125,7 +125,7 @@ class FirebirdBatchBlobStreamCommandExecutorTest {
     }
     
     private FirebirdBatchStatement registerBatchStatement(final long bufferSize) {
-        FirebirdBatchStatement result = new FirebirdBatchStatement(STATEMENT_ID, Collections.emptyList(), bufferSize, false, false, true);
+        FirebirdBatchStatement result = new FirebirdBatchStatement(STATEMENT_ID, Collections.emptyList(), 0, 0, bufferSize, false, false, true);
         FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, result);
         return result;
     }

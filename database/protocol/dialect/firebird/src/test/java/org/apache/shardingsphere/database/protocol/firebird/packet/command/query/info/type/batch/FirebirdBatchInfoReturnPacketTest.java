@@ -20,10 +20,14 @@ package org.apache.shardingsphere.database.protocol.firebird.packet.command.quer
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.FirebirdCommandPacketType;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchMessageCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStatement;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdParseBatchBlr;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.FirebirdInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.common.FirebirdCommonInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
+import org.firebirdsql.gds.BlrConstants;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -50,8 +54,8 @@ class FirebirdBatchInfoReturnPacketTest {
     
     @Test
     void assertWriteDataAndBlobsSize() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(7, Collections.emptyList(), 1024L, false, false, true);
-        batchStatement.addSize(32L);
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(7, Collections.emptyList(), 30, 32, 1024L, false, false, true);
+        batchStatement.addParameterValues(Collections.singletonList(1));
         batchStatement.appendBlobStream(Unpooled.buffer().writeLong(1L).writeInt(0).writeInt(0), 16L);
         List<FirebirdInfoPacketType> infoItems = Arrays.asList(FirebirdBatchInfoPacketType.DATA_BYTES_SIZE, FirebirdBatchInfoPacketType.BLOBS_BYTES_SIZE);
         assertThat(write(infoItems, batchStatement, 64), is("0b040020000000" + "0c040010000000" + "01"));
@@ -102,6 +106,20 @@ class FirebirdBatchInfoReturnPacketTest {
                 FirebirdBatchInfoPacketType.BLOB_ALIGNMENT,
                 FirebirdBatchInfoPacketType.BLOB_ALIGNMENT);
         assertThat(write(infoItems, new FirebirdBatchStatement(7), 64), is("03040015000014" + "03040015000014" + "0d040004000000" + "0d040004000000" + "01"));
+    }
+    
+    @Test
+    void assertWriteDataSizeOfDecodedMessages() {
+        ByteBuf blr = Unpooled.buffer().writeByte(BlrConstants.blr_version5).writeByte(BlrConstants.blr_begin).writeByte(BlrConstants.blr_message).writeByte(0)
+                .writeShortLE(2).writeByte(BlrConstants.blr_short).writeByte(0).writeByte(BlrConstants.blr_short).writeByte(0).writeByte(BlrConstants.blr_end).writeByte(BlrConstants.blr_eoc);
+        FirebirdParseBatchBlr messageFormat = FirebirdParseBatchBlr.parse(blr, blr.readableBytes());
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(7, messageFormat.getFields(), messageFormat.getMessageLength(), messageFormat.getAlignedMessageLength(),
+                1024L, false, false, false);
+        ByteBuf messages = Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_MSG.getValue()).writeInt(7).writeInt(2).writeInt(0).writeInt(1).writeInt(0).writeInt(2);
+        for (List<Object> each : new FirebirdBatchMessageCommandPacket(new FirebirdPacketPayload(messages, StandardCharsets.UTF_8)).readParameterValues(messageFormat.getFields())) {
+            batchStatement.addParameterValues(each);
+        }
+        assertThat(write(Collections.singletonList(FirebirdBatchInfoPacketType.DATA_BYTES_SIZE), batchStatement, 64), is("0b040008000000" + "01"));
     }
     
     private String write(final List<FirebirdInfoPacketType> infoItems, final FirebirdBatchStatement batchStatement, final int maxLength) {

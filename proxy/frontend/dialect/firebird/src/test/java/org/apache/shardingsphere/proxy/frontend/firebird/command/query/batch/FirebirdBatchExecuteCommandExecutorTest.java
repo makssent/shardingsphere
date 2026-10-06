@@ -906,7 +906,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     
     private FirebirdBatchStatement createStreamBlobBatchStatement(final ByteBuf blobStream) {
         FirebirdBatchColumnDescriptor columnDescriptor = createBlobColumnDescriptor(true);
-        FirebirdBatchStatement result = new FirebirdBatchStatement(STATEMENT_ID, Collections.singletonList(columnDescriptor), 1024L, false, false, true);
+        FirebirdBatchStatement result = new FirebirdBatchStatement(STATEMENT_ID, Collections.singletonList(columnDescriptor), 8, 8, 1024L, false, false, true);
         result.appendBlobStream(blobStream, 20L);
         return result;
     }

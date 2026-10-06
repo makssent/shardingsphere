@@ -62,7 +62,7 @@ class FirebirdBatchStatementTest {
     
     @Test
     void assertCreateWithRecordCounts() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 1024L, true, false, false);
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 6, 8, 1024L, true, false, false);
         assertTrue(batchStatement.isRecordCounts());
         assertFalse(batchStatement.isMultiError());
         assertThat(batchStatement.getBufferSize(), is(1024L));
@@ -70,7 +70,7 @@ class FirebirdBatchStatementTest {
     
     @Test
     void assertCreateWithMultiError() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 1024L, false, true, true);
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 6, 8, 1024L, false, true, true);
         assertTrue(batchStatement.isMultiError());
         assertFalse(batchStatement.isRecordCounts());
         assertTrue(batchStatement.isBlobStreamAllowed());
@@ -228,10 +228,17 @@ class FirebirdBatchStatementTest {
     }
     
     @Test
-    void assertReset() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(100, Collections.emptyList(), BUFFER_SIZE);
+    void assertGetDataSize() {
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 14, 16, 1024L, false, false, false);
         batchStatement.addParameterValues(Collections.singletonList("foo"));
-        batchStatement.addSize(10L);
+        batchStatement.addParameterValues(Collections.singletonList("bar"));
+        assertThat(batchStatement.getDataSize(), is(32L));
+    }
+    
+    @Test
+    void assertReset() {
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(100, Collections.emptyList(), 14, 16, BUFFER_SIZE, false, false, false);
+        batchStatement.addParameterValues(Collections.singletonList("foo"));
         batchStatement.getBlobIds().put(1L, 2L);
         batchStatement.getStreamBlobContents().put(3L, new byte[]{1});
         batchStatement.appendBlobStream(createBlobHeader(4L, 0, 0), 16L);
@@ -239,7 +246,7 @@ class FirebirdBatchStatementTest {
         otherBatchStatement.getBlobIds().put(1L, 3L);
         batchStatement.reset();
         assertTrue(batchStatement.getParameterValues().isEmpty());
-        assertThat(batchStatement.getAccumulatedSize(), is(0L));
+        assertThat(batchStatement.getDataSize(), is(0L));
         assertTrue(batchStatement.getBlobIds().isEmpty());
         assertTrue(batchStatement.getStreamBlobContents().isEmpty());
         assertTrue(batchStatement.getBlobBuffer().isEmpty());

@@ -110,7 +110,7 @@ public final class FirebirdBatchInfoReturnPacket extends FirebirdPacket {
             case BUFFER_BYTES_SIZE:
                 return (int) batchStatement.getBufferSize();
             case DATA_BYTES_SIZE:
-                return (int) batchStatement.getAccumulatedSize();
+                return (int) batchStatement.getDataSize();
             case BLOBS_BYTES_SIZE:
                 return (int) batchStatement.getBlobStreamSize();
             case BLOB_ALIGNMENT:

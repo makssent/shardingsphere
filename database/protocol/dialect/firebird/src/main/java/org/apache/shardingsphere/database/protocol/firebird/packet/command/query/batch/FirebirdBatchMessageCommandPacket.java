@@ -45,8 +45,6 @@ public final class FirebirdBatchMessageCommandPacket extends FirebirdCommandPack
     
     private final ByteBuf data;
     
-    private final int dataLength;
-    
     private final Charset charset;
     
     public FirebirdBatchMessageCommandPacket(final FirebirdPacketPayload payload) {
@@ -55,7 +53,6 @@ public final class FirebirdBatchMessageCommandPacket extends FirebirdCommandPack
         messageCount = payload.readInt4Unsigned();
         charset = payload.getCharset();
         data = payload.getByteBuf().readSlice(payload.getByteBuf().readableBytes());
-        dataLength = data.readableBytes();
     }
     
     /**

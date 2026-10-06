@@ -98,19 +98,24 @@ public final class FirebirdBatchStatementManager {
      * @param connectionId connection ID
      * @param statementId statement ID
      * @param columnDescriptors column descriptors
+     * @param messageLength message length
+     * @param alignedMessageLength aligned message length
      * @param bufferSize buffer size
      * @param recordCounts whether record counts are requested
      * @param multiError whether multiple errors are requested
      * @param blobStreamAllowed whether BLOB policy allows BLOB stream
      */
-    public void registerBatchStatement(final int connectionId, final int statementId, final List<FirebirdBatchColumnDescriptor> columnDescriptors,
-                                       final long bufferSize, final boolean recordCounts, final boolean multiError, final boolean blobStreamAllowed) {
+    public void registerBatchStatement(final int connectionId, final int statementId, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final int messageLength,
+                                       final int alignedMessageLength, final long bufferSize, final boolean recordCounts, final boolean multiError, final boolean blobStreamAllowed) {
         FirebirdBatchRegistry.getInstance().registerBatchStatement(connectionId, statementId,
-                new FirebirdBatchStatement(statementId, columnDescriptors, bufferSize, recordCounts, multiError, blobStreamAllowed));
+                new FirebirdBatchStatement(statementId, columnDescriptors, messageLength, alignedMessageLength, bufferSize, recordCounts, multiError, blobStreamAllowed));
     }
     
     /**
      * Append batch message.
+     *
+     * <p>Like Firebird, the batch buffer holds every stored message with the aligned message length, and the incoming messages take
+     * the aligned length each except the last one.</p>
      *
      * @param connectionId connection ID
      * @param packet batch message packet
@@ -120,13 +125,13 @@ public final class FirebirdBatchStatementManager {
     public void appendBatchMessage(final int connectionId, final FirebirdBatchMessageCommandPacket packet) {
         FirebirdBatchStatement batchStatement = getBatchStatement(connectionId, packet.getStatementHandle());
         ShardingSpherePreconditions.checkNotNull(batchStatement, () -> new InvalidBatchHandleException(packet.getStatementHandle()));
-        int dataLength = packet.getDataLength();
-        ShardingSpherePreconditions.checkState(batchStatement.getAccumulatedSize() + dataLength <= batchStatement.getBufferSize(),
-                () -> new BatchTooBigException(packet.getStatementHandle(), batchStatement.getAccumulatedSize(), dataLength, batchStatement.getBufferSize()));
+        long dataSize = batchStatement.getDataSize();
+        long messagesSize = (packet.getMessageCount() - 1L) * batchStatement.getAlignedMessageLength() + batchStatement.getMessageLength();
+        ShardingSpherePreconditions.checkState(dataSize + messagesSize <= batchStatement.getBufferSize(),
+                () -> new BatchTooBigException(packet.getStatementHandle(), dataSize, messagesSize, batchStatement.getBufferSize()));
         for (List<Object> each : packet.readParameterValues(batchStatement.getColumnDescriptors())) {
             batchStatement.addParameterValues(each);
         }
-        batchStatement.addSize(dataLength);
     }
     
     /**
