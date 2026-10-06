@@ -28,6 +28,8 @@ import org.apache.shardingsphere.database.exception.core.exception.syntax.databa
 import org.apache.shardingsphere.database.exception.core.exception.syntax.sql.DialectSQLParsingException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.table.TableExistsException;
 import org.apache.shardingsphere.database.exception.core.mapper.SQLDialectExceptionMapper;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException.StatusVectorEntry;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
@@ -43,12 +45,19 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.vendor.FirebirdVendorError;
 import org.apache.shardingsphere.infra.exception.external.sql.vendor.VendorError;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
+import org.firebirdsql.gds.ISCConstants;
 import org.junit.jupiter.api.Test;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.isA;
 import static org.mockito.Mockito.mock;
 
 class FirebirdDialectExceptionMapperTest {
@@ -105,7 +114,9 @@ class FirebirdDialectExceptionMapperTest {
     
     @Test
     void assertConvertWithInvalidBatchParameterVersion() {
-        assertSQLException(mapper.convert(new InvalidBatchParameterVersionException(2, 1)), FirebirdVendorError.INVALID_BATCH_PARAMETER_VERSION, 2, 1);
+        SQLException actual = mapper.convert(new InvalidBatchParameterVersionException(2, 1));
+        assertSQLException(actual, FirebirdVendorError.INVALID_BATCH_PARAMETER_VERSION, 2, 1);
+        assertStatusVector(actual, Collections.singletonList(Arrays.asList(ISCConstants.isc_batch_param_version, 2, 1)));
     }
     
     @Test
@@ -163,5 +174,18 @@ class FirebirdDialectExceptionMapperTest {
         assertThat(actual.getSQLState(), is(vendorError.getSqlState().getValue()));
         assertThat(actual.getErrorCode(), is(vendorError.getVendorCode()));
         assertThat(actual.getMessage(), is(String.format(vendorError.getReason(), messageArgs)));
+    }
+    
+    private void assertStatusVector(final SQLException actual, final List<List<?>> expectedStatusVector) {
+        assertThat(actual, isA(FirebirdException.class));
+        Collection<StatusVectorEntry> statusVector = ((FirebirdException) actual).getStatusVector();
+        List<List<Object>> actualStatusVector = new ArrayList<>(statusVector.size());
+        for (StatusVectorEntry each : statusVector) {
+            List<Object> entry = new ArrayList<>(each.getArguments().size() + 1);
+            entry.add(each.getGdsCode());
+            entry.addAll(each.getArguments());
+            actualStatusVector.add(entry);
+        }
+        assertThat(actualStatusVector, is(expectedStatusVector));
     }
 }

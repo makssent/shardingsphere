@@ -26,6 +26,8 @@ import org.apache.shardingsphere.database.exception.core.exception.syntax.databa
 import org.apache.shardingsphere.database.exception.core.exception.syntax.sql.DialectSQLParsingException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.table.TableExistsException;
 import org.apache.shardingsphere.database.exception.core.mapper.SQLDialectExceptionMapper;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException.StatusVectorEntry;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
@@ -43,6 +45,8 @@ import org.apache.shardingsphere.infra.exception.external.sql.vendor.VendorError
 import org.apache.shardingsphere.infra.exception.generic.UnknownSQLException;
 
 import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.Collections;
 
 /**
  * Firebird dialect exception mapper.
@@ -74,7 +78,7 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
         }
         if (sqlDialectException instanceof InvalidBatchParameterVersionException) {
             InvalidBatchParameterVersionException ex = (InvalidBatchParameterVersionException) sqlDialectException;
-            return toSQLException(FirebirdVendorError.INVALID_BATCH_PARAMETER_VERSION, ex.getVersion(), ex.getExpectedVersion());
+            return toFirebirdException(FirebirdVendorError.INVALID_BATCH_PARAMETER_VERSION, ex.getVersion(), ex.getExpectedVersion());
         }
         if (sqlDialectException instanceof BatchParametersRequiredException) {
             return toSQLException(FirebirdVendorError.BATCH_PARAMETERS_REQUIRED);
@@ -115,6 +119,11 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
     
     private SQLException toSQLException(final VendorError vendorError, final Object... messageArgs) {
         return new SQLException(String.format(vendorError.getReason(), messageArgs), vendorError.getSqlState().getValue(), vendorError.getVendorCode());
+    }
+    
+    private SQLException toFirebirdException(final VendorError vendorError, final Object... args) {
+        return new FirebirdException(String.format(vendorError.getReason(), args), vendorError.getSqlState().getValue(), vendorError.getVendorCode(),
+                Collections.singletonList(new StatusVectorEntry(vendorError.getVendorCode(), Arrays.asList(args))));
     }
     
     @Override
