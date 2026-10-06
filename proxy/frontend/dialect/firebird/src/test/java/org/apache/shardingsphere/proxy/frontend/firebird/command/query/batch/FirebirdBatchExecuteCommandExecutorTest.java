@@ -31,6 +31,7 @@ import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
+import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.simple.ParameterMarkerExpressionSegment;
 import org.firebirdsql.gds.BlrConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,7 +84,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     @Mock
     private FirebirdBatchStatement batchStatement;
     
-    @Mock
+    @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private FirebirdServerPreparedStatement preparedStatement;
     
     private int transactionId;
@@ -157,6 +158,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(createPacket.getBatchMessageLength()).thenReturn(6L);
         when(createPacket.getBatchParametersBuffer()).thenReturn(Unpooled.EMPTY_BUFFER);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(preparedStatement.getSqlStatementContext().getSqlStatement().getParameterMarkers()).thenReturn(Collections.singleton(new ParameterMarkerExpressionSegment(0, 0, 0)));
         FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
         try {
             new FirebirdBatchCreateCommandExecutor(createPacket, connectionSession).execute();

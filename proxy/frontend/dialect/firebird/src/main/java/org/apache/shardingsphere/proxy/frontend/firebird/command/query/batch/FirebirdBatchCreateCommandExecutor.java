@@ -26,12 +26,15 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchMessageFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.WrongParameterCountException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchCreateCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdParseBatchBlr;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
+import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 
 import java.sql.SQLException;
 import java.util.Collection;
@@ -71,7 +74,8 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
     public Collection<DatabasePacket> execute() throws SQLException {
         int connectionId = connectionSession.getConnectionId();
         int statementId = packet.getStatementHandle();
-        if (null == connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(statementId)) {
+        FirebirdServerPreparedStatement preparedStatement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(statementId);
+        if (null == preparedStatement) {
             throw new InvalidStatementHandleException(statementId);
         }
         if (null != FirebirdBatchStatementManager.getInstance().getBatchStatement(connectionId, statementId)) {
@@ -80,15 +84,16 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
         ByteBuf batchBlr = packet.getBatchBlr();
         int blrLength = batchBlr.readableBytes();
         FirebirdParseBatchBlr messageFormat = FirebirdParseBatchBlr.parse(batchBlr, blrLength);
-        if (messageFormat.getFields().isEmpty()) {
-            throw new BatchParametersRequiredException(statementId);
-        }
         if (packet.getBatchMessageLength() != messageFormat.getMessageLength()) {
             throw new InvalidBatchMessageFormatException(
                     String.format("invalid message length: computed %d from BLR but client sent %d", messageFormat.getMessageLength(), packet.getBatchMessageLength()));
         }
         ByteBuf batchParametersBuffer = packet.getBatchParametersBuffer();
         BatchParameters batchParameters = BatchParameters.parse(batchParametersBuffer);
+        int parameterCount = preparedStatement.getSqlStatementContext().getSqlStatement().getParameterMarkers().size();
+        ShardingSpherePreconditions.checkState(0 != parameterCount, () -> new BatchParametersRequiredException(statementId));
+        int fieldCount = messageFormat.getFields().size();
+        ShardingSpherePreconditions.checkState(parameterCount == fieldCount, () -> new WrongParameterCountException(parameterCount, fieldCount));
         FirebirdBatchStatementManager.getInstance().registerBatchStatement(
                 connectionId, statementId, messageFormat.getFields(), batchParameters.getBufferSize(), batchParameters.isRecordCounts(), batchParameters.isMultiError());
         return Collections.singleton(new FirebirdGenericResponsePacket().setHandle(statementId));

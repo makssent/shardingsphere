@@ -25,6 +25,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchMessageFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.WrongParameterCountException;
 import org.apache.shardingsphere.database.protocol.firebird.err.FirebirdErrorPacketFactory;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchCreateCommandPacket;
@@ -34,6 +35,8 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.generic.Fireb
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.simple.ParameterMarkerExpressionSegment;
+import org.apache.shardingsphere.sql.parser.statement.core.segment.generic.ParameterMarkerSegment;
 import org.firebirdsql.gds.BlrConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -43,6 +46,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Collection;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -87,7 +91,7 @@ class FirebirdBatchCreateCommandExecutorTest {
     @Mock
     private FirebirdBatchCreateCommandPacket packet;
     
-    @Mock
+    @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private FirebirdServerPreparedStatement preparedStatement;
     
     @AfterEach
@@ -103,6 +107,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         when(packet.getBatchBlr()).thenReturn(createBatchBlr());
         when(packet.getBatchMessageLength()).thenReturn(6L);
+        mockParameterMarkers(1);
         when(packet.getBatchParametersBuffer()).thenReturn(Unpooled.EMPTY_BUFFER);
         Collection<DatabasePacket> actual = new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute();
         assertThat(actual.size(), is(1));
@@ -129,6 +134,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         when(packet.getBatchBlr()).thenReturn(createBatchBlr());
         when(packet.getBatchMessageLength()).thenReturn(6L);
+        mockParameterMarkers(1);
         when(packet.getBatchParametersBuffer()).thenReturn(createBatchParametersBuffer(TAG_RECORD_COUNTS, 1));
         new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute();
         assertTrue(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID).isRecordCounts());
@@ -142,6 +148,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         when(packet.getBatchBlr()).thenReturn(createBatchBlr());
         when(packet.getBatchMessageLength()).thenReturn(6L);
+        mockParameterMarkers(1);
         when(packet.getBatchParametersBuffer()).thenReturn(createBatchParametersBuffer(TAG_MULTIERROR, 1));
         new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute();
         assertTrue(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID).isMultiError());
@@ -176,7 +183,38 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         when(packet.getBatchBlr()).thenReturn(createEmptyBatchBlr());
+        mockParameterMarkers(1);
+        WrongParameterCountException actual = assertThrows(WrongParameterCountException.class, () -> new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute());
+        assertThat(actual.getExpectedCount(), is(1));
+        assertThat(actual.getActualCount(), is(0));
+    }
+    
+    @Test
+    void assertExecuteWithoutStatementParameters() {
+        FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
+        when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(packet.getBatchBlr()).thenReturn(createBatchBlr());
+        when(packet.getBatchMessageLength()).thenReturn(6L);
+        mockParameterMarkers(0);
         assertThrows(BatchParametersRequiredException.class, () -> new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute());
+        assertNull(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID));
+    }
+    
+    @Test
+    void assertExecuteWhenParameterCountMismatched() {
+        FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
+        when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(packet.getBatchBlr()).thenReturn(createBatchBlr());
+        when(packet.getBatchMessageLength()).thenReturn(6L);
+        mockParameterMarkers(2);
+        WrongParameterCountException actual = assertThrows(WrongParameterCountException.class, () -> new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute());
+        assertThat(actual.getExpectedCount(), is(2));
+        assertThat(actual.getActualCount(), is(1));
+        assertNull(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID));
     }
     
     @Test
@@ -296,6 +334,14 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertThat(actual.getVersion(), is(BATCH_VERSION_1));
         assertThat(actual.getBufferSize(), is(DEFAULT_BUFFER_SIZE));
         assertFalse(actual.isRecordCounts());
+    }
+    
+    private void mockParameterMarkers(final int count) {
+        Collection<ParameterMarkerSegment> parameterMarkers = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            parameterMarkers.add(new ParameterMarkerExpressionSegment(0, 0, i));
+        }
+        when(preparedStatement.getSqlStatementContext().getSqlStatement().getParameterMarkers()).thenReturn(parameterMarkers);
     }
     
     private ByteBuf createBatchBlr() {

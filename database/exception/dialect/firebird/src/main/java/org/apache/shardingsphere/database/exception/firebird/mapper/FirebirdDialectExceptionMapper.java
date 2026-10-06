@@ -26,6 +26,8 @@ import org.apache.shardingsphere.database.exception.core.exception.syntax.databa
 import org.apache.shardingsphere.database.exception.core.exception.syntax.sql.DialectSQLParsingException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.table.TableExistsException;
 import org.apache.shardingsphere.database.exception.core.mapper.SQLDialectExceptionMapper;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException.StatusVectorEntry;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
@@ -38,16 +40,24 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.WrongParameterCountException;
 import org.apache.shardingsphere.database.exception.firebird.vendor.FirebirdVendorError;
 import org.apache.shardingsphere.infra.exception.external.sql.vendor.VendorError;
 import org.apache.shardingsphere.infra.exception.generic.UnknownSQLException;
+import org.firebirdsql.gds.ISCConstants;
 
 import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.Collections;
 
 /**
  * Firebird dialect exception mapper.
  */
 public final class FirebirdDialectExceptionMapper implements SQLDialectExceptionMapper {
+    
+    private static final StatusVectorEntry DYNAMIC_SQL_ERROR = new StatusVectorEntry(ISCConstants.isc_dsql_error, Collections.emptyList());
+    
+    private static final StatusVectorEntry BATCH_STATEMENT_SQL_ERROR_CODE = new StatusVectorEntry(ISCConstants.isc_sqlerr, Collections.singletonList(-901));
     
     @Override
     public SQLException convert(final SQLDialectException sqlDialectException) {
@@ -77,7 +87,11 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
             return toSQLException(FirebirdVendorError.INVALID_BATCH_PARAMETER_VERSION, ex.getVersion(), ex.getExpectedVersion());
         }
         if (sqlDialectException instanceof BatchParametersRequiredException) {
-            return toSQLException(FirebirdVendorError.BATCH_PARAMETERS_REQUIRED);
+            return toBatchStatementException(FirebirdVendorError.BATCH_PARAMETERS_REQUIRED);
+        }
+        if (sqlDialectException instanceof WrongParameterCountException) {
+            WrongParameterCountException ex = (WrongParameterCountException) sqlDialectException;
+            return toWrongParameterCountException(ex.getExpectedCount(), ex.getActualCount());
         }
         if (sqlDialectException instanceof InvalidBatchMessageFormatException) {
             return toSQLException(FirebirdVendorError.SQLDA_ERROR);
@@ -115,6 +129,18 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
     
     private SQLException toSQLException(final VendorError vendorError, final Object... messageArgs) {
         return new SQLException(String.format(vendorError.getReason(), messageArgs), vendorError.getSqlState().getValue(), vendorError.getVendorCode());
+    }
+    
+    private SQLException toBatchStatementException(final VendorError vendorError) {
+        return new FirebirdException(vendorError.getReason(), vendorError.getSqlState().getValue(), vendorError.getVendorCode(),
+                Arrays.asList(DYNAMIC_SQL_ERROR, BATCH_STATEMENT_SQL_ERROR_CODE, new StatusVectorEntry(vendorError.getVendorCode(), Collections.emptyList())));
+    }
+    
+    private SQLException toWrongParameterCountException(final int expectedCount, final int actualCount) {
+        FirebirdVendorError vendorError = FirebirdVendorError.WRONG_PARAMETER_COUNT;
+        return new FirebirdException(String.format(vendorError.getReason(), expectedCount, actualCount), vendorError.getSqlState().getValue(), vendorError.getVendorCode(),
+                Arrays.asList(DYNAMIC_SQL_ERROR, new StatusVectorEntry(ISCConstants.isc_dsql_sqlda_err, Collections.emptyList()),
+                        new StatusVectorEntry(vendorError.getVendorCode(), Arrays.<Object>asList(expectedCount, actualCount))));
     }
     
     @Override
