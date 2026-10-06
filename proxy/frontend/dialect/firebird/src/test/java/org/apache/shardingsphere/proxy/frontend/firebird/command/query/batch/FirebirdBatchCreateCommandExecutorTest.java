@@ -24,6 +24,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchMessageFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchStatementTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
 import org.apache.shardingsphere.database.protocol.firebird.err.FirebirdErrorPacketFactory;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
@@ -34,16 +35,30 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.generic.Fireb
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.ReturningSegment;
+import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.subquery.SubquerySegment;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.ddl.ExecuteStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.DeleteStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.InsertStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.MergeStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.SelectStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.UpdateStatement;
 import org.firebirdsql.gds.BlrConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.sql.SQLException;
 import java.util.Collection;
+import java.util.Optional;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -54,6 +69,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -87,7 +103,7 @@ class FirebirdBatchCreateCommandExecutorTest {
     @Mock
     private FirebirdBatchCreateCommandPacket packet;
     
-    @Mock
+    @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private FirebirdServerPreparedStatement preparedStatement;
     
     @AfterEach
@@ -101,6 +117,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(mock(InsertStatement.class));
         when(packet.getBatchBlr()).thenReturn(createBatchBlr());
         when(packet.getBatchMessageLength()).thenReturn(6L);
         when(packet.getBatchParametersBuffer()).thenReturn(Unpooled.EMPTY_BUFFER);
@@ -127,6 +144,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(mock(InsertStatement.class));
         when(packet.getBatchBlr()).thenReturn(createBatchBlr());
         when(packet.getBatchMessageLength()).thenReturn(6L);
         when(packet.getBatchParametersBuffer()).thenReturn(createBatchParametersBuffer(TAG_RECORD_COUNTS, 1));
@@ -140,6 +158,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(mock(InsertStatement.class));
         when(packet.getBatchBlr()).thenReturn(createBatchBlr());
         when(packet.getBatchMessageLength()).thenReturn(6L);
         when(packet.getBatchParametersBuffer()).thenReturn(createBatchParametersBuffer(TAG_MULTIERROR, 1));
@@ -175,8 +194,60 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(mock(InsertStatement.class));
         when(packet.getBatchBlr()).thenReturn(createEmptyBatchBlr());
         assertThrows(BatchParametersRequiredException.class, () -> new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute());
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("batchStatementCases")
+    void assertExecuteWithBatchStatement(final String name, final SQLStatement sqlStatement) throws SQLException {
+        FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
+        when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(sqlStatement);
+        when(packet.getBatchBlr()).thenReturn(createBatchBlr());
+        when(packet.getBatchMessageLength()).thenReturn(6L);
+        new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute();
+        assertNotNull(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("nonBatchStatementCases")
+    void assertExecuteWithNonBatchStatement(final String name, final SQLStatement sqlStatement) {
+        FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
+        when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(sqlStatement);
+        when(packet.getBatchBlr()).thenReturn(createBatchBlr());
+        when(packet.getBatchMessageLength()).thenReturn(6L);
+        assertThrows(InvalidBatchStatementTypeException.class, () -> new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute());
+        assertNull(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID));
+    }
+    
+    @Test
+    void assertExecuteWithNonBatchStatementAndBatchBlrWithoutFields() {
+        FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
+        when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(mock(SelectStatement.class));
+        when(packet.getBatchBlr()).thenReturn(createEmptyBatchBlr());
+        assertThrows(InvalidBatchStatementTypeException.class, () -> new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute());
+    }
+    
+    @Test
+    void assertExecuteWithNonBatchStatementAndInvalidBatchParametersVersion() {
+        FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
+        when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(packet.getBatchBlr()).thenReturn(createBatchBlr());
+        when(packet.getBatchMessageLength()).thenReturn(6L);
+        when(packet.getBatchParametersBuffer()).thenReturn(Unpooled.wrappedBuffer(new byte[]{2}));
+        assertThrows(InvalidBatchParameterVersionException.class, () -> new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute());
     }
     
     @Test
@@ -296,6 +367,37 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertThat(actual.getVersion(), is(BATCH_VERSION_1));
         assertThat(actual.getBufferSize(), is(DEFAULT_BUFFER_SIZE));
         assertFalse(actual.isRecordCounts());
+    }
+    
+    private static Stream<Arguments> batchStatementCases() {
+        InsertStatement insertWithReturning = mock(InsertStatement.class);
+        when(insertWithReturning.getReturning()).thenReturn(Optional.of(mock(ReturningSegment.class)));
+        return Stream.of(
+                Arguments.of("insert", mock(InsertStatement.class)),
+                Arguments.of("insert values with returning", insertWithReturning),
+                Arguments.of("update", mock(UpdateStatement.class)),
+                Arguments.of("delete", mock(DeleteStatement.class)),
+                Arguments.of("merge", mock(MergeStatement.class)),
+                Arguments.of("execute procedure", mock(ExecuteStatement.class)));
+    }
+    
+    private static Stream<Arguments> nonBatchStatementCases() {
+        InsertStatement insertSelectWithReturning = mock(InsertStatement.class);
+        when(insertSelectWithReturning.getReturning()).thenReturn(Optional.of(mock(ReturningSegment.class)));
+        when(insertSelectWithReturning.getInsertSelect()).thenReturn(Optional.of(mock(SubquerySegment.class)));
+        UpdateStatement updateWithReturning = mock(UpdateStatement.class);
+        when(updateWithReturning.getReturning()).thenReturn(Optional.of(mock(ReturningSegment.class)));
+        DeleteStatement deleteWithReturning = mock(DeleteStatement.class);
+        when(deleteWithReturning.getReturning()).thenReturn(Optional.of(mock(ReturningSegment.class)));
+        MergeStatement mergeWithReturning = mock(MergeStatement.class);
+        when(mergeWithReturning.getReturning()).thenReturn(Optional.of(mock(ReturningSegment.class)));
+        return Stream.of(
+                Arguments.of("select", mock(SelectStatement.class)),
+                Arguments.of("insert select with returning", insertSelectWithReturning),
+                Arguments.of("update with returning", updateWithReturning),
+                Arguments.of("delete with returning", deleteWithReturning),
+                Arguments.of("merge with returning", mergeWithReturning),
+                Arguments.of("other statement", mock(SQLStatement.class)));
     }
     
     private ByteBuf createBatchBlr() {
