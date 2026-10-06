@@ -42,7 +42,7 @@ class FirebirdBatchStatementTest {
     
     @Test
     void assertCreateWithRecordCounts() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 1024L, true, false);
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 6, 8, 1024L, true, false);
         assertTrue(batchStatement.isRecordCounts());
         assertFalse(batchStatement.isMultiError());
         assertThat(batchStatement.getBufferSize(), is(1024L));
@@ -50,18 +50,25 @@ class FirebirdBatchStatementTest {
     
     @Test
     void assertCreateWithMultiError() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 1024L, false, true);
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 6, 8, 1024L, false, true);
         assertTrue(batchStatement.isMultiError());
         assertFalse(batchStatement.isRecordCounts());
     }
     
     @Test
-    void assertReset() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(100);
+    void assertGetDataSize() {
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 14, 16, 1024L, false, false);
         batchStatement.addParameterValues(Collections.singletonList("foo"));
-        batchStatement.addSize(10L);
+        batchStatement.addParameterValues(Collections.singletonList("bar"));
+        assertThat(batchStatement.getDataSize(), is(32L));
+    }
+    
+    @Test
+    void assertReset() {
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(100, Collections.emptyList(), 14, 16, 1024L, false, false);
+        batchStatement.addParameterValues(Collections.singletonList("foo"));
         batchStatement.reset();
         assertTrue(batchStatement.getParameterValues().isEmpty());
-        assertThat(batchStatement.getAccumulatedSize(), is(0L));
+        assertThat(batchStatement.getDataSize(), is(0L));
     }
 }

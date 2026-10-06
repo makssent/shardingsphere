@@ -52,6 +52,17 @@ class FirebirdParseBatchBlrTest {
         assertDescriptor(actual.getFields().get(3), FirebirdBinaryColumnType.BOOLEAN, 1, 0, 26);
         assertThat(actual.getMessageLength(), is(30));
         assertThat(actual.getNetLength(), is(28));
+        assertThat(actual.getAlignedMessageLength(), is(32));
+    }
+    
+    @Test
+    void assertParseInt128AfterShortField() {
+        ByteBuf blr = createBlr(BlrConstants.blr_version5,
+                new byte[]{(byte) BlrConstants.blr_short, 0, (byte) BlrConstants.blr_short, 0, (byte) BlrConstants.blr_int128, 0, (byte) BlrConstants.blr_short, 0}, 4);
+        FirebirdParseBatchBlr actual = FirebirdParseBatchBlr.parse(blr, blr.readableBytes());
+        assertDescriptor(actual.getFields().get(1), FirebirdBinaryColumnType.INT128, 16, 0, 8);
+        assertThat(actual.getMessageLength(), is(26));
+        assertThat(actual.getAlignedMessageLength(), is(32));
     }
     
     @ParameterizedTest(name = "{0}")
@@ -73,6 +84,7 @@ class FirebirdParseBatchBlrTest {
         assertThat(actual.getFields().size(), is(0));
         assertThat(actual.getMessageLength(), is(0));
         assertThat(actual.getNetLength(), is(0));
+        assertThat(actual.getAlignedMessageLength(), is(0));
     }
     
     @ParameterizedTest(name = "{0}")

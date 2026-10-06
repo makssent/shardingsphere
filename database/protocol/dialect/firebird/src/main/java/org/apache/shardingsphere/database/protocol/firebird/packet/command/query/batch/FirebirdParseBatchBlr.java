@@ -43,6 +43,8 @@ public final class FirebirdParseBatchBlr {
     
     private final int netLength;
     
+    private final int alignedMessageLength;
+    
     /**
      * Parse a BLR message buffer into its message format and validate that every field is supported.
      *
@@ -124,9 +126,11 @@ public final class FirebirdParseBatchBlr {
         List<FirebirdBatchColumnDescriptor> fields = new ArrayList<>(columnCount);
         int offset = 0;
         int netLength = 0;
+        int alignment = Short.BYTES;
         for (int i = 0; i < columnCount; i++) {
             int blrType = buffer.readUnsignedByte();
             FirebirdBatchColumnDescriptor descriptor = readDescriptor(buffer, blrType);
+            alignment = Math.max(alignment, alignmentOf(blrType));
             offset = alignTo(offset, alignmentOf(blrType));
             final int fieldOffset = offset;
             offset += descriptor.getLength();
@@ -136,7 +140,7 @@ public final class FirebirdParseBatchBlr {
             offset = appendNullIndicator(buffer, offset);
             fields.add(new FirebirdBatchColumnDescriptor(descriptor.getType(), descriptor.getLength(), descriptor.getScale(), fieldOffset));
         }
-        return new FirebirdParseBatchBlr(fields, offset, netLength);
+        return new FirebirdParseBatchBlr(fields, offset, netLength, alignTo(offset, alignment));
     }
     
     private static int appendNullIndicator(final ByteBuf buffer, final int offset) {
@@ -208,7 +212,7 @@ public final class FirebirdParseBatchBlr {
         if (BlrConstants.blr_varying == blrType || BlrConstants.blr_varying2 == blrType || BlrConstants.blr_short == blrType) {
             return Short.BYTES;
         }
-        if (BlrConstants.blr_int64 == blrType || BlrConstants.blr_double == blrType || BlrConstants.blr_d_float == blrType) {
+        if (BlrConstants.blr_int64 == blrType || BlrConstants.blr_int128 == blrType || BlrConstants.blr_double == blrType || BlrConstants.blr_d_float == blrType) {
             return Long.BYTES;
         }
         return Integer.BYTES;

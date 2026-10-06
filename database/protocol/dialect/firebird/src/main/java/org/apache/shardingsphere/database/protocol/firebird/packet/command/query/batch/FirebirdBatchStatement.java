@@ -35,6 +35,10 @@ public final class FirebirdBatchStatement {
     
     private final List<FirebirdBatchColumnDescriptor> columnDescriptors;
     
+    private final int messageLength;
+    
+    private final int alignedMessageLength;
+    
     private final long bufferSize;
     
     private final boolean recordCounts;
@@ -43,14 +47,12 @@ public final class FirebirdBatchStatement {
     
     private final List<List<Object>> parameterValues = new ArrayList<>();
     
-    private long accumulatedSize;
-    
     public FirebirdBatchStatement(final int statementHandle) {
-        this(statementHandle, Collections.emptyList(), 0L, false, false);
+        this(statementHandle, Collections.emptyList(), 0, 0, 0L, false, false);
     }
     
     public FirebirdBatchStatement(final int statementHandle, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final long bufferSize) {
-        this(statementHandle, columnDescriptors, bufferSize, false, false);
+        this(statementHandle, columnDescriptors, 0, 0, bufferSize, false, false);
     }
     
     /**
@@ -62,11 +64,12 @@ public final class FirebirdBatchStatement {
     }
     
     /**
-     * Add accumulated batch message size in bytes.
-     * @param size size in bytes to add
+     * Get size of the batch messages in the batch buffer: every stored message takes the aligned message length.
+     *
+     * @return size in bytes
      */
-    public void addSize(final long size) {
-        accumulatedSize += size;
+    public long getDataSize() {
+        return (long) parameterValues.size() * alignedMessageLength;
     }
     
     /**
@@ -74,6 +77,5 @@ public final class FirebirdBatchStatement {
      */
     public void reset() {
         parameterValues.clear();
-        accumulatedSize = 0;
     }
 }

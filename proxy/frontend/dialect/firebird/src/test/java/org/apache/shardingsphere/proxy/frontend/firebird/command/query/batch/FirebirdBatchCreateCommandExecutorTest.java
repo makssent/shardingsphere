@@ -119,6 +119,8 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertThat(actualBatchStatement.getColumnDescriptors().get(0).getLength(), is(4));
         assertThat(actualBatchStatement.getColumnDescriptors().get(0).getScale(), is(0));
         assertThat(actualBatchStatement.getColumnDescriptors().get(0).getOffset(), is(0));
+        assertThat(actualBatchStatement.getMessageLength(), is(6));
+        assertThat(actualBatchStatement.getAlignedMessageLength(), is(6));
     }
     
     @Test

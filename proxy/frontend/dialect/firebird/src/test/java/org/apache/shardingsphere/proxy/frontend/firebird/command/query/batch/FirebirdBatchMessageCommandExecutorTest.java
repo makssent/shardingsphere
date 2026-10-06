@@ -98,7 +98,8 @@ class FirebirdBatchMessageCommandExecutorTest {
     void assertExecute() throws SQLException {
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
-        when(packet.getDataLength()).thenReturn(8);
+        when(packet.getMessageCount()).thenReturn(1L);
+        when(batchStatement.getMessageLength()).thenReturn(8);
         when(batchStatement.getBufferSize()).thenReturn(16L);
         when(packet.readParameterValues(any())).thenReturn(Collections.singletonList(Collections.singletonList("foo")));
         when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
@@ -108,7 +109,6 @@ class FirebirdBatchMessageCommandExecutorTest {
             assertThat(actual.size(), is(1));
             assertThat(actual.iterator().next(), isA(FirebirdGenericResponsePacket.class));
             verify(batchStatement).addParameterValues(Collections.singletonList("foo"));
-            verify(batchStatement).addSize(8);
         }
     }
     
@@ -127,14 +127,15 @@ class FirebirdBatchMessageCommandExecutorTest {
     void assertExecuteWhenBatchTooBig() {
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
-        when(packet.getDataLength()).thenReturn(9);
-        when(batchStatement.getAccumulatedSize()).thenReturn(8L);
+        when(packet.getMessageCount()).thenReturn(1L);
+        when(batchStatement.getDataSize()).thenReturn(8L);
+        when(batchStatement.getMessageLength()).thenReturn(9);
         when(batchStatement.getBufferSize()).thenReturn(16L);
         when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
         try (MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class)) {
             mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
             assertThrows(BatchTooBigException.class, () -> new FirebirdBatchMessageCommandExecutor(packet, connectionSession).execute());
-            verify(batchStatement, never()).addSize(9);
+            verify(packet, never()).readParameterValues(any());
             verify(batchStatement, never()).reset();
         }
     }
@@ -147,7 +148,7 @@ class FirebirdBatchMessageCommandExecutorTest {
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(STATEMENT_ID,
-                Collections.singletonList(new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.LONG, Integer.BYTES, 0, 0)), 8L);
+                Collections.singletonList(new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.LONG, Integer.BYTES, 0, 0)), 6, 8, 8L, false, false);
         FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         try {
             List<Object> out = new LinkedList<>();
@@ -156,10 +157,10 @@ class FirebirdBatchMessageCommandExecutorTest {
             new FirebirdBatchMessageCommandExecutor(createBatchSendMessagePacket((ByteBuf) out.get(0)), connectionSession).execute();
             assertThat(batchStatement.getParameterValues().size(), is(1));
             assertThat(batchStatement.getParameterValues().get(0), is(Collections.singletonList(100)));
-            assertThat(batchStatement.getAccumulatedSize(), is(8L));
+            assertThat(batchStatement.getDataSize(), is(8L));
             assertThrows(BatchTooBigException.class, () -> new FirebirdBatchMessageCommandExecutor(createBatchSendMessagePacket((ByteBuf) out.get(1)), connectionSession).execute());
             assertThat(batchStatement.getParameterValues(), is(Collections.singletonList(Collections.singletonList(100))));
-            assertThat(batchStatement.getAccumulatedSize(), is(8L));
+            assertThat(batchStatement.getDataSize(), is(8L));
             assertExecuteExecutesAcceptedMessages(batchStatement);
         } finally {
             FirebirdBatchRegistry.getInstance().unregisterConnection(CONNECTION_ID);
@@ -184,7 +185,7 @@ class FirebirdBatchMessageCommandExecutorTest {
         }
         assertThat(executedParameterValues, is(Collections.singletonList(Collections.singletonList(Collections.singletonList(100)))));
         assertTrue(batchStatement.getParameterValues().isEmpty());
-        assertThat(batchStatement.getAccumulatedSize(), is(0L));
+        assertThat(batchStatement.getDataSize(), is(0L));
     }
     
     private FirebirdBatchMessageCommandPacket createBatchSendMessagePacket(final ByteBuf byteBuf) {

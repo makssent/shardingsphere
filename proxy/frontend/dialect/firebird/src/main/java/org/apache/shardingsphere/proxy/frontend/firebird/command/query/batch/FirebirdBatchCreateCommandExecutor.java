@@ -89,8 +89,8 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
         }
         ByteBuf batchParametersBuffer = packet.getBatchParametersBuffer();
         BatchParameters batchParameters = BatchParameters.parse(batchParametersBuffer);
-        FirebirdBatchStatementManager.getInstance().registerBatchStatement(
-                connectionId, statementId, messageFormat.getFields(), batchParameters.getBufferSize(), batchParameters.isRecordCounts(), batchParameters.isMultiError());
+        FirebirdBatchStatementManager.getInstance().registerBatchStatement(connectionId, statementId, messageFormat.getFields(), messageFormat.getMessageLength(),
+                messageFormat.getAlignedMessageLength(), batchParameters.getBufferSize(), batchParameters.isRecordCounts(), batchParameters.isMultiError());
         return Collections.singleton(new FirebirdGenericResponsePacket().setHandle(statementId));
     }
     

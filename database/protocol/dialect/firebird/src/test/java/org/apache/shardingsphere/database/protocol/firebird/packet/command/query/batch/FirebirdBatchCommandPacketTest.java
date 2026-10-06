@@ -85,8 +85,7 @@ class FirebirdBatchCommandPacketTest {
     @Test
     void assertBatchSendMessageGetLengthIgnoresBatchBufferSize() {
         FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(STATEMENT_ID, Collections.singletonList(longDescriptor()), 8L);
-        batchStatement.addSize(1L);
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(STATEMENT_ID, Collections.singletonList(longDescriptor()), 6, 8, 4L, false, false);
         FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         try {
             assertThat(FirebirdBatchMessageCommandPacket.getLength(createBatchMessagePayload(), CONNECTION_ID), is(20));

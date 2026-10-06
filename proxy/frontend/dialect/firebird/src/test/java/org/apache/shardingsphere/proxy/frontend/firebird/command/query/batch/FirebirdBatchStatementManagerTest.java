@@ -67,61 +67,71 @@ class FirebirdBatchStatementManagerTest {
     
     @Test
     void assertRegisterBatchStatement() {
-        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 16L, true, true);
+        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 6, 8, 16L, true, true);
         FirebirdBatchStatement actual = manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID);
         assertThat(actual.getStatementHandle(), is(STATEMENT_ID));
         assertThat(actual.getBufferSize(), is(16L));
         assertTrue(actual.isRecordCounts());
         assertTrue(actual.isMultiError());
+        assertThat(actual.getMessageLength(), is(6));
+        assertThat(actual.getAlignedMessageLength(), is(8));
     }
     
     @Test
     void assertAppendBatchMessage() {
-        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 8L, false, false);
+        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 6, 8, 16L, false, false);
         List<List<Object>> expectedParameterValues = Arrays.asList(Collections.singletonList("foo_value"), Collections.singletonList("bar_value"));
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
-        when(packet.getDataLength()).thenReturn(4);
+        when(packet.getMessageCount()).thenReturn(2L);
         when(packet.readParameterValues(Collections.emptyList())).thenReturn(expectedParameterValues);
         manager.appendBatchMessage(CONNECTION_ID, packet);
         FirebirdBatchStatement actual = manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID);
         assertThat(actual.getParameterValues(), is(expectedParameterValues));
-        assertThat(actual.getAccumulatedSize(), is(4L));
+        assertThat(actual.getDataSize(), is(16L));
+    }
+    
+    @Test
+    void assertAppendBatchMessageWithLastMessageUnaligned() {
+        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 6, 8, 14L, false, false);
+        manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID).addParameterValues(Collections.singletonList("foo_value"));
+        when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
+        when(packet.getMessageCount()).thenReturn(1L);
+        when(packet.readParameterValues(Collections.emptyList())).thenReturn(Collections.singletonList(Collections.singletonList("bar_value")));
+        manager.appendBatchMessage(CONNECTION_ID, packet);
+        assertThat(manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID).getParameterValues().size(), is(2));
     }
     
     @Test
     void assertAppendBatchMessageWhenBatchNotFound() {
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         assertThrows(InvalidBatchHandleException.class, () -> manager.appendBatchMessage(CONNECTION_ID, packet));
-        verify(packet, never()).getDataLength();
         verify(packet, never()).readParameterValues(anyList());
     }
     
     @Test
     void assertAppendBatchMessageWhenBufferSizeExceeded() {
-        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 8L, false, false);
+        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 6, 8, 13L, false, false);
+        manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID).addParameterValues(Collections.singletonList("foo_value"));
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
-        when(packet.getDataLength()).thenReturn(9);
+        when(packet.getMessageCount()).thenReturn(1L);
         assertThrows(BatchTooBigException.class, () -> manager.appendBatchMessage(CONNECTION_ID, packet));
         verify(packet, never()).readParameterValues(anyList());
-        FirebirdBatchStatement actual = manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID);
-        assertThat(actual.getParameterValues(), is(Collections.emptyList()));
-        assertThat(actual.getAccumulatedSize(), is(0L));
+        assertThat(manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID).getParameterValues().size(), is(1));
     }
     
     @Test
     void assertResetBatchStatement() {
-        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 8L, false, false);
+        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 6, 8, 8L, false, false);
         FirebirdBatchStatement batchStatement = manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID);
         batchStatement.addParameterValues(Collections.singletonList("foo_value"));
-        batchStatement.addSize(4L);
         manager.resetBatchStatement(batchStatement);
         assertThat(batchStatement.getParameterValues(), is(Collections.emptyList()));
-        assertThat(batchStatement.getAccumulatedSize(), is(0L));
+        assertThat(batchStatement.getDataSize(), is(0L));
     }
     
     @Test
     void assertUnregisterBatchStatement() {
-        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 8L, false, false);
+        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 6, 8, 8L, false, false);
         manager.unregisterBatchStatement(CONNECTION_ID, STATEMENT_ID);
         assertNull(manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID));
     }
@@ -133,7 +143,7 @@ class FirebirdBatchStatementManagerTest {
     
     @Test
     void assertUnregisterConnection() {
-        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 8L, false, false);
+        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 6, 8, 8L, false, false);
         manager.unregisterConnection(CONNECTION_ID);
         assertNull(manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID));
     }

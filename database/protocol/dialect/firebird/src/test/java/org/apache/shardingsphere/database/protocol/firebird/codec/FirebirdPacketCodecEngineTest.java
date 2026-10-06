@@ -352,8 +352,7 @@ class FirebirdPacketCodecEngineTest {
     void assertDecodeBatchMessageOverBufferSizeIsStillFramedWithoutCodecError() {
         FirebirdBatchRegistry.getInstance().registerConnection(BATCH_CONNECTION_ID);
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(BATCH_STATEMENT_HANDLE,
-                Collections.singletonList(new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.LONG, Integer.BYTES, 0, 0)), 8L);
-        batchStatement.addSize(1L);
+                Collections.singletonList(new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.LONG, Integer.BYTES, 0, 0)), 6, 8, 4L, false, false);
         FirebirdBatchRegistry.getInstance().registerBatchStatement(BATCH_CONNECTION_ID, BATCH_STATEMENT_HANDLE, batchStatement);
         try {
             ByteBuf in = buildBatchMessage(BATCH_STATEMENT_HANDLE, 100);
