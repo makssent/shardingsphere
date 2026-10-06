@@ -40,6 +40,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.stream.Stream;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.mockStatic;
@@ -51,6 +53,12 @@ class FirebirdReturnColumnPacketTest {
     
     @Mock
     private FirebirdPacketPayload payload;
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("assertGetColumnTypeArguments")
+    void assertGetColumnType(final String name, final int dataType, final boolean blobColumn, final FirebirdBinaryColumnType expectedColumnType) {
+        assertThat(createPacket(Collections.emptyList(), dataType, null, blobColumn, null, 0).getColumnType(), is(expectedColumnType));
+    }
     
     @Test
     void assertWrite() {
@@ -111,6 +119,10 @@ class FirebirdReturnColumnPacketTest {
         ShardingSphereColumn column = new ShardingSphereColumn("col", dataType, false, false, false, true, false, true);
         ShardingSphereTable table = new ShardingSphereTable("tbl", Collections.singleton(column), Collections.emptyList(), Collections.emptyList());
         return new FirebirdReturnColumnPacket(requestedItems, 1, table, column, "t", "c", "o", columnLength, blobColumn, blobSubType, blobCharsetId);
+    }
+    
+    private static Stream<Arguments> assertGetColumnTypeArguments() {
+        return Stream.of(Arguments.of("jdbc_type", Types.VARCHAR, false, FirebirdBinaryColumnType.VARYING), Arguments.of("blob_column", Types.VARCHAR, true, FirebirdBinaryColumnType.BLOB));
     }
     
     private static Stream<Arguments> assertWriteLengthArguments() {
