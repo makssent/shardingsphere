@@ -91,7 +91,7 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
         BatchParameters batchParameters = BatchParameters.parse(batchParametersBuffer);
         FirebirdBatchStatementManager.getInstance().registerBatchStatement(
                 connectionId, statementId, messageFormat.getFields(), batchParameters.getBufferSize(), batchParameters.isRecordCounts(), batchParameters.isMultiError());
-        return Collections.singleton(new FirebirdGenericResponsePacket().setHandle(statementId));
+        return Collections.singleton(new FirebirdGenericResponsePacket());
     }
     
     @RequiredArgsConstructor

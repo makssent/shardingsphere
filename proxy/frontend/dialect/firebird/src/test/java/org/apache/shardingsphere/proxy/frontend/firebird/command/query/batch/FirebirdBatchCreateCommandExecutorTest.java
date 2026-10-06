@@ -108,7 +108,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertThat(actual.size(), is(1));
         DatabasePacket actualPacket = actual.iterator().next();
         assertThat(actualPacket, isA(FirebirdGenericResponsePacket.class));
-        assertThat(((FirebirdGenericResponsePacket) actualPacket).getHandle(), is(STATEMENT_ID));
+        assertThat(((FirebirdGenericResponsePacket) actualPacket).getHandle(), is(0));
         FirebirdBatchStatement actualBatchStatement = FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID);
         assertNotNull(actualBatchStatement);
         assertThat(actualBatchStatement.getStatementHandle(), is(STATEMENT_ID));
