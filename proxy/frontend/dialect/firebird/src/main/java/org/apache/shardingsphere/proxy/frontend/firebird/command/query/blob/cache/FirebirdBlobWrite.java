@@ -19,6 +19,9 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cac
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.TransliterationFailedException;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdBlobTransliterator;
 
 import java.io.ByteArrayOutputStream;
 
@@ -36,13 +39,18 @@ public final class FirebirdBlobWrite {
     @Getter
     private boolean closed;
     
+    @Setter
+    private FirebirdBlobTransliterator transliterator;
+    
     /**
      * Append a BLOB data segment.
      *
      * @param segment BLOB data segment bytes
+     * @throws TransliterationFailedException if the segment cannot be transliterated as the BLOB parameter buffer of the BLOB requires
      */
     public void append(final byte[] segment) {
-        buffer.write(segment, 0, segment.length);
+        byte[] data = null == transliterator ? segment : transliterator.put(segment);
+        buffer.write(data, 0, data.length);
     }
     
     public int getSize() {

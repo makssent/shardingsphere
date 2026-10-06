@@ -33,7 +33,7 @@ import java.util.Optional;
  * BLOB parameter buffer utility class for Firebird.
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
-public final class FirebirdBlobParameterBufferUtils {
+final class FirebirdBlobParameterBufferUtils {
     
     private static final int BPB_VERSION1 = 1;
     
@@ -71,7 +71,7 @@ public final class FirebirdBlobParameterBufferUtils {
      * @throws BlobFilterNotFoundException if Firebird has no BLOB filter for the sub type conversion
      * @throws UnsupportedBlobFilterException if Firebird converts the data with another BLOB filter or a character set without Java character set
      */
-    public static Optional<FirebirdBlobTransliterator> createTransliterator(final byte[] bpb, final int connectionCharsetId) {
+    static Optional<FirebirdBlobTransliterator> createTransliterator(final byte[] bpb, final int connectionCharsetId) {
         if (0 == bpb.length || BPB_VERSION1 != bpb[0]) {
             return Optional.empty();
         }

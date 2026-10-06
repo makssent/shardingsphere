@@ -20,6 +20,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
+import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdConstant;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdCloseBlobCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdCreateBlobCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdOpenBlobCommandPacket;
@@ -149,8 +150,10 @@ class FirebirdOpenBlobCommandExecutorTest {
     }
     
     private FirebirdGenericResponsePacket createBlobWithSegment(final byte[] segment) {
-        FirebirdGenericResponsePacket result = (FirebirdGenericResponsePacket) new FirebirdCreateBlobCommandExecutor(
-                mock(FirebirdCreateBlobCommandPacket.class), connectionSession).execute().iterator().next();
+        FirebirdCreateBlobCommandPacket createPacket = mock(FirebirdCreateBlobCommandPacket.class);
+        when(createPacket.getBlobParameterBuffer()).thenReturn(new byte[0]);
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
+        FirebirdGenericResponsePacket result = (FirebirdGenericResponsePacket) new FirebirdCreateBlobCommandExecutor(createPacket, connectionSession).execute().iterator().next();
         FirebirdPutBlobSegmentCommandPacket putPacket = mock(FirebirdPutBlobSegmentCommandPacket.class);
         when(putPacket.getBlobHandle()).thenReturn(result.getHandle());
         when(putPacket.getSegment()).thenReturn(segment);

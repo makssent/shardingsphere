@@ -75,11 +75,13 @@ public final class FirebirdBlobWriteCache {
      * @param connectionId connection id
      * @param blobHandle blob handle
      * @param blobId blob id
+     * @return registered BLOB write
      */
-    public void registerBlob(final int connectionId, final int blobHandle, final long blobId) {
-        FirebirdBlobWrite write = new FirebirdBlobWrite(blobHandle, blobId);
-        getHandleMap(connectionId).put(blobHandle, write);
-        getIdMap(connectionId).put(blobId, write);
+    public FirebirdBlobWrite registerBlob(final int connectionId, final int blobHandle, final long blobId) {
+        FirebirdBlobWrite result = new FirebirdBlobWrite(blobHandle, blobId);
+        getHandleMap(connectionId).put(blobHandle, result);
+        getIdMap(connectionId).put(blobId, result);
+        return result;
     }
     
     /**
