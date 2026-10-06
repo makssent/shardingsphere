@@ -72,7 +72,13 @@ public enum FirebirdVendorError implements VendorError {
     
     INVALID_SEGSTR_ID(XOpenSQLState.SYNTAX_ERROR, ISCConstants.isc_bad_segstr_id, "invalid BLOB ID"),
     
-    CANNOT_UPDATE_OLD_BLOB(XOpenSQLState.SYNTAX_ERROR, ISCConstants.isc_cannot_update_old_blob, "cannot update old BLOB");
+    CANNOT_UPDATE_OLD_BLOB(XOpenSQLState.SYNTAX_ERROR, ISCConstants.isc_cannot_update_old_blob, "cannot update old BLOB"),
+    
+    UNSUPPORTED_BLOB_FILTER(XOpenSQLState.FEATURE_NOT_SUPPORTED, ISCConstants.isc_wish_list, "feature is not supported; BLOB filter conversion requested by BLOB parameter buffer"),
+    
+    BLOB_FILTER_NOT_FOUND(XOpenSQLState.GENERAL_ERROR, ISCConstants.isc_nofilter, "filter not found to convert type %d to type %d"),
+    
+    TRANSLITERATION_FAILED(FirebirdState.TRANSLITERATION_FAILED, ISCConstants.isc_transliteration_failed, "Cannot transliterate character between character sets");
     
     private final SQLState sqlState;
     

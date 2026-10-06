@@ -29,6 +29,7 @@ import org.apache.shardingsphere.database.exception.core.mapper.SQLDialectExcept
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.CannotUpdateOldBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
@@ -38,6 +39,8 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.TransliterationFailedException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlobFilterException;
 import org.apache.shardingsphere.database.exception.firebird.vendor.FirebirdVendorError;
 import org.apache.shardingsphere.infra.exception.external.sql.vendor.VendorError;
 import org.apache.shardingsphere.infra.exception.generic.UnknownSQLException;
@@ -109,6 +112,16 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
         }
         if (sqlDialectException instanceof CannotUpdateOldBlobException) {
             return toSQLException(FirebirdVendorError.CANNOT_UPDATE_OLD_BLOB);
+        }
+        if (sqlDialectException instanceof UnsupportedBlobFilterException) {
+            return toSQLException(FirebirdVendorError.UNSUPPORTED_BLOB_FILTER);
+        }
+        if (sqlDialectException instanceof BlobFilterNotFoundException) {
+            BlobFilterNotFoundException ex = (BlobFilterNotFoundException) sqlDialectException;
+            return toSQLException(FirebirdVendorError.BLOB_FILTER_NOT_FOUND, ex.getSourceType(), ex.getTargetType());
+        }
+        if (sqlDialectException instanceof TransliterationFailedException) {
+            return toSQLException(FirebirdVendorError.TRANSLITERATION_FAILED);
         }
         return new UnknownSQLException(sqlDialectException).toSQLException();
     }

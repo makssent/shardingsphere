@@ -31,6 +31,7 @@ import org.apache.shardingsphere.database.exception.core.mapper.SQLDialectExcept
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.CannotUpdateOldBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
@@ -40,6 +41,8 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.TransliterationFailedException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlobFilterException;
 import org.apache.shardingsphere.database.exception.firebird.vendor.FirebirdVendorError;
 import org.apache.shardingsphere.infra.exception.external.sql.vendor.VendorError;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
@@ -151,6 +154,21 @@ class FirebirdDialectExceptionMapperTest {
     @Test
     void assertConvertWithCannotUpdateOldBlob() {
         assertSQLException(mapper.convert(new CannotUpdateOldBlobException(42)), FirebirdVendorError.CANNOT_UPDATE_OLD_BLOB);
+    }
+    
+    @Test
+    void assertConvertWithUnsupportedBlobFilter() {
+        assertSQLException(mapper.convert(new UnsupportedBlobFilterException()), FirebirdVendorError.UNSUPPORTED_BLOB_FILTER);
+    }
+    
+    @Test
+    void assertConvertWithBlobFilterNotFound() {
+        assertSQLException(mapper.convert(new BlobFilterNotFoundException(-1, 1)), FirebirdVendorError.BLOB_FILTER_NOT_FOUND, -1, 1);
+    }
+    
+    @Test
+    void assertConvertWithTransliterationFailed() {
+        assertSQLException(mapper.convert(new TransliterationFailedException()), FirebirdVendorError.TRANSLITERATION_FAILED);
     }
     
     @Test
