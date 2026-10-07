@@ -44,6 +44,18 @@ class FirebirdBlrRowMetadataTest {
         FirebirdBlrRowMetadata actual = FirebirdBlrRowMetadata.parseBLR(createBlr());
         assertThat(actual.getLength(), is(21));
         assertThat(actual.getColumnTypes(), is(Arrays.asList(FirebirdBinaryColumnType.LONG, FirebirdBinaryColumnType.VARYING, FirebirdBinaryColumnType.DOUBLE)));
+        assertThat(actual.getColumnScales(), is(Arrays.asList(0, 0, 0)));
+    }
+    
+    @Test
+    void assertParseBLRWithScaledTypes() {
+        ByteBuf blr = Unpooled.buffer().writeZero(4).writeByte(8).writeByte(0)
+                .writeByte(BlrConstants.blr_short).writeByte(-2).writeZero(2)
+                .writeByte(BlrConstants.blr_int64).writeByte(-4).writeZero(2)
+                .writeByte(BlrConstants.blr_end);
+        FirebirdBlrRowMetadata actual = FirebirdBlrRowMetadata.parseBLR(blr);
+        assertThat(actual.getColumnTypes(), is(Arrays.asList(FirebirdBinaryColumnType.SHORT, FirebirdBinaryColumnType.INT64)));
+        assertThat(actual.getColumnScales(), is(Arrays.asList(-2, -4)));
     }
     
     @Test

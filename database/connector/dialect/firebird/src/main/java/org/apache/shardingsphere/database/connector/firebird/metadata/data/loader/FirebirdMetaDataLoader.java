@@ -24,6 +24,8 @@ import org.apache.shardingsphere.database.connector.core.metadata.data.model.Sch
 import org.apache.shardingsphere.database.connector.core.metadata.data.model.TableMetaData;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobInfoRegistry;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNonFixedLengthColumnSizeRegistry;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNumericColumn;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNumericColumnRegistry;
 
 import java.sql.SQLException;
 import java.util.Collection;
@@ -44,6 +46,7 @@ public final class FirebirdMetaDataLoader implements DialectMetaDataLoader {
         }
         loadBlobColumns(material);
         loadNonFixedLengthColumnSizes(material);
+        loadNumericColumns(material);
         return Collections.singleton(new SchemaMetaData(material.getDefaultSchemaName(), tableMetaData));
     }
     
@@ -60,6 +63,13 @@ public final class FirebirdMetaDataLoader implements DialectMetaDataLoader {
         for (String each : material.getActualTableNames()) {
             Map<String, Integer> tableColumns = blobColumns.getOrDefault(each, Collections.emptyMap());
             FirebirdBlobInfoRegistry.refreshTable(material.getDefaultSchemaName(), each, tableColumns);
+        }
+    }
+    
+    private void loadNumericColumns(final MetaDataLoaderMaterial material) throws SQLException {
+        Map<String, Map<String, FirebirdNumericColumn>> numericColumns = new FirebirdNumericColumnLoader(material).load();
+        for (String each : material.getActualTableNames()) {
+            FirebirdNumericColumnRegistry.refreshTable(material.getDefaultSchemaName(), each, numericColumns.getOrDefault(each, Collections.emptyMap()));
         }
     }
     

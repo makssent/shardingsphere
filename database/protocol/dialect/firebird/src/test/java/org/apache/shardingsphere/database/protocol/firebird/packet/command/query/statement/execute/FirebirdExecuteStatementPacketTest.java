@@ -33,6 +33,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.stream.Stream;
 
@@ -78,6 +79,22 @@ class FirebirdExecuteStatementPacketTest {
         assertThat(packet.getTransactionId(), is(2));
         assertThat(packet.getParameterTypes(), is(Collections.singletonList(expectedParameterType)));
         assertThat(packet.getParameterValues(), is(Collections.singletonList(expectedParameterValue)));
+    }
+    
+    @Test
+    void assertExecuteStatementPacketWithScaledParameterValue() {
+        when(payload.readInt4()).thenReturn(FirebirdCommandPacketType.EXECUTE.getValue(), 1, 2, 0, 1);
+        when(payload.readInt1()).thenReturn(0);
+        when(payload.readInt8()).thenReturn(12345L);
+        when(payload.readBuffer()).thenReturn(byteBuf);
+        when(byteBuf.isReadable()).thenReturn(true);
+        when(byteBuf.readUnsignedByte()).thenReturn((short) 5, (short) 0, (short) BlrConstants.blr_int64, (short) BlrConstants.blr_end);
+        when(byteBuf.readerIndex()).thenReturn(7);
+        when(byteBuf.getByte(7)).thenReturn((byte) -4);
+        when(byteBuf.skipBytes(anyInt())).thenReturn(byteBuf);
+        FirebirdExecuteStatementPacket packet = new FirebirdExecuteStatementPacket(payload, FirebirdProtocolVersion.PROTOCOL_VERSION13);
+        assertThat(packet.getParameterTypes(), is(Collections.singletonList(FirebirdBinaryColumnType.INT64)));
+        assertThat(packet.getParameterValues(), is(Collections.singletonList(new BigDecimal("1.2345"))));
     }
     
     @Test

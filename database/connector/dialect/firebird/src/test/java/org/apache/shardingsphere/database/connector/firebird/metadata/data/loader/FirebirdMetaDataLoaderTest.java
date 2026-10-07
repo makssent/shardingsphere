@@ -26,6 +26,8 @@ import org.apache.shardingsphere.database.connector.core.spi.DatabaseTypedSPILoa
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobInfoRegistry;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNonFixedLengthColumnSizeRegistry;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNumericColumn;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNumericColumnRegistry;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedConstruction;
@@ -62,14 +64,19 @@ class FirebirdMetaDataLoaderTest {
         Map<String, Map<String, Integer>> allSizes = Collections.singletonMap("TEST_TABLE", tableSizes);
         Map<String, Integer> tableBlobColumns = Collections.singletonMap("BLOB_COL", 1);
         Map<String, Map<String, Integer>> allBlobColumns = Collections.singletonMap("TEST_TABLE", tableBlobColumns);
+        Map<String, FirebirdNumericColumn> tableNumericColumns = Collections.singletonMap("NUMERIC_COL", new FirebirdNumericColumn(16, 2, -4));
+        Map<String, Map<String, FirebirdNumericColumn>> allNumericColumns = Collections.singletonMap("TEST_TABLE", tableNumericColumns);
         try (
                 MockedStatic<TableMetaDataLoader> tableLoaderMocked = mockStatic(TableMetaDataLoader.class);
                 MockedStatic<FirebirdNonFixedLengthColumnSizeRegistry> sizeRegistryMocked = mockStatic(FirebirdNonFixedLengthColumnSizeRegistry.class);
                 MockedStatic<FirebirdBlobInfoRegistry> blobRegistryMocked = mockStatic(FirebirdBlobInfoRegistry.class);
+                MockedStatic<FirebirdNumericColumnRegistry> numericRegistryMocked = mockStatic(FirebirdNumericColumnRegistry.class);
                 MockedConstruction<FirebirdNonFixedLengthColumnSizeLoader> columnSizeLoaderMocked =
                         mockConstruction(FirebirdNonFixedLengthColumnSizeLoader.class, (mock, context) -> when(mock.load()).thenReturn(allSizes));
                 MockedConstruction<FirebirdBlobColumnLoader> blobColumnLoaderMocked =
-                        mockConstruction(FirebirdBlobColumnLoader.class, (mock, context) -> when(mock.load()).thenReturn(allBlobColumns))) {
+                        mockConstruction(FirebirdBlobColumnLoader.class, (mock, context) -> when(mock.load()).thenReturn(allBlobColumns));
+                MockedConstruction<FirebirdNumericColumnLoader> numericColumnLoaderMocked =
+                        mockConstruction(FirebirdNumericColumnLoader.class, (mock, context) -> when(mock.load()).thenReturn(allNumericColumns))) {
             tableLoaderMocked.when(() -> TableMetaDataLoader.loadNormalized(dataSource, "TEST_TABLE", databaseType)).thenReturn(Optional.of(tableMetaData));
             Collection<SchemaMetaData> actual = dialectMetaDataLoader.load(material);
             assertThat(actual.size(), is(1));
@@ -78,8 +85,10 @@ class FirebirdMetaDataLoaderTest {
             assertThat(schema.getTables(), contains(tableMetaData));
             sizeRegistryMocked.verify(() -> FirebirdNonFixedLengthColumnSizeRegistry.refreshTable("schema", "TEST_TABLE", tableSizes));
             blobRegistryMocked.verify(() -> FirebirdBlobInfoRegistry.refreshTable("schema", "TEST_TABLE", tableBlobColumns));
+            numericRegistryMocked.verify(() -> FirebirdNumericColumnRegistry.refreshTable("schema", "TEST_TABLE", tableNumericColumns));
             verify(columnSizeLoaderMocked.constructed().get(0)).load();
             verify(blobColumnLoaderMocked.constructed().get(0)).load();
+            verify(numericColumnLoaderMocked.constructed().get(0)).load();
         }
     }
 }

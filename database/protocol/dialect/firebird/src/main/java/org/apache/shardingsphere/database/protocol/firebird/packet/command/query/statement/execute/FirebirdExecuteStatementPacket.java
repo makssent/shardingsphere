@@ -25,6 +25,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdBlrRowMetadata;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.protocol.FirebirdBinaryProtocolValue;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.protocol.FirebirdBinaryProtocolValueFactory;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.protocol.util.FirebirdNumericScaleUtils;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 
 import java.util.ArrayList;
@@ -62,7 +63,8 @@ public final class FirebirdExecuteStatementPacket extends FirebirdCommandPacket 
         type = FirebirdCommandPacketType.valueOf(payload.readInt4());
         statementId = payload.readInt4();
         transactionId = payload.readInt4();
-        parameterTypes = FirebirdBlrRowMetadata.parseBLR(payload.readBuffer()).getColumnTypes();
+        FirebirdBlrRowMetadata parameterMetadata = FirebirdBlrRowMetadata.parseBLR(payload.readBuffer());
+        parameterTypes = parameterMetadata.getColumnTypes();
         message = payload.readInt4();
         int msgCount = payload.readInt4();
         List<Integer> nullBits = new ArrayList<>();
@@ -78,7 +80,7 @@ public final class FirebirdExecuteStatementPacket extends FirebirdCommandPacket 
             Integer nullBit = nullBits.get(i / 8);
             if (((nullBit >> i % 8) & 1) == 0) {
                 FirebirdBinaryProtocolValue binaryProtocolValue = FirebirdBinaryProtocolValueFactory.getBinaryProtocolValue(parameterTypes.get(i));
-                parameterValues.add(binaryProtocolValue.read(payload));
+                parameterValues.add(FirebirdNumericScaleUtils.applyScale(parameterTypes.get(i), binaryProtocolValue.read(payload), parameterMetadata.getColumnScales().get(i)));
             } else {
                 parameterValues.add(null);
             }

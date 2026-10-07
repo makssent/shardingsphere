@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobInfoRegistry;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNonFixedLengthColumnSizeRegistry;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNumericColumnRegistry;
 import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.database.NoDatabaseSelectedException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoPacketType;
@@ -231,6 +232,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
                     processReturnValues(sqlStatementContext, metaDataContexts, describeColumns, requestedItems);
                 } else {
                     processParameters(sqlStatementContext, metaDataContexts, describeColumns, requestedItems);
+                    describeColumns.forEach(this::describeNumericParameter);
                 }
                 return;
             }
@@ -506,6 +508,14 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
             }
         }
         return logicTableName;
+    }
+    
+    private void describeNumericParameter(final FirebirdReturnColumnPacket parameter) {
+        if (null == parameter.getTable() || null == parameter.getTable().getName() || null == parameter.getColumn()) {
+            return;
+        }
+        FirebirdNumericColumnRegistry.findNumericColumn(
+                connectionSession.getCurrentDatabaseName(), getActualTableName(parameter.getTable().getName()), parameter.getColumn().getName()).ifPresent(parameter::setNumericColumn);
     }
     
     private Integer resolveBlobSubtype(final ShardingSphereTable table, final ShardingSphereColumn column, final boolean blobColumn) {

@@ -19,6 +19,8 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statemen
 
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobInfoRegistry;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNumericColumn;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNumericColumnRegistry;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.database.NoDatabaseSelectedException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoPacketType;
@@ -137,6 +139,8 @@ class FirebirdPrepareStatementCommandExecutorTest {
         FirebirdFetchStatementCache.getInstance().unregisterConnection(CONNECTION_ID);
         FirebirdBlobInfoRegistry.refreshTable("foo_db", "foo_tbl", Collections.emptyMap());
         FirebirdBlobInfoRegistry.refreshTable("foo_db", "foo_tbl_0", Collections.emptyMap());
+        FirebirdNumericColumnRegistry.refreshTable("foo_db", "foo_tbl", Collections.emptyMap());
+        FirebirdNumericColumnRegistry.refreshTable("foo_db", "foo_tbl_0", Collections.emptyMap());
     }
     
     private MetaDataContexts createMetaDataContexts() {
@@ -235,6 +239,58 @@ class FirebirdPrepareStatementCommandExecutorTest {
         columnPacket.write(payload);
         verify(payload).writeInt4LE(FirebirdBinaryColumnType.BLOB.getValue() + 1);
         verify(payload).writeInt4LE(7);
+    }
+    
+    @Test
+    void assertDescribeNumericParameter() throws Exception {
+        FirebirdNumericColumnRegistry.refreshTable("foo_db", "foo_tbl", Collections.singletonMap("id", new FirebirdNumericColumn(16, 2, -4)));
+        when(packet.getSQL()).thenReturn("SELECT id FROM foo_tbl WHERE id = ?");
+        when(packet.nextItem()).thenReturn(true, true, true, true, true, true, true, true, true, false);
+        when(packet.getCurrentItem()).thenReturn(
+                FirebirdSQLInfoPacketType.STMT_TYPE,
+                FirebirdSQLInfoPacketType.SELECT,
+                FirebirdSQLInfoPacketType.SCALE,
+                FirebirdSQLInfoPacketType.SCALE,
+                FirebirdSQLInfoPacketType.DESCRIBE_END,
+                FirebirdSQLInfoPacketType.DESCRIBE_END,
+                FirebirdSQLInfoPacketType.BIND,
+                FirebirdSQLInfoPacketType.SCALE,
+                FirebirdSQLInfoPacketType.SCALE,
+                FirebirdSQLInfoPacketType.DESCRIBE_END,
+                FirebirdSQLInfoPacketType.DESCRIBE_END);
+        FirebirdPrepareStatementReturnPacket returnPacket = (FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) new FirebirdPrepareStatementCommandExecutor(
+                packet, connectionSession).execute().iterator().next()).getData();
+        FirebirdPacketPayload selectPayload = mock(FirebirdPacketPayload.class, RETURNS_DEEP_STUBS);
+        returnPacket.getDescribeSelect().get(0).write(selectPayload);
+        verify(selectPayload).writeInt4LE(0);
+        FirebirdPacketPayload bindPayload = mock(FirebirdPacketPayload.class, RETURNS_DEEP_STUBS);
+        returnPacket.getDescribeBind().get(0).write(bindPayload);
+        verify(bindPayload).writeInt4LE(-4);
+    }
+    
+    @Test
+    void assertDescribeNumericParameterOfShardingTable() throws Exception {
+        DataNodeRuleAttribute dataNodeRuleAttribute = mock(DataNodeRuleAttribute.class);
+        when(dataNodeRuleAttribute.findFirstActualTable("foo_tbl")).thenReturn(Optional.of("foo_tbl_0"));
+        ShardingSphereRule rule = mock(ShardingSphereRule.class);
+        when(rule.getAttributes()).thenReturn(new RuleAttributes(dataNodeRuleAttribute));
+        ShardingSphereDatabase database = ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData().getDatabase("foo_db");
+        doReturn(new RuleMetaData(Collections.singleton(rule))).when(database).getRuleMetaData();
+        FirebirdNumericColumnRegistry.refreshTable("foo_db", "foo_tbl_0", Collections.singletonMap("id", new FirebirdNumericColumn(8, 1, -2)));
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id) VALUES (?)");
+        when(packet.nextItem()).thenReturn(true, true, true, true, true, false);
+        when(packet.getCurrentItem()).thenReturn(
+                FirebirdSQLInfoPacketType.STMT_TYPE,
+                FirebirdSQLInfoPacketType.BIND,
+                FirebirdSQLInfoPacketType.TYPE,
+                FirebirdSQLInfoPacketType.TYPE,
+                FirebirdSQLInfoPacketType.DESCRIBE_END,
+                FirebirdSQLInfoPacketType.DESCRIBE_END);
+        FirebirdPrepareStatementReturnPacket returnPacket = (FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) new FirebirdPrepareStatementCommandExecutor(
+                packet, connectionSession).execute().iterator().next()).getData();
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class, RETURNS_DEEP_STUBS);
+        returnPacket.getDescribeBind().get(0).write(payload);
+        verify(payload).writeInt4LE(FirebirdBinaryColumnType.LONG.getValue() + 1);
     }
     
     @Test

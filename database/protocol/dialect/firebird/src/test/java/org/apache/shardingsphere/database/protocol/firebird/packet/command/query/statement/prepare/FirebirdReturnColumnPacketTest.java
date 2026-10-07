@@ -17,6 +17,7 @@
 
 package org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare;
 
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNumericColumn;
 import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoPacketType;
@@ -91,6 +92,15 @@ class FirebirdReturnColumnPacketTest {
         verify(payload).writeInt4LE(expectedSubType);
     }
     
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("assertWriteNumericColumnArguments")
+    void assertWriteNumericColumn(final String name, final FirebirdSQLInfoPacketType requestedItem, final FirebirdNumericColumn numericColumn, final int expectedValue) {
+        FirebirdReturnColumnPacket packet = createPacket(Collections.singletonList(requestedItem), Types.DECIMAL, null, false, null);
+        packet.setNumericColumn(numericColumn);
+        packet.write(payload);
+        verify(payload).writeInt4LE(expectedValue);
+    }
+    
     @Test
     void assertWriteWithUnsupportedRequestedItem() {
         FirebirdReturnColumnPacket packet = createPacket(Collections.singletonList(FirebirdSQLInfoPacketType.SELECT), Types.INTEGER, null, false, null);
@@ -113,6 +123,21 @@ class FirebirdReturnColumnPacketTest {
                 Arguments.of("length_text", FirebirdBinaryColumnType.TEXT, 99),
                 Arguments.of("length_legacy_text", FirebirdBinaryColumnType.LEGACY_TEXT, 99),
                 Arguments.of("length_long", FirebirdBinaryColumnType.LONG, FirebirdBinaryColumnType.LONG.getLength()));
+    }
+    
+    private static Stream<Arguments> assertWriteNumericColumnArguments() {
+        return Stream.of(
+                Arguments.of("type_numeric_smallint", FirebirdSQLInfoPacketType.TYPE, new FirebirdNumericColumn(7, 1, -2), FirebirdBinaryColumnType.SHORT.getValue() + 1),
+                Arguments.of("type_numeric_integer", FirebirdSQLInfoPacketType.TYPE, new FirebirdNumericColumn(8, 1, -3), FirebirdBinaryColumnType.LONG.getValue() + 1),
+                Arguments.of("type_decimal_bigint", FirebirdSQLInfoPacketType.TYPE, new FirebirdNumericColumn(16, 2, -4), FirebirdBinaryColumnType.INT64.getValue() + 1),
+                Arguments.of("type_without_numeric_column", FirebirdSQLInfoPacketType.TYPE, null, FirebirdBinaryColumnType.DECIMAL.getValue() + 1),
+                Arguments.of("sub_type_decimal", FirebirdSQLInfoPacketType.SUB_TYPE, new FirebirdNumericColumn(8, 2, -2), 2),
+                Arguments.of("sub_type_numeric", FirebirdSQLInfoPacketType.SUB_TYPE, new FirebirdNumericColumn(7, 1, -2), 1),
+                Arguments.of("scale", FirebirdSQLInfoPacketType.SCALE, new FirebirdNumericColumn(16, 2, -4), -4),
+                Arguments.of("scale_without_numeric_column", FirebirdSQLInfoPacketType.SCALE, null, 0),
+                Arguments.of("length_smallint", FirebirdSQLInfoPacketType.LENGTH, new FirebirdNumericColumn(7, 1, -2), 2),
+                Arguments.of("length_integer", FirebirdSQLInfoPacketType.LENGTH, new FirebirdNumericColumn(8, 2, -2), 4),
+                Arguments.of("length_bigint", FirebirdSQLInfoPacketType.LENGTH, new FirebirdNumericColumn(16, 2, -4), 8));
     }
     
     private static Stream<Arguments> assertWriteSubTypeArguments() {

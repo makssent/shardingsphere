@@ -22,6 +22,7 @@ import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.protocol.util.FirebirdNumericScaleUtils;
 import org.firebirdsql.gds.BlrConstants;
 
 import java.util.ArrayList;
@@ -40,6 +41,8 @@ public final class FirebirdBlrRowMetadata {
     
     private final List<FirebirdBinaryColumnType> columnTypes;
     
+    private final List<Integer> columnScales;
+    
     /**
      * Parse FirebirdBlrRowMetadata from BLR buffer.
      *
@@ -48,11 +51,12 @@ public final class FirebirdBlrRowMetadata {
      */
     public static FirebirdBlrRowMetadata parseBLR(final ByteBuf blrBuffer) {
         int length = blrBuffer.readableBytes();
-        List<FirebirdBinaryColumnType> columnTypes = parse(blrBuffer);
-        return new FirebirdBlrRowMetadata(blrBuffer, length, columnTypes);
+        List<Integer> columnScales = new ArrayList<>();
+        List<FirebirdBinaryColumnType> columnTypes = parse(blrBuffer, columnScales);
+        return new FirebirdBlrRowMetadata(blrBuffer, length, columnTypes, columnScales);
     }
     
-    private static List<FirebirdBinaryColumnType> parse(final ByteBuf blrBuffer) {
+    private static List<FirebirdBinaryColumnType> parse(final ByteBuf blrBuffer, final List<Integer> columnScales) {
         ByteBuf buffer = blrBuffer.duplicate();
         if (!buffer.isReadable()) {
             return new ArrayList<>(0);
@@ -65,6 +69,7 @@ public final class FirebirdBlrRowMetadata {
         while (blrType != BlrConstants.blr_end) {
             FirebirdBinaryColumnType type = FirebirdBinaryColumnType.valueOfBLRType(blrType);
             result.add(type);
+            columnScales.add(FirebirdNumericScaleUtils.isScaledType(type) ? (int) buffer.getByte(buffer.readerIndex()) : 0);
             buffer.skipBytes(getSkipCount(type) + 2);
             blrType = buffer.readUnsignedByte();
         }

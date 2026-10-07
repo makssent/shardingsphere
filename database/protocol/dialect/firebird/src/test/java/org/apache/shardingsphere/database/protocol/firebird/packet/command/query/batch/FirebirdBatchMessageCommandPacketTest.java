@@ -23,8 +23,11 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -37,5 +40,14 @@ class FirebirdBatchMessageCommandPacketTest {
         int actual = FirebirdBatchMessageCommandPacket.getLength(new FirebirdPacketPayload(packet, StandardCharsets.UTF_8),
                 Collections.singletonList(new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.LONG, Integer.BYTES, 0, 0)));
         assertThat(actual, is(20));
+    }
+    
+    @Test
+    void assertReadParameterValuesWithScaledColumns() {
+        ByteBuf packet = Unpooled.buffer().writeInt(0).writeInt(42).writeInt(1).writeByte(0).writeZero(3).writeInt(-12345).writeLong(12345L);
+        FirebirdBatchMessageCommandPacket actual = new FirebirdBatchMessageCommandPacket(new FirebirdPacketPayload(packet, StandardCharsets.UTF_8));
+        List<List<Object>> actualValues = actual.readParameterValues(Arrays.asList(
+                new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.LONG, Integer.BYTES, -2, 0), new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.INT64, Long.BYTES, -4, 0)));
+        assertThat(actualValues, is(Collections.singletonList(Arrays.asList(new BigDecimal("-123.45"), new BigDecimal("1.2345")))));
     }
 }

@@ -24,6 +24,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.Fireb
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.protocol.FirebirdBinaryProtocolValue;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.protocol.FirebirdBinaryProtocolValueFactory;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.protocol.util.FirebirdNumericScaleUtils;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 
 import java.nio.charset.Charset;
@@ -154,7 +155,7 @@ public final class FirebirdBatchMessageCommandPacket extends FirebirdCommandPack
             return result;
         }
         FirebirdBinaryProtocolValue binaryProtocolValue = FirebirdBinaryProtocolValueFactory.getBinaryProtocolValue(descriptor.getType());
-        return binaryProtocolValue.read(payload);
+        return FirebirdNumericScaleUtils.applyScale(descriptor.getType(), binaryProtocolValue.read(payload), descriptor.getScale());
     }
     
     private static List<Integer> readNullBits(final FirebirdPacketPayload payload, final int columnCount) {
