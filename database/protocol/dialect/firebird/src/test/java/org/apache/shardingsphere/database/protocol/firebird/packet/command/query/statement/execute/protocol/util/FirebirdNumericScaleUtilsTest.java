@@ -23,6 +23,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -42,6 +43,9 @@ class FirebirdNumericScaleUtilsTest {
                 Arguments.of("integer_with_negative_value", FirebirdBinaryColumnType.LONG, -123456, -3, new BigDecimal("-123.456")),
                 Arguments.of("bigint_with_scale", FirebirdBinaryColumnType.INT64, 12345L, -4, new BigDecimal("1.2345")),
                 Arguments.of("bigint_without_scale", FirebirdBinaryColumnType.INT64, 12345L, 0, 12345L),
+                Arguments.of("int128_with_scale", FirebirdBinaryColumnType.INT128, new BigInteger("-123456789012345678901234567890"), -4, new BigDecimal("-12345678901234567890123456.7890")),
+                Arguments.of("int128_without_scale", FirebirdBinaryColumnType.INT128, new BigInteger("17014118346046923173168730371588410572"), 0,
+                        new BigInteger("17014118346046923173168730371588410572")),
                 Arguments.of("blob_with_scale", FirebirdBinaryColumnType.BLOB, 12345L, -4, 12345L),
                 Arguments.of("varying_with_charset", FirebirdBinaryColumnType.VARYING, "foo", 4, "foo"),
                 Arguments.of("null_value", FirebirdBinaryColumnType.INT64, null, -4, null));

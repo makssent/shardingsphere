@@ -35,7 +35,6 @@ import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
-import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class FirebirdInt16BinaryProtocolValueTest {
@@ -43,17 +42,10 @@ class FirebirdInt16BinaryProtocolValueTest {
     @Mock
     private FirebirdPacketPayload payload;
     
-    @Mock
-    private ByteBuf byteBuf;
-    
-    @Mock
-    private ByteBuf result;
-    
-    @Test
-    void assertRead() {
-        when(payload.getByteBuf()).thenReturn(byteBuf);
-        when(byteBuf.readSlice(16)).thenReturn(result);
-        assertThat(new FirebirdInt16BinaryProtocolValue().read(payload), is(result));
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("readArguments")
+    void assertRead(final String name, final byte[] value, final BigInteger expected) {
+        assertThat(new FirebirdInt16BinaryProtocolValue().read(new FirebirdPacketPayload(Unpooled.wrappedBuffer(value), StandardCharsets.UTF_8)), is(expected));
     }
     
     @ParameterizedTest(name = "{0}")
@@ -70,6 +62,13 @@ class FirebirdInt16BinaryProtocolValueTest {
     @Test
     void assertGetLength() {
         assertThat(new FirebirdInt16BinaryProtocolValue().getLength(payload), is(16));
+    }
+    
+    private static Stream<Arguments> readArguments() {
+        return Stream.of(
+                Arguments.of("positive", new byte[]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3}, BigInteger.valueOf(66051L)),
+                Arguments.of("negative", new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2}, BigInteger.valueOf(-2L)),
+                Arguments.of("maximum", new byte[]{127, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}, BigInteger.ONE.shiftLeft(127).subtract(BigInteger.ONE)));
     }
     
     private static Stream<Arguments> writeArguments() {

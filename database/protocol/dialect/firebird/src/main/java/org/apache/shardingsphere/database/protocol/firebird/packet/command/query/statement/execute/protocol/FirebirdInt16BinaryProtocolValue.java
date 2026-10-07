@@ -29,7 +29,9 @@ public final class FirebirdInt16BinaryProtocolValue implements FirebirdBinaryPro
     
     @Override
     public Object read(final FirebirdPacketPayload payload) {
-        return payload.getByteBuf().readSlice(16);
+        byte[] result = new byte[16];
+        payload.getByteBuf().readBytes(result);
+        return new BigInteger(result);
     }
     
     @Override

@@ -24,8 +24,8 @@ import lombok.RequiredArgsConstructor;
 /**
  * Firebird numeric column.
  *
- * <p>Storage of a NUMERIC or DECIMAL column as Firebird defines it in {@code RDB$FIELDS}: the JDBC type of the column does not tell whether the value is stored
- * as SMALLINT, INTEGER or BIGINT, nor its scale.</p>
+ * <p>Storage of a NUMERIC, DECIMAL or INT128 column as Firebird defines it in {@code RDB$FIELDS}: the JDBC type of the column does not tell whether the value
+ * is stored as SMALLINT, INTEGER, BIGINT or INT128, nor its scale.</p>
  */
 @RequiredArgsConstructor
 @Getter

@@ -22,6 +22,7 @@ import lombok.NoArgsConstructor;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 
 import java.math.BigDecimal;
+import java.math.BigInteger;
 
 /**
  * Numeric scale utility class of Firebird.
@@ -32,7 +33,7 @@ public final class FirebirdNumericScaleUtils {
     /**
      * Apply the scale of a message field to its value.
      *
-     * <p>SMALLINT, INTEGER and BIGINT fields with a scale carry NUMERIC and DECIMAL values as integers in units of {@code 10^scale}.</p>
+     * <p>SMALLINT, INTEGER, BIGINT and INT128 fields with a scale carry NUMERIC and DECIMAL values as integers in units of {@code 10^scale}.</p>
      *
      * @param type field type
      * @param value value read from the message
@@ -43,7 +44,7 @@ public final class FirebirdNumericScaleUtils {
         if (0 == scale || !isScaledType(type) || !(value instanceof Number)) {
             return value;
         }
-        return BigDecimal.valueOf(((Number) value).longValue(), -scale);
+        return new BigDecimal(value instanceof BigInteger ? (BigInteger) value : BigInteger.valueOf(((Number) value).longValue()), -scale);
     }
     
     /**
@@ -53,6 +54,6 @@ public final class FirebirdNumericScaleUtils {
      * @return whether field type carries a scale
      */
     public static boolean isScaledType(final FirebirdBinaryColumnType type) {
-        return FirebirdBinaryColumnType.SHORT == type || FirebirdBinaryColumnType.LONG == type || FirebirdBinaryColumnType.INT64 == type;
+        return FirebirdBinaryColumnType.SHORT == type || FirebirdBinaryColumnType.LONG == type || FirebirdBinaryColumnType.INT64 == type || FirebirdBinaryColumnType.INT128 == type;
     }
 }

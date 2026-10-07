@@ -137,7 +137,10 @@ class FirebirdReturnColumnPacketTest {
                 Arguments.of("scale_without_numeric_column", FirebirdSQLInfoPacketType.SCALE, null, 0),
                 Arguments.of("length_smallint", FirebirdSQLInfoPacketType.LENGTH, new FirebirdNumericColumn(7, 1, -2), 2),
                 Arguments.of("length_integer", FirebirdSQLInfoPacketType.LENGTH, new FirebirdNumericColumn(8, 2, -2), 4),
-                Arguments.of("length_bigint", FirebirdSQLInfoPacketType.LENGTH, new FirebirdNumericColumn(16, 2, -4), 8));
+                Arguments.of("length_bigint", FirebirdSQLInfoPacketType.LENGTH, new FirebirdNumericColumn(16, 2, -4), 8),
+                Arguments.of("type_int128", FirebirdSQLInfoPacketType.TYPE, new FirebirdNumericColumn(26, 0, 0), FirebirdBinaryColumnType.INT128.getValue() + 1),
+                Arguments.of("scale_numeric_int128", FirebirdSQLInfoPacketType.SCALE, new FirebirdNumericColumn(26, 1, -4), -4),
+                Arguments.of("length_int128", FirebirdSQLInfoPacketType.LENGTH, new FirebirdNumericColumn(26, 1, -4), 16));
     }
     
     private static Stream<Arguments> assertWriteSubTypeArguments() {
