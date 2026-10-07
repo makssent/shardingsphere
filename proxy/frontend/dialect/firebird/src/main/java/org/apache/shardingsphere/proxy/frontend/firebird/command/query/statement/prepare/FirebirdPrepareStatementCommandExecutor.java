@@ -67,6 +67,7 @@ import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.column.Co
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.BinaryOperationExpression;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.ExpressionSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.FunctionSegment;
+import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.ListExpression;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.simple.LiteralExpressionSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.simple.ParameterMarkerExpressionSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.item.ProjectionSegment;
@@ -397,12 +398,36 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
             return expr instanceof ParameterMarkerExpressionSegment;
         }
         BinaryOperationExpression binary = (BinaryOperationExpression) expr;
+        if (binary.getRight() instanceof ListExpression) {
+            processPatternExpr(binary.getLeft(), (ListExpression) binary.getRight(), affectedColumns);
+            return false;
+        }
         processExpr(binary.getLeft(), affectedColumns);
         boolean rightIsParam = processExpr(binary.getRight(), affectedColumns);
         if (rightIsParam && binary.getLeft() instanceof ColumnSegment) {
             affectedColumns.add((ColumnSegment) binary.getLeft());
         }
         return false;
+    }
+    
+    private void processPatternExpr(final ExpressionSegment value, final ListExpression pattern, final Collection<ColumnSegment> affectedColumns) {
+        ColumnSegment typeColumn = null;
+        if (value instanceof ColumnSegment) {
+            typeColumn = (ColumnSegment) value;
+        } else if (pattern.getItems().get(0) instanceof ColumnSegment) {
+            typeColumn = (ColumnSegment) pattern.getItems().get(0);
+        }
+        if (null == typeColumn) {
+            return;
+        }
+        if (value instanceof ParameterMarkerExpressionSegment) {
+            affectedColumns.add(typeColumn);
+        }
+        for (ExpressionSegment each : pattern.getItems()) {
+            if (each instanceof ParameterMarkerExpressionSegment) {
+                affectedColumns.add(typeColumn);
+            }
+        }
     }
     
     private void processExpressionProjection(final ExpressionProjection expr, final Collection<FirebirdReturnColumnPacket> describeColumns, final Collection<FirebirdSQLInfoPacketType> requestedItems,
