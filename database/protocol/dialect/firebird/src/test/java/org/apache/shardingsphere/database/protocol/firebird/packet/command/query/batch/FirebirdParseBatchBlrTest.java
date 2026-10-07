@@ -104,6 +104,16 @@ class FirebirdParseBatchBlrTest {
         assertThat(actual.getMessageLength(), is(26));
     }
     
+    @Test
+    void assertParseDecFloatAlignedToEightBytes() {
+        ByteBuf blr = createBlr(BlrConstants.blr_version5, new byte[]{(byte) BlrConstants.blr_short, 0, (byte) BlrConstants.blr_short, 0,
+                (byte) BlrConstants.blr_dec64, (byte) BlrConstants.blr_short, 0, (byte) BlrConstants.blr_dec128, (byte) BlrConstants.blr_short, 0}, 6);
+        FirebirdParseBatchBlr actual = FirebirdParseBatchBlr.parse(blr, blr.readableBytes());
+        assertDescriptor(actual.getFields().get(1), FirebirdBinaryColumnType.DEC16, 8, 0, 8);
+        assertDescriptor(actual.getFields().get(2), FirebirdBinaryColumnType.DEC34, 16, 0, 24);
+        assertThat(actual.getMessageLength(), is(42));
+    }
+    
     @ParameterizedTest(name = "{0}")
     @MethodSource("invalidTerminatorArguments")
     void assertParseInvalidTerminator(final String name, final byte[] blrBytes, final String expectedMessage) {
@@ -114,7 +124,7 @@ class FirebirdParseBatchBlrTest {
     
     @Test
     void assertParseUnsupportedType() {
-        ByteBuf blr = createBlr(BlrConstants.blr_version5, new byte[]{(byte) BlrConstants.blr_dec64, (byte) BlrConstants.blr_short, 0}, 2);
+        ByteBuf blr = createBlr(BlrConstants.blr_version5, new byte[]{(byte) BlrConstants.blr_timestamp_tz, (byte) BlrConstants.blr_short, 0}, 2);
         assertThrows(IllegalArgumentException.class, () -> FirebirdParseBatchBlr.parse(blr, blr.readableBytes()));
     }
     
@@ -145,6 +155,8 @@ class FirebirdParseBatchBlrTest {
                 Arguments.of("long", BlrConstants.blr_version5, field(BlrConstants.blr_long, -2), FirebirdBinaryColumnType.LONG, 4, -2, 6, 4),
                 Arguments.of("int64", BlrConstants.blr_version5, field(BlrConstants.blr_int64, -3), FirebirdBinaryColumnType.INT64, 8, -3, 10, 8),
                 Arguments.of("int128", BlrConstants.blr_version5, field(BlrConstants.blr_int128, -4), FirebirdBinaryColumnType.INT128, 16, -4, 18, 16),
+                Arguments.of("dec64", BlrConstants.blr_version5, field(BlrConstants.blr_dec64), FirebirdBinaryColumnType.DEC16, 8, 0, 10, 8),
+                Arguments.of("dec128", BlrConstants.blr_version5, field(BlrConstants.blr_dec128), FirebirdBinaryColumnType.DEC34, 16, 0, 18, 16),
                 Arguments.of("float", BlrConstants.blr_version5, field(BlrConstants.blr_float), FirebirdBinaryColumnType.FLOAT, 4, 0, 6, 4),
                 Arguments.of("date", BlrConstants.blr_version5, field(BlrConstants.blr_sql_date), FirebirdBinaryColumnType.DATE, 4, 0, 6, 4),
                 Arguments.of("time", BlrConstants.blr_version5, field(BlrConstants.blr_sql_time), FirebirdBinaryColumnType.TIME, 4, 0, 6, 4),
