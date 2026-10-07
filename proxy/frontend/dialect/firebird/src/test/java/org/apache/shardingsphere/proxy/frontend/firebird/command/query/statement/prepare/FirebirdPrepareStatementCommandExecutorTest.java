@@ -19,6 +19,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statemen
 
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobInfoRegistry;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNonFixedLengthColumnSizeRegistry;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.database.NoDatabaseSelectedException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoPacketType;
@@ -67,6 +68,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.Types;
 import java.util.Arrays;
 import java.util.Collection;
@@ -162,6 +164,49 @@ class FirebirdPrepareStatementCommandExecutorTest {
         FirebirdServerPreparedStatement preparedStatement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(1);
         assertThat(preparedStatement.getSql(), is("SELECT 1"));
         assertThat(preparedStatement.getSqlStatementContext(), isA(SelectStatementContext.class));
+    }
+    
+    @Test
+    void assertDescribeStringFunctionsOfColumn() throws Exception {
+        ShardingSphereColumn nameColumn = new ShardingSphereColumn("name", Types.VARCHAR, false, false, false, true, false, true);
+        ShardingSphereDatabase database = ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData().getDatabase("foo_db");
+        database.getSchema("foo_db").putTable(new ShardingSphereTable("bar_tbl", Collections.singleton(nameColumn), Collections.emptyList(), Collections.emptyList()));
+        FirebirdNonFixedLengthColumnSizeRegistry.refreshTable("foo_db", "bar_tbl", Collections.singletonMap("name", 20));
+        try {
+            when(packet.getSQL()).thenReturn("SELECT TRIM(name), TRIM('x' FROM name), upper(name), LOWER(name) AS lower_name, SUBSTRING(name FROM 3 FOR 2), SUBSTRING(name FROM 3) FROM bar_tbl");
+            when(packet.nextItem()).thenReturn(true, true, true, true, true, true, true, false);
+            when(packet.getCurrentItem()).thenReturn(
+                    FirebirdSQLInfoPacketType.STMT_TYPE,
+                    FirebirdSQLInfoPacketType.SELECT,
+                    FirebirdSQLInfoPacketType.TYPE,
+                    FirebirdSQLInfoPacketType.TYPE,
+                    FirebirdSQLInfoPacketType.LENGTH,
+                    FirebirdSQLInfoPacketType.LENGTH,
+                    FirebirdSQLInfoPacketType.ALIAS,
+                    FirebirdSQLInfoPacketType.ALIAS,
+                    FirebirdSQLInfoPacketType.DESCRIBE_END,
+                    FirebirdSQLInfoPacketType.DESCRIBE_END);
+            FirebirdPrepareStatementCommandExecutor executor = new FirebirdPrepareStatementCommandExecutor(packet, connectionSession);
+            FirebirdPrepareStatementReturnPacket returnPacket = (FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) executor.execute().iterator().next()).getData();
+            assertThat(returnPacket.getDescribeSelect().size(), is(6));
+            assertStringFunctionColumn(returnPacket.getDescribeSelect().get(0), "TRIM", 20);
+            assertStringFunctionColumn(returnPacket.getDescribeSelect().get(1), "TRIM", 20);
+            assertStringFunctionColumn(returnPacket.getDescribeSelect().get(2), "UPPER", 20);
+            assertStringFunctionColumn(returnPacket.getDescribeSelect().get(3), "lower_name", 20);
+            assertStringFunctionColumn(returnPacket.getDescribeSelect().get(4), "SUBSTRING", 2);
+            assertStringFunctionColumn(returnPacket.getDescribeSelect().get(5), "SUBSTRING", 20);
+        } finally {
+            FirebirdNonFixedLengthColumnSizeRegistry.refreshTable("foo_db", "bar_tbl", Collections.emptyMap());
+        }
+    }
+    
+    private void assertStringFunctionColumn(final FirebirdReturnColumnPacket columnPacket, final String expectedAlias, final int expectedLength) {
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
+        when(payload.getCharset()).thenReturn(StandardCharsets.UTF_8);
+        columnPacket.write(payload);
+        verify(payload).writeInt4LE(FirebirdBinaryColumnType.VARYING.getValue() + 1);
+        verify(payload).writeInt4LE(expectedLength);
+        verify(payload).writeBytes(expectedAlias.getBytes(StandardCharsets.UTF_8));
     }
     
     @Test

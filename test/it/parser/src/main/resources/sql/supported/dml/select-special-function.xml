@@ -28,6 +28,7 @@
     <sql-case id="select_convert_function_using_binary" value="SELECT CONVERT('abc' USING BINARY)" db-types="MySQL" />
     <sql-case id="select_position" value="SELECT POSITION('bar' IN 'foobarbar')" db-types="MySQL,Doris,Hive" />
     <sql-case id="select_substring" value="SELECT SUBSTRING('foobarbar' from -4 for 2)" db-types="MySQL" />
+    <sql-case id="select_substring_from_for_with_column" value="SELECT SUBSTRING(name FROM 3 FOR 2) FROM t_order" db-types="Firebird" />
     <sql-case id="select_substr" value="SELECT SUBSTR('foobarbar' from 4)" db-types="MySQL,Presto" />
     <sql-case id="select_extract" value="SELECT EXTRACT(YEAR FROM '2019-07-02')" db-types="MySQL" />
     <sql-case id="select_extract_from_column" value="SELECT EXTRACT(YEAR FROM o.creation_date) FROM t_order o" db-types="MySQL" />
@@ -37,7 +38,7 @@
     <sql-case id="select_trim_with_both" value="SELECT TRIM(BOTH ' ' from ' bar ')" db-types="MySQL,Doris" />
     <sql-case id="select_with_trim_expr" value="SELECT TRIM('#' FROM `name`) FROM t_order" db-types="MySQL" />
     <sql-case id="select_with_trim_expr_and_both" value="SELECT TRIM(BOTH '#' FROM `name`) FROM `t_order`" db-types="MySQL" />
-    <sql-case id="select_with_trim_expr_from_expr" value="SELECT TRIM(remove_name FROM name) FROM t_order" db-types="MySQL" />
+    <sql-case id="select_with_trim_expr_from_expr" value="SELECT TRIM(remove_name FROM name) FROM t_order" db-types="MySQL,Firebird" />
     <sql-case id="select_with_trim_expr_from_expr_and_both" value="SELECT TRIM(BOTH `remove_name` FROM `name`) FROM `t_order`" db-types="MySQL" />
     <sql-case id="select_weight_string" value="SELECT WEIGHT_STRING('bar')" db-types="MySQL,Doris,Hive" />
     <sql-case id="select_values" value="SELECT VALUES(order_id) FROM t_order" db-types="MySQL,Presto,Doris,Hive" />

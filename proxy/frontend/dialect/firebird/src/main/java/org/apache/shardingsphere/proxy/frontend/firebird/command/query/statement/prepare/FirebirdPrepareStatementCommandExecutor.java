@@ -90,11 +90,14 @@ import org.apache.shardingsphere.sql.parser.statement.core.value.identifier.Iden
 
 import java.sql.SQLException;
 import java.sql.Types;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 
 /**
@@ -408,6 +411,9 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
     private void processExpressionProjection(final ExpressionProjection expr, final Collection<FirebirdReturnColumnPacket> describeColumns, final Collection<FirebirdSQLInfoPacketType> requestedItems,
                                              final int columnCount) {
         ExpressionSegment exprSegment = expr.getExpressionSegment().getExpr();
+        if (exprSegment instanceof FunctionSegment && processStringFunctionColumn((FunctionSegment) exprSegment, expr.getAlias().orElse(null), describeColumns, requestedItems, columnCount)) {
+            return;
+        }
         if (exprSegment instanceof FunctionSegment) {
             String functionName = ((FunctionSegment) exprSegment).getFunctionName();
             processCustomColumn(null, functionName, expr.getAlias().orElse(null), getFunctionType(functionName), describeColumns, requestedItems, columnCount);
@@ -465,6 +471,63 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
             default:
                 return 4;
         }
+    }
+    
+    private boolean processStringFunctionColumn(final FunctionSegment functionSegment, final IdentifierValue columnAlias, final Collection<FirebirdReturnColumnPacket> describeColumns,
+                                                final Collection<FirebirdSQLInfoPacketType> requestedItems, final int columnCount) {
+        String functionName = functionSegment.getFunctionName().toUpperCase(Locale.ENGLISH);
+        List<ExpressionSegment> parameters = new ArrayList<>(functionSegment.getParameters());
+        Optional<Integer> argumentLength = findStringFunctionArgument(functionName, parameters).flatMap(this::findTextColumnLength);
+        if (!argumentLength.isPresent()) {
+            return false;
+        }
+        int columnLength = "SUBSTRING".equals(functionName) ? getSubstringLength(parameters, argumentLength.get()) : argumentLength.get();
+        ShardingSphereTable table = new ShardingSphereTable(null, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+        ShardingSphereColumn column = new ShardingSphereColumn(functionName, Types.VARCHAR, false, false, true, true, false, true);
+        String columnAliasString = null == columnAlias ? functionName : columnAlias.getValue();
+        String owner = connectionSession.getConnectionContext().getGrantee().getUsername();
+        describeColumns.add(new FirebirdReturnColumnPacket(requestedItems, columnCount, table, column, null, columnAliasString, owner, columnLength, false, null));
+        return true;
+    }
+    
+    private Optional<ColumnSegment> findStringFunctionArgument(final String functionName, final List<ExpressionSegment> parameters) {
+        if (parameters.isEmpty()) {
+            return Optional.empty();
+        }
+        ExpressionSegment result;
+        switch (functionName) {
+            case "UPPER":
+            case "LOWER":
+            case "SUBSTRING":
+                result = parameters.get(0);
+                break;
+            case "TRIM":
+                result = parameters.get(parameters.size() - 1);
+                break;
+            default:
+                return Optional.empty();
+        }
+        return result instanceof ColumnSegment ? Optional.of((ColumnSegment) result) : Optional.empty();
+    }
+    
+    private Optional<Integer> findTextColumnLength(final ColumnSegment columnSegment) {
+        ColumnSegmentBoundInfo boundInfo = columnSegment.getColumnBoundInfo();
+        ShardingSphereSchema schema = ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData().getDatabase(connectionSession.getCurrentDatabaseName())
+                .findDefaultSchema().orElse(null);
+        ShardingSphereTable table = null == schema ? null : schema.getTable(boundInfo.getOriginalTable().getValue());
+        ShardingSphereColumn column = null == table ? null : table.getColumn(boundInfo.getOriginalColumn().getValue());
+        if (null == column || Types.CHAR != column.getDataType() && Types.VARCHAR != column.getDataType()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(resolveColumnLength(table, column));
+    }
+    
+    private int getSubstringLength(final List<ExpressionSegment> parameters, final int argumentLength) {
+        if (3 != parameters.size() || !(parameters.get(2) instanceof LiteralExpressionSegment)) {
+            return argumentLength;
+        }
+        Object forLength = ((LiteralExpressionSegment) parameters.get(2)).getLiterals();
+        return forLength instanceof Integer || forLength instanceof Long ? (int) Math.min(argumentLength, ((Number) forLength).longValue()) : argumentLength;
     }
     
     private void processCustomColumn(final String tableName, final String columnName, final IdentifierValue columnAlias, final int dataType,
