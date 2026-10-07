@@ -60,6 +60,7 @@ import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementResourceCleaner;
+import org.apache.shardingsphere.sql.parser.statement.core.enums.AggregationType;
 import org.apache.shardingsphere.sql.parser.statement.core.enums.TableSourceType;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.ReturningSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.assignment.ColumnAssignmentSegment;
@@ -69,8 +70,10 @@ import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.Expr
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.FunctionSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.simple.LiteralExpressionSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.simple.ParameterMarkerExpressionSegment;
+import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.item.AggregationProjectionSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.item.ProjectionSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.predicate.WhereSegment;
+import org.apache.shardingsphere.sql.parser.statement.core.segment.generic.DataTypeSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.generic.OwnerSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.generic.bound.ColumnSegmentBoundInfo;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.generic.table.SubqueryTableSegment;
@@ -95,6 +98,7 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 
 /**
@@ -256,7 +260,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
                 processExpressionProjection((ExpressionProjection) each, describeColumns, requestedItems, ++columnCount);
             } else if (each instanceof AggregationProjection) {
                 String functionName = ((AggregationProjection) each).getType().name();
-                processCustomColumn(null, functionName, each.getAlias().orElse(null), getFunctionType(functionName), describeColumns, requestedItems, ++columnCount);
+                processCustomColumn(null, functionName, each.getAlias().orElse(null), getAggregationType((AggregationProjection) each, schema), describeColumns, requestedItems, ++columnCount);
             } else if (each instanceof SubqueryProjection) {
                 SubqueryProjection subquery = (SubqueryProjection) each;
                 processCustomColumn(null, subquery.getColumnName(), subquery.getAlias().orElse(null), Types.INTEGER, describeColumns, requestedItems, ++columnCount);
@@ -316,6 +320,33 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
             }
         }
         return result;
+    }
+    
+    private int getAggregationType(final AggregationProjection projection, final ShardingSphereSchema schema) {
+        Optional<ShardingSphereColumn> argument = AggregationType.SUM == projection.getType() ? findAggregationArgument(projection.getAggregationSegment(), schema) : Optional.empty();
+        if (!argument.isPresent()) {
+            return getFunctionType(projection.getType().name());
+        }
+        switch (argument.get().getDataType()) {
+            case Types.SMALLINT:
+            case Types.INTEGER:
+                return Types.BIGINT;
+            case Types.REAL:
+            case Types.FLOAT:
+            case Types.DOUBLE:
+                return Types.DOUBLE;
+            default:
+                return getFunctionType(projection.getType().name());
+        }
+    }
+    
+    private Optional<ShardingSphereColumn> findAggregationArgument(final AggregationProjectionSegment aggregation, final ShardingSphereSchema schema) {
+        if (1 != aggregation.getParameters().size() || !(aggregation.getParameters().iterator().next() instanceof ColumnSegment)) {
+            return Optional.empty();
+        }
+        ColumnSegmentBoundInfo boundInfo = ((ColumnSegment) aggregation.getParameters().iterator().next()).getColumnBoundInfo();
+        ShardingSphereTable table = schema.getTable(boundInfo.getOriginalTable().getValue());
+        return null == table ? Optional.empty() : Optional.ofNullable(table.getColumn(boundInfo.getOriginalColumn().getValue()));
     }
     
     private void processParameters(final SQLStatementContext sqlStatementContext, final MetaDataContexts metaDataContexts, final Collection<FirebirdReturnColumnPacket> describeColumns,
@@ -410,7 +441,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         ExpressionSegment exprSegment = expr.getExpressionSegment().getExpr();
         if (exprSegment instanceof FunctionSegment) {
             String functionName = ((FunctionSegment) exprSegment).getFunctionName();
-            processCustomColumn(null, functionName, expr.getAlias().orElse(null), getFunctionType(functionName), describeColumns, requestedItems, columnCount);
+            processCustomColumn(null, functionName, expr.getAlias().orElse(null), getFunctionSegmentType((FunctionSegment) exprSegment), describeColumns, requestedItems, columnCount);
         } else if (exprSegment instanceof BinaryOperationExpression) {
             String operationName = getOperationName(((BinaryOperationExpression) exprSegment).getOperator());
             int operationType = getOperationType(((BinaryOperationExpression) exprSegment).getOperator());
@@ -428,6 +459,24 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
                 type = Types.NUMERIC;
             }
             processCustomColumn(null, null, expr.getAlias().orElse(null), type, describeColumns, requestedItems, columnCount);
+        }
+    }
+    
+    private int getFunctionSegmentType(final FunctionSegment functionSegment) {
+        if (!"CAST".equalsIgnoreCase(functionSegment.getFunctionName())) {
+            return getFunctionType(functionSegment.getFunctionName());
+        }
+        Optional<DataTypeSegment> dataType = functionSegment.getParameters().stream().filter(DataTypeSegment.class::isInstance).map(DataTypeSegment.class::cast).findFirst();
+        switch (dataType.map(optional -> optional.getDataTypeName().toUpperCase(Locale.ENGLISH)).orElse("")) {
+            case "SMALLINT":
+                return Types.SMALLINT;
+            case "INT":
+            case "INTEGER":
+                return Types.INTEGER;
+            case "BIGINT":
+                return Types.BIGINT;
+            default:
+                return getFunctionType(functionSegment.getFunctionName());
         }
     }
     

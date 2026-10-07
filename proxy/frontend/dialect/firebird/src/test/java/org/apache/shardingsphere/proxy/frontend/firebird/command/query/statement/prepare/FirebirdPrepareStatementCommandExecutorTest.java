@@ -62,6 +62,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -73,6 +76,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -205,6 +209,35 @@ class FirebirdPrepareStatementCommandExecutorTest {
         FirebirdReturnColumnPacket columnPacket = returnPacket.getDescribeSelect().get(0);
         columnPacket.write(payload);
         verify(payload).writeInt4LE(FirebirdBinaryColumnType.INT64.getValue() + 1);
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("describeExpressionTypeArguments")
+    void assertDescribeExpressionType(final String name, final String sql, final FirebirdBinaryColumnType expectedType) throws Exception {
+        when(packet.getSQL()).thenReturn(sql);
+        when(packet.nextItem()).thenReturn(true, true, true, true, true, false);
+        when(packet.getCurrentItem()).thenReturn(
+                FirebirdSQLInfoPacketType.STMT_TYPE,
+                FirebirdSQLInfoPacketType.SELECT,
+                FirebirdSQLInfoPacketType.TYPE,
+                FirebirdSQLInfoPacketType.TYPE,
+                FirebirdSQLInfoPacketType.DESCRIBE_END,
+                FirebirdSQLInfoPacketType.DESCRIBE_END);
+        FirebirdPrepareStatementCommandExecutor executor = new FirebirdPrepareStatementCommandExecutor(packet, connectionSession);
+        FirebirdPrepareStatementReturnPacket returnPacket = (FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) executor.execute().iterator().next()).getData();
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class, RETURNS_DEEP_STUBS);
+        returnPacket.getDescribeSelect().get(0).write(payload);
+        verify(payload).writeInt4LE(expectedType.getValue() + 1);
+    }
+    
+    private static Stream<Arguments> describeExpressionTypeArguments() {
+        return Stream.of(
+                Arguments.of("sum_of_integer_column", "SELECT SUM(id) FROM foo_tbl", FirebirdBinaryColumnType.INT64),
+                Arguments.of("max_of_integer_column", "SELECT MAX(id) FROM foo_tbl", FirebirdBinaryColumnType.LONG),
+                Arguments.of("cast_column_to_bigint", "SELECT CAST(id AS BIGINT) FROM foo_tbl", FirebirdBinaryColumnType.INT64),
+                Arguments.of("cast_literal_to_bigint", "SELECT CAST(1 AS BIGINT) FROM foo_tbl", FirebirdBinaryColumnType.INT64),
+                Arguments.of("cast_column_to_smallint", "SELECT CAST(id AS SMALLINT) FROM foo_tbl", FirebirdBinaryColumnType.SHORT),
+                Arguments.of("cast_column_to_integer", "SELECT CAST(id AS INTEGER) FROM foo_tbl", FirebirdBinaryColumnType.LONG));
     }
     
     @Test
