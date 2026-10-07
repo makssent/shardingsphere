@@ -580,6 +580,8 @@ public final class FirebirdDMLStatementVisitor extends FirebirdStatementVisitor 
             return JoinType.LEFT.name();
         } else if (null != ctx.RIGHT()) {
             return JoinType.RIGHT.name();
+        } else if (null != ctx.FULL()) {
+            return JoinType.FULL.name();
         } else if (null != ctx.INNER()) {
             return JoinType.INNER.name();
         } else if (null != ctx.CROSS()) {

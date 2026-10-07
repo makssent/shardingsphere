@@ -209,7 +209,7 @@ class FirebirdPrepareStatementCommandExecutorTest {
         FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class, RETURNS_DEEP_STUBS);
         FirebirdReturnColumnPacket columnPacket = returnPacket.getDescribeSelect().get(0);
         columnPacket.write(payload);
-        verify(payload).writeInt4LE(FirebirdBinaryColumnType.INT64.getValue() + 1);
+        verify(payload).writeInt4LE(FirebirdBinaryColumnType.INT64.getValue());
     }
     
     @Test
@@ -317,8 +317,14 @@ class FirebirdPrepareStatementCommandExecutorTest {
         return Stream.of(
                 Arguments.of("not_null_column", "SELECT nn FROM foo_tbl", FirebirdSQLInfoPacketType.SELECT, notNull),
                 Arguments.of("nullable_column", "SELECT id FROM foo_tbl", FirebirdSQLInfoPacketType.SELECT, nullable),
-                Arguments.of("not_null_column_of_join", "SELECT a.nn FROM foo_tbl a JOIN foo_tbl b ON a.id = b.id", FirebirdSQLInfoPacketType.SELECT, nullable),
-                Arguments.of("not_null_column_of_union", "SELECT nn FROM foo_tbl UNION SELECT nn FROM foo_tbl", FirebirdSQLInfoPacketType.SELECT, nullable),
+                Arguments.of("not_null_column_of_inner_join", "SELECT b.nn FROM foo_tbl a JOIN foo_tbl b ON a.id = b.id", FirebirdSQLInfoPacketType.SELECT, notNull),
+                Arguments.of("not_null_column_of_left_join_preserved_side", "SELECT a.nn FROM foo_tbl a LEFT JOIN foo_tbl b ON a.id = b.id", FirebirdSQLInfoPacketType.SELECT, notNull),
+                Arguments.of("not_null_column_of_left_join_null_side", "SELECT b.nn FROM foo_tbl a LEFT JOIN foo_tbl b ON a.id = b.id", FirebirdSQLInfoPacketType.SELECT, nullable),
+                Arguments.of("not_null_column_of_right_join_null_side", "SELECT a.nn FROM foo_tbl a RIGHT JOIN foo_tbl b ON a.id = b.id", FirebirdSQLInfoPacketType.SELECT, nullable),
+                Arguments.of("not_null_column_of_full_join", "SELECT a.nn FROM foo_tbl a FULL JOIN foo_tbl b ON a.id = b.id", FirebirdSQLInfoPacketType.SELECT, nullable),
+                Arguments.of("not_null_column_of_union", "SELECT nn FROM foo_tbl UNION SELECT nn FROM foo_tbl", FirebirdSQLInfoPacketType.SELECT, notNull),
+                Arguments.of("nullable_column_of_union", "SELECT nn FROM foo_tbl UNION SELECT id FROM foo_tbl", FirebirdSQLInfoPacketType.SELECT, nullable),
+                Arguments.of("count", "SELECT COUNT(*) FROM foo_tbl", FirebirdSQLInfoPacketType.SELECT, FirebirdBinaryColumnType.INT64.getValue()),
                 Arguments.of("not_null_column_of_returning", "INSERT INTO foo_tbl (nn) VALUES (1) RETURNING nn", FirebirdSQLInfoPacketType.SELECT, nullable),
                 Arguments.of("not_null_where_parameter", "SELECT id FROM foo_tbl WHERE nn = ?", FirebirdSQLInfoPacketType.BIND, notNull),
                 Arguments.of("not_null_insert_parameter", "INSERT INTO foo_tbl (nn) VALUES (?)", FirebirdSQLInfoPacketType.BIND, notNull),

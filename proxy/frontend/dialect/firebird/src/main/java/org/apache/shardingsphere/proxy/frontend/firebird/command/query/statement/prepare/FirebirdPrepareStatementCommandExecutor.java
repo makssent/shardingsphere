@@ -61,19 +61,24 @@ import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementResourceCleaner;
+import org.apache.shardingsphere.sql.parser.statement.core.enums.AggregationType;
+import org.apache.shardingsphere.sql.parser.statement.core.enums.JoinType;
 import org.apache.shardingsphere.sql.parser.statement.core.enums.TableSourceType;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.ReturningSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.assignment.ColumnAssignmentSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.column.ColumnSegment;
+import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.combine.CombineSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.BinaryOperationExpression;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.ExpressionSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.FunctionSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.simple.LiteralExpressionSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.simple.ParameterMarkerExpressionSegment;
+import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.item.ColumnProjectionSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.item.ProjectionSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.predicate.WhereSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.generic.OwnerSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.generic.bound.ColumnSegmentBoundInfo;
+import org.apache.shardingsphere.sql.parser.statement.core.segment.generic.table.JoinTableSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.generic.table.SimpleTableSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.generic.table.SubqueryTableSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.generic.table.TableSegment;
@@ -92,11 +97,14 @@ import org.apache.shardingsphere.sql.parser.statement.core.value.identifier.Iden
 
 import java.sql.SQLException;
 import java.sql.Types;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 
 /**
@@ -243,7 +251,6 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         ShardingSphereDatabase database = metaDataContexts.getMetaData().getDatabase(databaseName);
         ShardingSphereSchema schema = database.findDefaultSchema().orElse(null);
         Collection<Projection> projections = getProjections(sqlStatementContext, schema);
-        boolean singleTableSelect = isSingleTableSelect(sqlStatementContext);
         int columnCount = 0;
         for (Projection each : projections) {
             if (each instanceof ColumnProjection) {
@@ -254,7 +261,8 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
                     table = metaDataContexts.getMetaData().getDatabase(databaseName).getSchema("system_tables")
                             .getTable(tableName.isEmpty() ? getTableNames(sqlStatementContext).iterator().next() : tableName);
                 }
-                ShardingSphereColumn column = getDescribedColumn(table, table.getColumn(((ColumnProjection) each).getOriginalColumn().getValue()), singleTableSelect && !systemTable);
+                boolean notNullDescribable = !systemTable && isNotNullDescribable(sqlStatementContext, schema, (ColumnProjection) each, columnCount);
+                ShardingSphereColumn column = getDescribedColumn(table, table.getColumn(((ColumnProjection) each).getOriginalColumn().getValue()), notNullDescribable);
                 processColumn(describeColumns, requestedItems, table, column, ((ColumnProjection) each).getOwner().orElse(null), each.getAlias().orElse(null), ++columnCount);
             } else if (each instanceof ExpressionProjection) {
                 processExpressionProjection((ExpressionProjection) each, describeColumns, requestedItems, ++columnCount);
@@ -394,6 +402,54 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         return new ShardingSphereColumn(column.getName(), column.getDataType(), column.isPrimaryKey(), column.isGenerated(), column.isCaseSensitive(), column.isVisible(), column.isUnsigned(), true);
     }
     
+    private boolean isNotNullDescribable(final SQLStatementContext sqlStatementContext, final ShardingSphereSchema schema, final ColumnProjection projection, final int index) {
+        if (!(sqlStatementContext instanceof SelectStatementContext)) {
+            return false;
+        }
+        SelectStatement selectStatement = ((SelectStatementContext) sqlStatementContext).getSqlStatement();
+        TableSegment from = selectStatement.getFrom().orElse(null);
+        boolean notNullSide = from instanceof SimpleTableSegment || from instanceof JoinTableSegment && !findNullableJoinSide(from, projection, false).orElse(true);
+        return notNullSide && (!selectStatement.getCombine().isPresent() || isNotNullInCombine(selectStatement.getCombine().get(), schema, index));
+    }
+    
+    private Optional<Boolean> findNullableJoinSide(final TableSegment tableSegment, final ColumnProjection projection, final boolean nullableSide) {
+        if (tableSegment instanceof SimpleTableSegment) {
+            return isProjectionTable((SimpleTableSegment) tableSegment, projection) ? Optional.of(nullableSide) : Optional.empty();
+        }
+        if (!(tableSegment instanceof JoinTableSegment)) {
+            return Optional.empty();
+        }
+        JoinTableSegment join = (JoinTableSegment) tableSegment;
+        boolean fullJoin = JoinType.FULL.name().equals(join.getJoinType());
+        Optional<Boolean> result = findNullableJoinSide(join.getLeft(), projection, nullableSide || fullJoin || JoinType.RIGHT.name().equals(join.getJoinType()));
+        return result.isPresent() ? result : findNullableJoinSide(join.getRight(), projection, nullableSide || fullJoin || JoinType.LEFT.name().equals(join.getJoinType()));
+    }
+    
+    private boolean isProjectionTable(final SimpleTableSegment tableSegment, final ColumnProjection projection) {
+        String tableName = tableSegment.getTableName().getIdentifier().getValue();
+        Optional<IdentifierValue> owner = projection.getOwner();
+        return owner.isPresent() ? tableSegment.getAliasName().orElse(tableName).equalsIgnoreCase(owner.get().getValue()) : tableName.equalsIgnoreCase(projection.getOriginalTable().getValue());
+    }
+    
+    private boolean isNotNullInCombine(final CombineSegment combine, final ShardingSphereSchema schema, final int index) {
+        if (!isNotNullCombinedColumn(combine.getRight().getSelect(), schema, index)) {
+            return false;
+        }
+        Optional<CombineSegment> leftCombine = combine.getLeft().getSelect().getCombine();
+        return !leftCombine.isPresent() || isNotNullInCombine(leftCombine.get(), schema, index);
+    }
+    
+    private boolean isNotNullCombinedColumn(final SelectStatement selectStatement, final ShardingSphereSchema schema, final int index) {
+        List<ProjectionSegment> projections = new ArrayList<>(selectStatement.getProjections().getProjections());
+        if (!selectStatement.getFrom().map(SimpleTableSegment.class::isInstance).orElse(false) || index >= projections.size() || !(projections.get(index) instanceof ColumnProjectionSegment)) {
+            return false;
+        }
+        ColumnSegmentBoundInfo boundInfo = ((ColumnProjectionSegment) projections.get(index)).getColumn().getColumnBoundInfo();
+        ShardingSphereTable table = schema.getTable(boundInfo.getOriginalTable().getValue());
+        ShardingSphereColumn column = null == table ? null : table.getColumn(boundInfo.getOriginalColumn().getValue());
+        return null != column && !column.isNullable() && TableType.TABLE == table.getType();
+    }
+    
     private Collection<ColumnSegment> findAffectedColumns(final SQLStatementContext sqlStatementContext) {
         Collection<ColumnSegment> result = new LinkedList<>();
         if (sqlStatementContext instanceof UpdateStatementContext) {
@@ -490,7 +546,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
     private void processCustomColumn(final String tableName, final String columnName, final IdentifierValue columnAlias, final int dataType,
                                      final Collection<FirebirdReturnColumnPacket> describeColumns, final Collection<FirebirdSQLInfoPacketType> requestedItems, final int columnCount) {
         ShardingSphereTable table = new ShardingSphereTable(tableName, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
-        ShardingSphereColumn column = new ShardingSphereColumn(columnName, dataType, false, false, true, true, false, true);
+        ShardingSphereColumn column = new ShardingSphereColumn(columnName, dataType, false, false, true, true, false, !AggregationType.COUNT.name().equals(columnName));
         processColumn(describeColumns, requestedItems, table, column, null, columnAlias, columnCount);
     }
     

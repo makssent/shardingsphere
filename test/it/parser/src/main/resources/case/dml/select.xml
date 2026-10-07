@@ -13673,6 +13673,39 @@
         </from>
     </select>
 
+    <select sql-case-id="select_full_join_firebird">
+        <projections start-index="7" stop-index="16">
+            <column-projection name="order_id" start-index="7" stop-index="16">
+                <owner name="a" start-index="7" stop-index="7" />
+            </column-projection>
+        </projections>
+        <from>
+            <join-table join-type="FULL">
+                <left>
+                    <simple-table name="t_order" alias="a" start-index="23" stop-index="31" />
+                </left>
+                <right>
+                    <simple-table name="t_order_item" alias="b" start-index="43" stop-index="56" />
+                </right>
+                <on-condition>
+                    <binary-operation-expression start-index="61" stop-index="83">
+                        <left>
+                            <column name="order_id" start-index="61" stop-index="70">
+                                <owner name="a" start-index="61" stop-index="61" />
+                            </column>
+                        </left>
+                        <operator>=</operator>
+                        <right>
+                            <column name="order_id" start-index="74" stop-index="83">
+                                <owner name="b" start-index="74" stop-index="74" />
+                            </column>
+                        </right>
+                    </binary-operation-expression>
+                </on-condition>
+            </join-table>
+        </from>
+    </select>
+
     <select sql-case-id="select_comma_join_firebird">
         <projections start-index="7" stop-index="7">
             <shorthand-projection start-index="7" stop-index="7" />
