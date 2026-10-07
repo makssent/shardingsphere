@@ -99,6 +99,13 @@ class FirebirdReturnColumnPacketTest {
         }
     }
     
+    @Test
+    void assertWriteOctetsSubTypeAndLength() {
+        createPacket(Arrays.asList(FirebirdSQLInfoPacketType.SUB_TYPE, FirebirdSQLInfoPacketType.LENGTH), Types.VARBINARY, 10, false, null).write(payload);
+        verify(payload).writeInt4LE(1);
+        verify(payload).writeInt4LE(10);
+    }
+    
     private FirebirdReturnColumnPacket createPacket(final Collection<FirebirdSQLInfoPacketType> requestedItems, final int dataType, final Integer columnLength,
                                                     final boolean blobColumn, final Integer blobSubType) {
         ShardingSphereColumn column = new ShardingSphereColumn("col", dataType, false, false, false, true, false, true);
