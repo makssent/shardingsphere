@@ -62,6 +62,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -73,6 +76,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -140,7 +144,8 @@ class FirebirdPrepareStatementCommandExecutorTest {
         RuleMetaData globalRuleMetaData = new RuleMetaData(Collections.singleton(parserRule));
         ShardingSphereColumn column = new ShardingSphereColumn("id", Types.INTEGER, false, false, true, true, false, true);
         ShardingSphereColumn blobColumn = new ShardingSphereColumn("content", Types.BLOB, false, false, true, true, false, true);
-        ShardingSphereTable table = new ShardingSphereTable("foo_tbl", Arrays.asList(column, blobColumn), Collections.emptyList(), Collections.emptyList());
+        ShardingSphereColumn notNullColumn = new ShardingSphereColumn("nn", Types.INTEGER, false, false, true, true, false, false);
+        ShardingSphereTable table = new ShardingSphereTable("foo_tbl", Arrays.asList(column, blobColumn, notNullColumn), Collections.emptyList(), Collections.emptyList());
         ShardingSphereSchema schema = new ShardingSphereSchema("foo_db", databaseType, Collections.singleton(table), Collections.emptyList());
         ShardingSphereDatabase database = spy(new ShardingSphereDatabase(
                 "foo_db", databaseType, new ResourceMetaData(Collections.emptyMap()), new RuleMetaData(Collections.emptyList()), Collections.singleton(schema),
@@ -285,5 +290,39 @@ class FirebirdPrepareStatementCommandExecutorTest {
         FirebirdPrepareStatementCommandExecutor executor = new FirebirdPrepareStatementCommandExecutor(packet, connectionSession);
         executor.execute();
         verify(connectionSession).invalidatePreparedStatementCache(FirebirdStatementResourceCleaner.createPreparedStatementCacheKey(1));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("describeNullableArguments")
+    void assertDescribeNullable(final String name, final String sql, final FirebirdSQLInfoPacketType describeItem, final int expectedType) throws Exception {
+        when(packet.getSQL()).thenReturn(sql);
+        when(packet.nextItem()).thenReturn(true, true, true, true, true, false);
+        when(packet.getCurrentItem()).thenReturn(
+                FirebirdSQLInfoPacketType.STMT_TYPE,
+                describeItem,
+                FirebirdSQLInfoPacketType.TYPE,
+                FirebirdSQLInfoPacketType.TYPE,
+                FirebirdSQLInfoPacketType.DESCRIBE_END,
+                FirebirdSQLInfoPacketType.DESCRIBE_END);
+        FirebirdPrepareStatementCommandExecutor executor = new FirebirdPrepareStatementCommandExecutor(packet, connectionSession);
+        FirebirdPrepareStatementReturnPacket returnPacket = (FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) executor.execute().iterator().next()).getData();
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class, RETURNS_DEEP_STUBS);
+        (FirebirdSQLInfoPacketType.SELECT == describeItem ? returnPacket.getDescribeSelect() : returnPacket.getDescribeBind()).get(0).write(payload);
+        verify(payload).writeInt4LE(expectedType);
+    }
+    
+    private static Stream<Arguments> describeNullableArguments() {
+        int notNull = FirebirdBinaryColumnType.LONG.getValue();
+        int nullable = FirebirdBinaryColumnType.LONG.getValue() + 1;
+        return Stream.of(
+                Arguments.of("not_null_column", "SELECT nn FROM foo_tbl", FirebirdSQLInfoPacketType.SELECT, notNull),
+                Arguments.of("nullable_column", "SELECT id FROM foo_tbl", FirebirdSQLInfoPacketType.SELECT, nullable),
+                Arguments.of("not_null_column_of_join", "SELECT a.nn FROM foo_tbl a JOIN foo_tbl b ON a.id = b.id", FirebirdSQLInfoPacketType.SELECT, nullable),
+                Arguments.of("not_null_column_of_union", "SELECT nn FROM foo_tbl UNION SELECT nn FROM foo_tbl", FirebirdSQLInfoPacketType.SELECT, nullable),
+                Arguments.of("not_null_column_of_returning", "INSERT INTO foo_tbl (nn) VALUES (1) RETURNING nn", FirebirdSQLInfoPacketType.SELECT, nullable),
+                Arguments.of("not_null_where_parameter", "SELECT id FROM foo_tbl WHERE nn = ?", FirebirdSQLInfoPacketType.BIND, notNull),
+                Arguments.of("not_null_insert_parameter", "INSERT INTO foo_tbl (nn) VALUES (?)", FirebirdSQLInfoPacketType.BIND, notNull),
+                Arguments.of("nullable_insert_parameter", "INSERT INTO foo_tbl (id) VALUES (?)", FirebirdSQLInfoPacketType.BIND, nullable),
+                Arguments.of("not_null_update_parameter", "UPDATE foo_tbl SET nn = ? WHERE id = 1", FirebirdSQLInfoPacketType.BIND, notNull));
     }
 }

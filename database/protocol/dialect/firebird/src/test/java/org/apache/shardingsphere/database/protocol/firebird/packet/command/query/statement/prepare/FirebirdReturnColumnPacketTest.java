@@ -74,6 +74,15 @@ class FirebirdReturnColumnPacketTest {
     }
     
     @ParameterizedTest(name = "{0}")
+    @MethodSource("assertWriteTypeArguments")
+    void assertWriteType(final String name, final boolean nullable, final int expectedType) {
+        ShardingSphereColumn column = new ShardingSphereColumn("col", Types.INTEGER, false, false, false, true, false, nullable);
+        ShardingSphereTable table = new ShardingSphereTable("tbl", Collections.singleton(column), Collections.emptyList(), Collections.emptyList());
+        new FirebirdReturnColumnPacket(Collections.singletonList(FirebirdSQLInfoPacketType.TYPE), 1, table, column, "t", "c", "o", null, false, null).write(payload);
+        verify(payload).writeInt4LE(expectedType);
+    }
+    
+    @ParameterizedTest(name = "{0}")
     @MethodSource("assertWriteLengthArguments")
     void assertWriteLength(final String name, final FirebirdBinaryColumnType columnType, final int expectedLength) {
         FirebirdReturnColumnPacket packet = createPacket(Collections.singletonList(FirebirdSQLInfoPacketType.LENGTH), Types.INTEGER, 99, false, null);
@@ -120,5 +129,9 @@ class FirebirdReturnColumnPacketTest {
                 Arguments.of("blob_with_subtype", true, 7, 7),
                 Arguments.of("blob_without_subtype", true, null, FirebirdBinaryColumnType.BLOB.getSubtype()),
                 Arguments.of("long_default_subtype", false, null, FirebirdBinaryColumnType.LONG.getSubtype()));
+    }
+    
+    private static Stream<Arguments> assertWriteTypeArguments() {
+        return Stream.of(Arguments.of("nullable_column", true, FirebirdBinaryColumnType.LONG.getValue() + 1), Arguments.of("not_null_column", false, FirebirdBinaryColumnType.LONG.getValue()));
     }
 }

@@ -63,7 +63,7 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
                     FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.SQLDA_SEQ, index, payload);
                     break;
                 case TYPE:
-                    int type = columnType.getValue() + 1;
+                    int type = column.isNullable() ? columnType.getValue() + 1 : columnType.getValue();
                     FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.TYPE, type, payload);
                     break;
                 case SUB_TYPE:
