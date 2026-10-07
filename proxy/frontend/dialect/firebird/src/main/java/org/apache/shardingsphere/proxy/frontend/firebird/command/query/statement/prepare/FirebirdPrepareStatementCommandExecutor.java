@@ -427,7 +427,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
             } else if (value instanceof Number) {
                 type = Types.NUMERIC;
             }
-            processCustomColumn(null, null, expr.getAlias().orElse(null), type, describeColumns, requestedItems, columnCount);
+            processLiteralColumn(value, type, expr.getAlias().orElse(null), describeColumns, requestedItems, columnCount);
         }
     }
     
@@ -483,6 +483,21 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         Integer blobSubtype = resolveBlobSubtype(table, column, blobColumn);
         Integer columnLength = blobColumn ? null : resolveColumnLength(table, column);
         describeColumns.add(new FirebirdReturnColumnPacket(requestedItems, idx, table, column, tableAliasString, columnAliasString, owner, columnLength, blobColumn, blobSubtype));
+    }
+    
+    private void processLiteralColumn(final Object value, final int dataType, final IdentifierValue columnAlias, final Collection<FirebirdReturnColumnPacket> describeColumns,
+                                      final Collection<FirebirdSQLInfoPacketType> requestedItems, final int columnCount) {
+        ShardingSphereTable table = new ShardingSphereTable(null, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+        ShardingSphereColumn column = new ShardingSphereColumn("CONSTANT", dataType, false, false, true, true, false, false);
+        String columnAliasString = null == columnAlias ? column.getName() : columnAlias.getValue();
+        String owner = connectionSession.getConnectionContext().getGrantee().getUsername();
+        Integer columnLength = value instanceof String ? getStringLiteralLength((String) value) : null;
+        describeColumns.add(new FirebirdReturnColumnPacket(requestedItems, columnCount, table, column, null, columnAliasString, owner, columnLength, false, null));
+    }
+    
+    private int getStringLiteralLength(final String value) {
+        String text = value.replace("''", "'");
+        return text.codePointCount(0, text.length());
     }
     
     private boolean isBlobColumn(final ShardingSphereTable table, final ShardingSphereColumn column) {
