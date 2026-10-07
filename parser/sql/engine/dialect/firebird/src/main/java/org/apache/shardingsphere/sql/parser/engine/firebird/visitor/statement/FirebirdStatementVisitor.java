@@ -61,8 +61,10 @@ import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.Sche
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.SimpleExprContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.SpecialFunctionContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.StringLiteralsContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.SubstringFunctionContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.TableNameContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.TableNamesContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.TrimFunctionContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.UnreservedWordContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.VariableContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.WithClauseContext;
@@ -499,6 +501,12 @@ public abstract class FirebirdStatementVisitor extends FirebirdStatementBaseVisi
         if (null != ctx.genIdFunction()) {
             return visit(ctx.genIdFunction());
         }
+        if (null != ctx.substringFunction()) {
+            return visit(ctx.substringFunction());
+        }
+        if (null != ctx.trimFunction()) {
+            return visit(ctx.trimFunction());
+        }
         return new FunctionSegment(ctx.getStart().getStartIndex(), ctx.getStop().getStopIndex(), ctx.getChild(0).getChild(0).getText(), getOriginalText(ctx));
     }
     
@@ -528,6 +536,25 @@ public abstract class FirebirdStatementVisitor extends FirebirdStatementBaseVisi
             result.getParameters().add(segment);
         }
         result.getParameters().add((ExpressionSegment) visit(ctx.expr()));
+        return result;
+    }
+    
+    @Override
+    public final ASTNode visitSubstringFunction(final SubstringFunctionContext ctx) {
+        FunctionSegment result = new FunctionSegment(ctx.getStart().getStartIndex(), ctx.getStop().getStopIndex(), ctx.SUBSTRING().getText(), getOriginalText(ctx));
+        result.getParameters().add((ExpressionSegment) visit(ctx.expr()));
+        for (TerminalNode each : ctx.NUMBER_()) {
+            result.getParameters().add(new LiteralExpressionSegment(each.getSymbol().getStartIndex(), each.getSymbol().getStopIndex(), new NumberLiteralValue(each.getText()).getValue()));
+        }
+        return result;
+    }
+    
+    @Override
+    public final ASTNode visitTrimFunction(final TrimFunctionContext ctx) {
+        FunctionSegment result = new FunctionSegment(ctx.getStart().getStartIndex(), ctx.getStop().getStopIndex(), ctx.TRIM().getText(), getOriginalText(ctx));
+        for (ExprContext each : ctx.expr()) {
+            result.getParameters().add((ExpressionSegment) visit(each));
+        }
         return result;
     }
     

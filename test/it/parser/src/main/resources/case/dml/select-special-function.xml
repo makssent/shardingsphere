@@ -251,6 +251,28 @@
             </expression-projection>
         </projections>
     </select>
+    <select sql-case-id="select_substring_from_for_with_column">
+        <projections start-index="7" stop-index="34">
+            <expression-projection text="SUBSTRING(name FROM 3 FOR 2)" start-index="7" stop-index="34">
+                <expr>
+                    <function function-name="SUBSTRING" start-index="7" stop-index="34" text="SUBSTRING(name FROM 3 FOR 2)">
+                        <parameter>
+                            <column name="name" start-index="17" stop-index="20" />
+                        </parameter>
+                        <parameter>
+                            <literal-expression value="3" start-index="27" stop-index="27" />
+                        </parameter>
+                        <parameter>
+                            <literal-expression value="2" start-index="33" stop-index="33" />
+                        </parameter>
+                    </function>
+                </expr>
+            </expression-projection>
+        </projections>
+        <from>
+            <simple-table name="t_order" start-index="41" stop-index="47" />
+        </from>
+    </select>
     <select sql-case-id="select_substr">
         <projections start-index="7" stop-index="32">
             <expression-projection text="SUBSTR('foobarbar' from 4)" start-index="7" stop-index="32">
