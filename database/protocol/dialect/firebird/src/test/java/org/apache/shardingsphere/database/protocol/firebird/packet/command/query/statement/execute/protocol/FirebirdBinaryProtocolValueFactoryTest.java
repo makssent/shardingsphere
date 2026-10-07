@@ -46,6 +46,12 @@ class FirebirdBinaryProtocolValueFactoryTest {
     }
     
     @Test
+    void assertGetDecFloatBinaryProtocolValue() {
+        assertThat(FirebirdBinaryProtocolValueFactory.getBinaryProtocolValue(FirebirdBinaryColumnType.DEC16), isA(FirebirdDecFloat16BinaryProtocolValue.class));
+        assertThat(FirebirdBinaryProtocolValueFactory.getBinaryProtocolValue(FirebirdBinaryColumnType.DEC34), isA(FirebirdDecFloat34BinaryProtocolValue.class));
+    }
+    
+    @Test
     void assertGetInt8BinaryProtocolValue() {
         FirebirdBinaryProtocolValue actual = FirebirdBinaryProtocolValueFactory.getBinaryProtocolValue(FirebirdBinaryColumnType.INT64);
         assertThat(actual, isA(FirebirdInt8BinaryProtocolValue.class));

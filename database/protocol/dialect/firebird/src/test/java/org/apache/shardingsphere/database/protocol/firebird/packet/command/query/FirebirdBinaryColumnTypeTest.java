@@ -18,6 +18,7 @@
 package org.apache.shardingsphere.database.protocol.firebird.packet.command.query;
 
 import org.firebirdsql.gds.BlrConstants;
+import org.firebirdsql.jdbc.JaybirdTypeCodes;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Types;
@@ -54,6 +55,7 @@ class FirebirdBinaryColumnTypeTest {
         assertThat(FirebirdBinaryColumnType.valueOfJDBCType(Types.ARRAY), is(FirebirdBinaryColumnType.ARRAY));
         assertThat(FirebirdBinaryColumnType.valueOfJDBCType(Types.TIME_WITH_TIMEZONE), is(FirebirdBinaryColumnType.TIME_TZ));
         assertThat(FirebirdBinaryColumnType.valueOfJDBCType(Types.TIMESTAMP_WITH_TIMEZONE), is(FirebirdBinaryColumnType.TIMESTAMP_TZ));
+        assertThat(FirebirdBinaryColumnType.valueOfJDBCType(JaybirdTypeCodes.DECFLOAT), is(FirebirdBinaryColumnType.DEC34));
         
         assertThat(FirebirdBinaryColumnType.valueOfBLRType(BlrConstants.blr_varying2), is(FirebirdBinaryColumnType.VARYING));
         assertThat(FirebirdBinaryColumnType.valueOfBLRType(BlrConstants.blr_text2), is(FirebirdBinaryColumnType.TEXT));

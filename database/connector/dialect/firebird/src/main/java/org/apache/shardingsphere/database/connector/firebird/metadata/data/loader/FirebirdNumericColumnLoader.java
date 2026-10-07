@@ -33,8 +33,8 @@ import java.util.Map;
 /**
  * Loader for Firebird numeric columns.
  *
- * <p>Loads NUMERIC and DECIMAL columns stored as SMALLINT, INTEGER or BIGINT ({@code RDB$FIELD_TYPE} 7, 8 and 16) and all INT128 columns ({@code RDB$FIELD_TYPE} 26)
- * with their sub type and scale.</p>
+ * <p>Loads NUMERIC and DECIMAL columns stored as SMALLINT, INTEGER or BIGINT ({@code RDB$FIELD_TYPE} 7, 8 and 16), all INT128 columns ({@code RDB$FIELD_TYPE} 26)
+ * and all DECFLOAT columns ({@code RDB$FIELD_TYPE} 24 and 25) with their sub type and scale.</p>
  */
 @RequiredArgsConstructor
 final class FirebirdNumericColumnLoader {
@@ -44,7 +44,7 @@ final class FirebirdNumericColumnLoader {
                     + "FROM RDB$RELATION_FIELDS rf "
                     + "JOIN RDB$FIELDS f ON rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME "
                     + "WHERE TRIM(UPPER(rf.RDB$RELATION_NAME)) = ? "
-                    + "AND (f.RDB$FIELD_TYPE IN (7, 8, 16) AND (f.RDB$FIELD_SUB_TYPE IN (1, 2) OR f.RDB$FIELD_SCALE < 0) OR f.RDB$FIELD_TYPE = 26)";
+                    + "AND (f.RDB$FIELD_TYPE IN (7, 8, 16) AND (f.RDB$FIELD_SUB_TYPE IN (1, 2) OR f.RDB$FIELD_SCALE < 0) OR f.RDB$FIELD_TYPE IN (24, 25, 26))";
     
     private final MetaDataLoaderMaterial material;
     

@@ -22,6 +22,7 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.protocol.binary.BinaryColumnType;
 import org.firebirdsql.gds.BlrConstants;
+import org.firebirdsql.jdbc.JaybirdTypeCodes;
 
 import java.sql.Types;
 import java.util.HashMap;
@@ -59,8 +60,8 @@ public enum FirebirdBinaryColumnType implements BinaryColumnType {
     INT128(32752, 16),
     TIMESTAMP_TZ(32754, 10),
     TIME_TZ(32756, 6),
-    DEC16(32760, 2),
-    DEC34(32762, 4),
+    DEC16(32760, 8),
+    DEC34(32762, 16),
     BOOLEAN(32764, 1),
     NULL(32766, 0);
     
@@ -102,6 +103,7 @@ public enum FirebirdBinaryColumnType implements BinaryColumnType {
         JDBC_TYPE_AND_COLUMN_TYPE_MAP.put(Types.ARRAY, ARRAY);
         JDBC_TYPE_AND_COLUMN_TYPE_MAP.put(Types.TIME_WITH_TIMEZONE, TIME_TZ);
         JDBC_TYPE_AND_COLUMN_TYPE_MAP.put(Types.TIMESTAMP_WITH_TIMEZONE, TIMESTAMP_TZ);
+        JDBC_TYPE_AND_COLUMN_TYPE_MAP.put(JaybirdTypeCodes.DECFLOAT, DEC34);
         
         BLR_TYPE_AND_COLUMN_TYPE_MAP.put(BlrConstants.blr_varying2, VARYING);
         BLR_TYPE_AND_COLUMN_TYPE_MAP.put(BlrConstants.blr_text2, TEXT);
