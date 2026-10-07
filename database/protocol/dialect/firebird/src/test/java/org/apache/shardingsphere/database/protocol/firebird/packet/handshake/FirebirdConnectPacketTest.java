@@ -18,6 +18,7 @@
 package org.apache.shardingsphere.database.protocol.firebird.packet.handshake;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdArchType;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdAuthenticationMethod;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdUserDataType;
@@ -36,6 +37,7 @@ import java.util.List;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -93,6 +95,17 @@ class FirebirdConnectPacketTest {
         assertDoesNotThrow(() -> createPacketWithoutSpecificData().write(payload));
     }
     
+    @Test
+    void assertGetLength() {
+        assertThat(FirebirdConnectPacket.getLength(new FirebirdPacketPayload(createConnectPacketBytes(), StandardCharsets.UTF_8)), is(60));
+    }
+    
+    @Test
+    void assertGetLengthWithIncompletePacket() {
+        FirebirdPacketPayload incompletePayload = new FirebirdPacketPayload(createConnectPacketBytes().slice(0, 16), StandardCharsets.UTF_8);
+        assertThrows(IndexOutOfBoundsException.class, () -> FirebirdConnectPacket.getLength(incompletePayload));
+    }
+    
     private FirebirdConnectPacket createPacketWithSpecificData() {
         when(payload.readInt4()).thenReturn(FirebirdCommandPacketType.CONNECT.getValue(), 1, FirebirdArchType.ARCH_GENERIC.getCode(), 1);
         when(payload.readString()).thenReturn("db");
@@ -134,5 +147,15 @@ class FirebirdConnectPacketTest {
         when(userInfo.readSlice(5)).thenReturn(loginBuf);
         when(payload.readBuffer()).thenReturn(userInfo);
         return new FirebirdConnectPacket(payload);
+    }
+    
+    private ByteBuf createConnectPacketBytes() {
+        ByteBuf result = Unpooled.buffer();
+        result.writeInt(FirebirdCommandPacketType.CONNECT.getValue()).writeInt(FirebirdCommandPacketType.ATTACH.getValue()).writeInt(3).writeInt(FirebirdArchType.ARCH_GENERIC.getCode());
+        result.writeInt(6).writeBytes("foo_db".getBytes(StandardCharsets.US_ASCII)).writeZero(2);
+        result.writeInt(1);
+        result.writeInt(3).writeBytes(new byte[]{9, 1, 'x'}).writeZero(1);
+        result.writeInt(FirebirdProtocolVersion.PROTOCOL_VERSION13.getCode()).writeInt(FirebirdArchType.ARCH_GENERIC.getCode()).writeInt(0).writeInt(5).writeInt(2);
+        return result;
     }
 }
