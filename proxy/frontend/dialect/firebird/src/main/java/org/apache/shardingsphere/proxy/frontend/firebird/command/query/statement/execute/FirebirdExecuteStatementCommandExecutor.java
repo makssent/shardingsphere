@@ -93,7 +93,7 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
             }
             Collection<DatabasePacket> result = new LinkedList<>();
             if (packet.isStoredProcedure() && proxyBackendHandler.next()) {
-                result.add(getSQLResponse());
+                result.add(getSQLResponse(preparedStatement));
             }
             result.add(new FirebirdGenericResponsePacket());
             return result;
@@ -162,9 +162,9 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
         }
     }
     
-    private FirebirdSQLResponsePacket getSQLResponse() throws SQLException {
+    private FirebirdSQLResponsePacket getSQLResponse(final FirebirdServerPreparedStatement preparedStatement) throws SQLException {
         QueryResponseRow queryResponseRow = proxyBackendHandler.getRowData();
-        BinaryRow row = FirebirdBinaryRowBuilder.build(queryResponseRow);
+        BinaryRow row = FirebirdBinaryRowBuilder.build(queryResponseRow, preparedStatement.getSelectColumns());
         return new FirebirdSQLResponsePacket(row);
     }
 }

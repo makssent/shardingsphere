@@ -17,7 +17,11 @@
 
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.fetch;
 
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNumericColumn;
+import org.apache.shardingsphere.database.protocol.binary.BinaryCell;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFetchStatementPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdReturnColumnPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdFetchResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.connector.ProxyDatabaseConnectionManager;
@@ -25,7 +29,9 @@ import org.apache.shardingsphere.proxy.backend.handler.ProxyBackendHandler;
 import org.apache.shardingsphere.proxy.backend.response.data.QueryResponseCell;
 import org.apache.shardingsphere.proxy.backend.response.data.QueryResponseRow;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.proxy.backend.session.ServerPreparedStatementRegistry;
 import org.apache.shardingsphere.proxy.frontend.command.executor.ResponseType;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 import org.firebirdsql.gds.ISCConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,6 +41,7 @@ import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.Collection;
@@ -46,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -146,6 +154,26 @@ class FirebirdFetchStatementCommandExecutorTest {
         assertTrue(executor.next());
         assertFetchEndResponse((FirebirdFetchResponsePacket) executor.getQueryRowPacket());
         assertFalse(executor.next());
+        FirebirdFetchStatementCache.getInstance().unregisterStatement(CONNECTION_ID, STATEMENT_ID);
+    }
+    
+    @Test
+    void assertExecuteEncodesNumericColumnsAsDescribed() throws SQLException {
+        FirebirdFetchStatementCache.getInstance().registerStatement(CONNECTION_ID, STATEMENT_ID, proxyBackendHandler);
+        FirebirdServerPreparedStatement preparedStatement = new FirebirdServerPreparedStatement("SELECT N FROM T", null, null);
+        FirebirdReturnColumnPacket column = mock(FirebirdReturnColumnPacket.class);
+        when(column.getNumericColumn()).thenReturn(new FirebirdNumericColumn(7, 1, -2));
+        preparedStatement.getSelectColumns().add(column);
+        ServerPreparedStatementRegistry registry = new ServerPreparedStatementRegistry();
+        registry.addPreparedStatement(STATEMENT_ID, preparedStatement);
+        when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(registry);
+        when(packet.getFetchSize()).thenReturn(1);
+        when(proxyBackendHandler.next()).thenReturn(true);
+        when(proxyBackendHandler.getRowData()).thenReturn(new QueryResponseRow(Collections.singletonList(new QueryResponseCell(Types.NUMERIC, new BigDecimal("-12.34")))));
+        executor = new FirebirdFetchStatementCommandExecutor(packet, connectionSession);
+        BinaryCell actual = ((FirebirdFetchResponsePacket) executor.execute().iterator().next()).getRow().getCells().iterator().next();
+        assertThat(actual.getColumnType(), is(FirebirdBinaryColumnType.SHORT));
+        assertThat(actual.getData(), is(-1234));
         FirebirdFetchStatementCache.getInstance().unregisterStatement(CONNECTION_ID, STATEMENT_ID);
     }
     

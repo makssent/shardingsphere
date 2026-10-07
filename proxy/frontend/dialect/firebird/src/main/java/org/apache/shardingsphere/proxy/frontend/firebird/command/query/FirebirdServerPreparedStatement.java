@@ -20,9 +20,13 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdReturnColumnPacket;
 import org.apache.shardingsphere.infra.binder.context.statement.SQLStatementContext;
 import org.apache.shardingsphere.infra.hint.HintValueContext;
 import org.apache.shardingsphere.proxy.backend.session.ServerPreparedStatement;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Prepared statement for Firebird.
@@ -39,4 +43,6 @@ public final class FirebirdServerPreparedStatement implements ServerPreparedStat
     
     @Setter
     private long affectedRows;
+    
+    private final List<FirebirdReturnColumnPacket> selectColumns = new ArrayList<>();
 }

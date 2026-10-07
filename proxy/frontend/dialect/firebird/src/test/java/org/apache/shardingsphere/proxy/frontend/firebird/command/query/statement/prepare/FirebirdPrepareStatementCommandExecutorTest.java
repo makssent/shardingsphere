@@ -262,7 +262,7 @@ class FirebirdPrepareStatementCommandExecutorTest {
                 packet, connectionSession).execute().iterator().next()).getData();
         FirebirdPacketPayload selectPayload = mock(FirebirdPacketPayload.class, RETURNS_DEEP_STUBS);
         returnPacket.getDescribeSelect().get(0).write(selectPayload);
-        verify(selectPayload).writeInt4LE(0);
+        verify(selectPayload).writeInt4LE(-4);
         FirebirdPacketPayload bindPayload = mock(FirebirdPacketPayload.class, RETURNS_DEEP_STUBS);
         returnPacket.getDescribeBind().get(0).write(bindPayload);
         verify(bindPayload).writeInt4LE(-4);

@@ -19,17 +19,21 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statemen
 
 import org.apache.shardingsphere.database.protocol.binary.BinaryRow;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFetchStatementPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdReturnColumnPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdFetchResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.handler.ProxyBackendHandler;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.proxy.backend.session.ServerPreparedStatement;
 import org.apache.shardingsphere.proxy.frontend.command.executor.QueryCommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.command.executor.ResponseType;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdBinaryRowBuilder;
 
 import java.sql.SQLException;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 
 /**
  * Firebird fetch statement command executor.
@@ -40,12 +44,20 @@ public final class FirebirdFetchStatementCommandExecutor implements QueryCommand
     
     private final ProxyBackendHandler proxyBackendHandler;
     
+    private final List<FirebirdReturnColumnPacket> selectColumns;
+    
     private int fetchCount;
     
     public FirebirdFetchStatementCommandExecutor(final FirebirdFetchStatementPacket packet, final ConnectionSession connectionSession) {
         this.connectionSession = connectionSession;
         proxyBackendHandler = FirebirdFetchStatementCache.getInstance().getFetchBackendHandler(connectionSession.getConnectionId(), packet.getStatementId());
+        selectColumns = null == proxyBackendHandler ? Collections.emptyList() : getSelectColumns(connectionSession, packet.getStatementId());
         fetchCount = packet.getFetchSize();
+    }
+    
+    private static List<FirebirdReturnColumnPacket> getSelectColumns(final ConnectionSession connectionSession, final int statementId) {
+        ServerPreparedStatement preparedStatement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(statementId);
+        return preparedStatement instanceof FirebirdServerPreparedStatement ? ((FirebirdServerPreparedStatement) preparedStatement).getSelectColumns() : Collections.emptyList();
     }
     
     @Override
@@ -72,7 +84,7 @@ public final class FirebirdFetchStatementCommandExecutor implements QueryCommand
         fetchCount--;
         if (0 <= fetchCount) {
             if (proxyBackendHandler.next()) {
-                BinaryRow row = FirebirdBinaryRowBuilder.build(proxyBackendHandler.getRowData());
+                BinaryRow row = FirebirdBinaryRowBuilder.build(proxyBackendHandler.getRowData(), selectColumns);
                 return FirebirdFetchResponsePacket.getFetchRowPacket(row);
             } else {
                 connectionSession.getDatabaseConnectionManager().unmarkResourceInUse(proxyBackendHandler);

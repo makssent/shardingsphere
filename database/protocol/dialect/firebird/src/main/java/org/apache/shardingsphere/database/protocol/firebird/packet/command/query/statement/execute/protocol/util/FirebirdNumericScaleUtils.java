@@ -23,6 +23,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.math.RoundingMode;
 
 /**
  * Numeric scale utility class of Firebird.
@@ -45,6 +46,35 @@ public final class FirebirdNumericScaleUtils {
             return value;
         }
         return new BigDecimal(value instanceof BigInteger ? (BigInteger) value : BigInteger.valueOf(((Number) value).longValue()), -scale);
+    }
+    
+    /**
+     * Convert a number to the unscaled integer of a Firebird storage type: the value multiplied by {@code 10^-scale}, rounded half up as Firebird does.
+     *
+     * @param type storage type
+     * @param value value
+     * @param scale scale of the column, zero or negative
+     * @return {@code Integer} for SHORT and LONG, {@code Long} for INT64, {@code BigInteger} for INT128, the value itself for other types and non-numbers
+     * @throws ArithmeticException if the value does not fit the storage type
+     */
+    public static Object toUnscaledValue(final FirebirdBinaryColumnType type, final Object value, final int scale) {
+        if (!isScaledType(type) || !(value instanceof Number)) {
+            return value;
+        }
+        BigInteger unscaled = (value instanceof BigDecimal ? (BigDecimal) value : new BigDecimal(value.toString())).setScale(-scale, RoundingMode.HALF_UP).unscaledValue();
+        switch (type) {
+            case SHORT:
+                return (int) unscaled.shortValueExact();
+            case LONG:
+                return unscaled.intValueExact();
+            case INT64:
+                return unscaled.longValueExact();
+            default:
+                if (unscaled.bitLength() > 127) {
+                    throw new ArithmeticException("INT128 overflow: " + unscaled);
+                }
+                return unscaled;
+        }
     }
     
     /**

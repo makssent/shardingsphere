@@ -126,7 +126,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         }
         FirebirdServerPreparedStatement serverPreparedStatement = new FirebirdServerPreparedStatement(packet.getSQL(), sqlStatementContext, packet.getHintValueContext());
         connectionSession.getServerPreparedStatementRegistry().addPreparedStatement(statementId, serverPreparedStatement);
-        return createResponse(sqlStatementContext, metaDataContexts);
+        return createResponse(sqlStatementContext, metaDataContexts, serverPreparedStatement);
     }
     
     private SQLStatement resolveCurrentDatabase(final SQLStatement sqlStatement) {
@@ -142,7 +142,8 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         return packet.isValidStatementHandle() ? packet.getStatementId() : FirebirdStatementIdGenerator.getInstance().getStatementId(connectionSession.getConnectionId());
     }
     
-    private Collection<DatabasePacket> createResponse(final SQLStatementContext sqlStatementContext, final MetaDataContexts metaDataContexts) {
+    private Collection<DatabasePacket> createResponse(final SQLStatementContext sqlStatementContext, final MetaDataContexts metaDataContexts,
+                                                      final FirebirdServerPreparedStatement serverPreparedStatement) {
         FirebirdSQLInfoReturnValue statementType = getFirebirdStatementType(sqlStatementContext.getSqlStatement());
         FirebirdPrepareStatementReturnPacket returnPacket = new FirebirdPrepareStatementReturnPacket();
         while (packet.nextItem()) {
@@ -153,6 +154,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
                 case SELECT:
                     if (statementType.isSelectDescribable()) {
                         processDescribe(sqlStatementContext, metaDataContexts, returnPacket.getDescribeSelect(), true);
+                        serverPreparedStatement.getSelectColumns().addAll(returnPacket.getDescribeSelect());
                     } else {
                         skipDescribe();
                     }
@@ -232,8 +234,8 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
                     processReturnValues(sqlStatementContext, metaDataContexts, describeColumns, requestedItems);
                 } else {
                     processParameters(sqlStatementContext, metaDataContexts, describeColumns, requestedItems);
-                    describeColumns.forEach(this::describeNumericParameter);
                 }
+                describeColumns.forEach(this::describeNumericColumn);
                 return;
             }
         }
@@ -510,12 +512,12 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         return logicTableName;
     }
     
-    private void describeNumericParameter(final FirebirdReturnColumnPacket parameter) {
-        if (null == parameter.getTable() || null == parameter.getTable().getName() || null == parameter.getColumn()) {
+    private void describeNumericColumn(final FirebirdReturnColumnPacket column) {
+        if (null == column.getTable() || null == column.getTable().getName() || null == column.getColumn()) {
             return;
         }
         FirebirdNumericColumnRegistry.findNumericColumn(
-                connectionSession.getCurrentDatabaseName(), getActualTableName(parameter.getTable().getName()), parameter.getColumn().getName()).ifPresent(parameter::setNumericColumn);
+                connectionSession.getCurrentDatabaseName(), getActualTableName(column.getTable().getName()), column.getColumn().getName()).ifPresent(column::setNumericColumn);
     }
     
     private Integer resolveBlobSubtype(final ShardingSphereTable table, final ShardingSphereColumn column, final boolean blobColumn) {

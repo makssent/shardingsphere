@@ -36,21 +36,25 @@ public final class FirebirdInt16BinaryProtocolValue implements FirebirdBinaryPro
     
     @Override
     public void write(final FirebirdPacketPayload payload, final Object value) {
-        if (value instanceof BigDecimal) {
-            byte[] int16 = ((BigDecimal) value).toBigInteger().toByteArray();
-            payload.getByteBuf().writeZero(16 - int16.length);
-            payload.getByteBuf().writeBytes(int16);
-        } else if (value instanceof Integer) {
-            payload.getByteBuf().writeZero(12);
-            payload.writeInt4((Integer) value);
-        } else if (value instanceof BigInteger) {
-            byte[] int16 = ((BigInteger) value).toByteArray();
-            payload.getByteBuf().writeZero(16 - int16.length);
-            payload.getByteBuf().writeBytes(int16);
-        } else {
-            payload.getByteBuf().writeZero(8);
-            payload.writeInt8((Long) value);
+        byte[] int16 = toBigInteger(value).toByteArray();
+        if (int16.length > 16) {
+            throw new ArithmeticException("INT128 overflow: " + value);
         }
+        int signExtension = int16[0] < 0 ? 0xFF : 0;
+        for (int i = int16.length; i < 16; i++) {
+            payload.getByteBuf().writeByte(signExtension);
+        }
+        payload.getByteBuf().writeBytes(int16);
+    }
+    
+    private BigInteger toBigInteger(final Object value) {
+        if (value instanceof BigInteger) {
+            return (BigInteger) value;
+        }
+        if (value instanceof BigDecimal) {
+            return ((BigDecimal) value).toBigInteger();
+        }
+        return BigInteger.valueOf(((Number) value).longValue());
     }
     
     @Override

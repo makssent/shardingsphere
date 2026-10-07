@@ -47,6 +47,7 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
     @Getter
     private final ShardingSphereColumn column;
     
+    @Getter
     @Setter
     private FirebirdNumericColumn numericColumn;
     

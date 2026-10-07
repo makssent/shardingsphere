@@ -35,6 +35,7 @@ import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @ExtendWith(MockitoExtension.class)
 class FirebirdInt16BinaryProtocolValueTest {
@@ -60,6 +61,12 @@ class FirebirdInt16BinaryProtocolValueTest {
     }
     
     @Test
+    void assertWriteOverflow() {
+        FirebirdPacketPayload actualPayload = new FirebirdPacketPayload(Unpooled.buffer(), StandardCharsets.UTF_8);
+        assertThrows(ArithmeticException.class, () -> new FirebirdInt16BinaryProtocolValue().write(actualPayload, BigInteger.ONE.shiftLeft(127)));
+    }
+    
+    @Test
     void assertGetLength() {
         assertThat(new FirebirdInt16BinaryProtocolValue().getLength(payload), is(16));
     }
@@ -76,6 +83,10 @@ class FirebirdInt16BinaryProtocolValueTest {
                 Arguments.of("big decimal", BigDecimal.valueOf(10L), new byte[]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10}),
                 Arguments.of("integer", 513, new byte[]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1}),
                 Arguments.of("big integer", BigInteger.valueOf(66051L), new byte[]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3}),
-                Arguments.of("long", 4294967298L, new byte[]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2}));
+                Arguments.of("long", 4294967298L, new byte[]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2}),
+                Arguments.of("negative big decimal", new BigDecimal("-10"), new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -10}),
+                Arguments.of("negative big integer", BigInteger.valueOf(-2L), new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2}),
+                Arguments.of("negative long", -4294967298L, new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2, -1, -1, -1, -2}),
+                Arguments.of("minimum", BigInteger.ONE.shiftLeft(127).negate(), new byte[]{-128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
     }
 }

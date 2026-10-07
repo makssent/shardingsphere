@@ -19,13 +19,17 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statemen
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNumericColumn;
 import org.apache.shardingsphere.database.protocol.binary.BinaryCell;
 import org.apache.shardingsphere.database.protocol.binary.BinaryRow;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.protocol.util.FirebirdNumericScaleUtils;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdReturnColumnPacket;
 import org.apache.shardingsphere.proxy.backend.response.data.QueryResponseCell;
 import org.apache.shardingsphere.proxy.backend.response.data.QueryResponseRow;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -41,9 +45,28 @@ public final class FirebirdBinaryRowBuilder {
      * @return binary row
      */
     public static BinaryRow build(final QueryResponseRow row) {
+        return build(row, Collections.emptyList());
+    }
+    
+    /**
+     * Build binary row with the description of the columns sent to the client: NUMERIC and DECIMAL columns are written in their storage type and scale.
+     *
+     * @param row query response row
+     * @param columns described columns
+     * @return binary row
+     */
+    public static BinaryRow build(final QueryResponseRow row, final List<FirebirdReturnColumnPacket> columns) {
         List<BinaryCell> result = new ArrayList<>(row.getCells().size());
+        int index = 0;
         for (QueryResponseCell each : row.getCells()) {
-            result.add(new BinaryCell(FirebirdBinaryColumnType.valueOfJDBCType(each.getJdbcType()), each.getData()));
+            FirebirdNumericColumn numericColumn = index < columns.size() ? columns.get(index).getNumericColumn() : null;
+            index++;
+            if (null == numericColumn) {
+                result.add(new BinaryCell(FirebirdBinaryColumnType.valueOfJDBCType(each.getJdbcType()), each.getData()));
+            } else {
+                FirebirdBinaryColumnType type = FirebirdBinaryColumnType.valueOfBLRType(numericColumn.getFieldType());
+                result.add(new BinaryCell(type, FirebirdNumericScaleUtils.toUnscaledValue(type, each.getData(), numericColumn.getScale())));
+            }
         }
         return new BinaryRow(result);
     }
