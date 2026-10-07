@@ -330,7 +330,11 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         ShardingSphereSchema schema = metaDataContexts.getMetaData().getDatabase(databaseName).findDefaultSchema().orElse(null);
         int columnCount = 0;
         for (ColumnSegment columnSegment : affectedColumns) {
-            ShardingSphereTable table = schema.getTable(columnSegment.getColumnBoundInfo().getOriginalTable().getValue());
+            String tableName = columnSegment.getColumnBoundInfo().getOriginalTable().getValue();
+            ShardingSphereTable table = schema.getTable(tableName);
+            if (null == table) {
+                table = metaDataContexts.getMetaData().getDatabase(databaseName).getSchema("system_tables").getTable(tableName);
+            }
             ShardingSphereColumn column = table.getColumn(columnSegment.getColumnBoundInfo().getOriginalColumn().getValue());
             processColumn(describeColumns, requestedItems, table, column, columnSegment.getOwner().map(OwnerSegment::getIdentifier).orElse(null), columnSegment.getIdentifier(), ++columnCount);
         }
