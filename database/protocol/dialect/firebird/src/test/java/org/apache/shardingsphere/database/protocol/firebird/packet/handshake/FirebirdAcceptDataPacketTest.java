@@ -17,9 +17,12 @@
 
 package org.apache.shardingsphere.database.protocol.firebird.packet.handshake;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdAuthenticationMethod;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.apache.shardingsphere.database.protocol.payload.PacketPayload;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -29,8 +32,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.stream.Stream;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
 import static org.mockito.Mockito.inOrder;
 
 @ExtendWith(MockitoExtension.class)
@@ -46,22 +52,35 @@ class FirebirdAcceptDataPacketTest {
         FirebirdAcceptDataPacket packet = new FirebirdAcceptDataPacket(salt, publicKey, plugin, authenticated, keys);
         packet.write((PacketPayload) payload);
         InOrder order = inOrder(payload);
-        order.verify(payload).writeInt4(expectedPayloadLength);
-        verifyPayloadData(order, payload, expectedPayloadData, salt, publicKey);
+        if (expectedPayloadData) {
+            order.verify(payload).writeBuffer(expectedData(salt, publicKey));
+        } else {
+            order.verify(payload).writeInt4(expectedPayloadLength);
+        }
         order.verify(payload).writeString(plugin.getMethodName());
         order.verify(payload).writeInt4(authenticated);
         order.verify(payload).writeString(keys);
         order.verifyNoMoreInteractions();
     }
     
-    private void verifyPayloadData(final InOrder order, final FirebirdPacketPayload payload, final boolean expectedPayloadData, final byte[] salt, final String publicKey) {
-        if (!expectedPayloadData) {
-            return;
-        }
-        order.verify(payload).writeInt2LE(salt.length);
-        order.verify(payload).writeBytes(salt);
-        order.verify(payload).writeInt2LE(publicKey.length());
-        order.verify(payload).writeBytes(publicKey.getBytes(StandardCharsets.US_ASCII));
+    @Test
+    void assertWritePaddedData() {
+        ByteBuf buffer = Unpooled.buffer();
+        FirebirdAcceptDataPacket packet = new FirebirdAcceptDataPacket(new byte[32], String.join("", Collections.nCopies(254, "A")), FirebirdAuthenticationMethod.SRP256, 0, "");
+        packet.write((PacketPayload) new FirebirdPacketPayload(buffer, StandardCharsets.UTF_8));
+        assertThat(buffer.getInt(0), is(290));
+        assertThat(buffer.getShort(4 + 290), is((short) 0));
+        assertThat(buffer.getInt(4 + 292), is(FirebirdAuthenticationMethod.SRP256.getMethodName().length()));
+    }
+    
+    private static byte[] expectedData(final byte[] salt, final String publicKey) {
+        byte[] key = publicKey.getBytes(StandardCharsets.US_ASCII);
+        byte[] result = new byte[salt.length + key.length + 4];
+        result[0] = (byte) salt.length;
+        System.arraycopy(salt, 0, result, 2, salt.length);
+        result[2 + salt.length] = (byte) key.length;
+        System.arraycopy(key, 0, result, 4 + salt.length, key.length);
+        return result;
     }
     
     private static Stream<Arguments> writeArguments() {

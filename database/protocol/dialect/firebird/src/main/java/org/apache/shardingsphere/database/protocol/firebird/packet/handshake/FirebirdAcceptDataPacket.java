@@ -23,6 +23,8 @@ import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdAut
 import org.apache.shardingsphere.database.protocol.firebird.packet.FirebirdPacket;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -45,11 +47,8 @@ public final class FirebirdAcceptDataPacket extends FirebirdPacket {
     @Override
     protected void write(final FirebirdPacketPayload payload) {
         if (salt.length != 0 && !publicKey.isEmpty()) {
-            payload.writeInt4(salt.length + publicKey.length() + 4);
-            payload.writeInt2LE(salt.length);
-            payload.writeBytes(salt);
-            payload.writeInt2LE(publicKey.length());
-            payload.writeBytes(publicKey.getBytes(StandardCharsets.US_ASCII));
+            byte[] key = publicKey.getBytes(StandardCharsets.US_ASCII);
+            payload.writeBuffer(ByteBuffer.allocate(salt.length + key.length + 4).order(ByteOrder.LITTLE_ENDIAN).putShort((short) salt.length).put(salt).putShort((short) key.length).put(key).array());
         } else {
             payload.writeInt4(0);
         }
