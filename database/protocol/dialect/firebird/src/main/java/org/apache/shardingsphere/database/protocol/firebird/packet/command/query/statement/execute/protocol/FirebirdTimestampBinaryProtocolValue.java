@@ -36,9 +36,19 @@ public final class FirebirdTimestampBinaryProtocolValue implements FirebirdBinar
     
     @Override
     public void write(final FirebirdPacketPayload payload, final Object value) {
-        LocalDateTime localDateTime = value instanceof LocalDateTime ? (LocalDateTime) value : new Timestamp(((Date) value).getTime()).toLocalDateTime();
+        LocalDateTime localDateTime = toLocalDateTime(value);
         payload.writeInt4(FirebirdDateTimeUtils.getEncodedDate(localDateTime));
         payload.writeInt4(new FirebirdDateTimeUtils(localDateTime).getEncodedTime());
+    }
+    
+    private LocalDateTime toLocalDateTime(final Object value) {
+        if (value instanceof LocalDateTime) {
+            return (LocalDateTime) value;
+        }
+        if (value instanceof Timestamp) {
+            return ((Timestamp) value).toLocalDateTime();
+        }
+        return new Timestamp(((Date) value).getTime()).toLocalDateTime();
     }
     
     @Override
