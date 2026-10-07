@@ -95,6 +95,15 @@ class FirebirdParseBatchBlrTest {
         assertThat(actual.getMessage(), is("Expected blr_short NULL indicator, got: " + BlrConstants.blr_bool));
     }
     
+    @Test
+    void assertParseInt128AlignedToEightBytes() {
+        ByteBuf blr = createBlr(BlrConstants.blr_version5,
+                new byte[]{(byte) BlrConstants.blr_short, 0, (byte) BlrConstants.blr_short, 0, (byte) BlrConstants.blr_int128, -4, (byte) BlrConstants.blr_short, 0}, 4);
+        FirebirdParseBatchBlr actual = FirebirdParseBatchBlr.parse(blr, blr.readableBytes());
+        assertDescriptor(actual.getFields().get(1), FirebirdBinaryColumnType.INT128, 16, -4, 8);
+        assertThat(actual.getMessageLength(), is(26));
+    }
+    
     @ParameterizedTest(name = "{0}")
     @MethodSource("invalidTerminatorArguments")
     void assertParseInvalidTerminator(final String name, final byte[] blrBytes, final String expectedMessage) {
