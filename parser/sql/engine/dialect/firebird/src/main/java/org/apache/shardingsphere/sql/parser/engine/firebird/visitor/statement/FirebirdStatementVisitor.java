@@ -510,6 +510,8 @@ public abstract class FirebirdStatementVisitor extends FirebirdStatementBaseVisi
             result.getParameters().add((ColumnSegment) exprSegment);
         } else if (exprSegment instanceof LiteralExpressionSegment) {
             result.getParameters().add((LiteralExpressionSegment) exprSegment);
+        } else if (exprSegment instanceof ParameterMarkerExpressionSegment) {
+            result.getParameters().add((ParameterMarkerExpressionSegment) exprSegment);
         }
         result.getParameters().add((DataTypeSegment) visit(ctx.dataType()));
         return result;

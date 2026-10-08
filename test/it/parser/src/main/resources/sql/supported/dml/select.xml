@@ -461,6 +461,7 @@
     <sql-case id="select_not_between_firebird" value="SELECT * FROM t_order WHERE id NOT BETWEEN 1 AND 5" db-types="Firebird"/>
     <sql-case id="select_case_expr_firebird" value="SELECT CASE WHEN 1=1 THEN 1 END FROM t_order" db-types="Firebird"/>
     <sql-case id="select_cast_literal_firebird" value="SELECT CAST(1 AS VARCHAR(10)) FROM t_order" db-types="Firebird"/>
+    <sql-case id="select_where_cast_parameter_firebird" value="SELECT order_id FROM t_order WHERE order_id = CAST(? AS INTEGER)" db-types="Firebird"/>
     <sql-case id="select_variable_identifier_firebird" value="SELECT LOCAL.var FROM t_order" db-types="Firebird"/>
     <sql-case id="select_comma_join_firebird" value="SELECT * FROM t_order a, t_order_item b" db-types="Firebird"/>
     <sql-case id="select_subquery_table_firebird" value="SELECT * FROM (SELECT 1) sub" db-types="Firebird"/>

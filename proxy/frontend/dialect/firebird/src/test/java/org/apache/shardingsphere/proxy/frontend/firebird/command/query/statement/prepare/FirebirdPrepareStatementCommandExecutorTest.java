@@ -62,6 +62,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -73,6 +76,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -133,6 +137,55 @@ class FirebirdPrepareStatementCommandExecutorTest {
         FirebirdFetchStatementCache.getInstance().unregisterStatement(CONNECTION_ID, 1);
         FirebirdFetchStatementCache.getInstance().unregisterConnection(CONNECTION_ID);
         FirebirdBlobInfoRegistry.refreshTable("foo_db", "foo_tbl", Collections.emptyMap());
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("describeExpressionParametersArguments")
+    void assertDescribeExpressionParameters(final String name, final String sql, final Collection<FirebirdBinaryColumnType> expectedTypes) throws Exception {
+        FirebirdPrepareStatementReturnPacket returnPacket = prepareWithDescribeBind(sql);
+        assertThat(returnPacket.getDescribeBind().size(), is(expectedTypes.size()));
+        int index = 0;
+        for (FirebirdBinaryColumnType each : expectedTypes) {
+            FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class, RETURNS_DEEP_STUBS);
+            returnPacket.getDescribeBind().get(index++).write(payload);
+            verify(payload).writeInt4LE(each.getValue() + 1);
+        }
+    }
+    
+    private static Stream<Arguments> describeExpressionParametersArguments() {
+        return Stream.of(
+                Arguments.of("insert_cast_and_plain_values", "INSERT INTO foo_tbl (id, content) VALUES (CAST(? AS INTEGER), ?)",
+                        Arrays.asList(FirebirdBinaryColumnType.LONG, FirebirdBinaryColumnType.BLOB)),
+                Arguments.of("insert_expression_values", "INSERT INTO foo_tbl (id, content) VALUES (1 / ?, UPPER(?) || ?)",
+                        Arrays.asList(FirebirdBinaryColumnType.LONG, FirebirdBinaryColumnType.BLOB, FirebirdBinaryColumnType.BLOB)),
+                Arguments.of("where_cast_before_column", "SELECT id FROM foo_tbl WHERE id = CAST(? AS SMALLINT) AND content = ?",
+                        Arrays.asList(FirebirdBinaryColumnType.SHORT, FirebirdBinaryColumnType.BLOB)),
+                Arguments.of("where_arithmetic_between_in", "SELECT id FROM foo_tbl WHERE ? = id and id = 1 / ? AND id BETWEEN ? AND ? OR id IN (?, ?)",
+                        Collections.nCopies(6, FirebirdBinaryColumnType.LONG)),
+                Arguments.of("update_set_expression", "UPDATE foo_tbl SET id = id + ? WHERE id = ABS(?)", Arrays.asList(FirebirdBinaryColumnType.LONG, FirebirdBinaryColumnType.DOUBLE)),
+                Arguments.of("delete_cast_bigint_and_date", "DELETE FROM foo_tbl WHERE id = CAST(? AS BIGINT) OR CAST(? AS DATE) IS NULL",
+                        Arrays.asList(FirebirdBinaryColumnType.INT64, FirebirdBinaryColumnType.DATE)),
+                Arguments.of("untyped", "SELECT id FROM foo_tbl WHERE ? = ?", Arrays.asList(FirebirdBinaryColumnType.VARYING, FirebirdBinaryColumnType.VARYING)));
+    }
+    
+    @Test
+    void assertDescribeTextParameterLength() throws Exception {
+        FirebirdPrepareStatementReturnPacket returnPacket = prepareWithDescribeBind("SELECT id FROM foo_tbl WHERE id = CAST(? AS VARCHAR(10)) AND ? = ?");
+        assertThat(returnPacket.getDescribeBind().size(), is(3));
+        int[] expectedLengths = {10, 32765, 32765};
+        for (int i = 0; i < expectedLengths.length; i++) {
+            FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class, RETURNS_DEEP_STUBS);
+            returnPacket.getDescribeBind().get(i).write(payload);
+            verify(payload).writeInt4LE(expectedLengths[i]);
+        }
+    }
+    
+    private FirebirdPrepareStatementReturnPacket prepareWithDescribeBind(final String sql) throws Exception {
+        when(packet.getSQL()).thenReturn(sql);
+        when(packet.nextItem()).thenReturn(true, true, true, true, true, true, false);
+        when(packet.getCurrentItem()).thenReturn(FirebirdSQLInfoPacketType.STMT_TYPE, FirebirdSQLInfoPacketType.BIND, FirebirdSQLInfoPacketType.TYPE, FirebirdSQLInfoPacketType.TYPE,
+                FirebirdSQLInfoPacketType.LENGTH, FirebirdSQLInfoPacketType.LENGTH, FirebirdSQLInfoPacketType.DESCRIBE_END, FirebirdSQLInfoPacketType.DESCRIBE_END);
+        return (FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) new FirebirdPrepareStatementCommandExecutor(packet, connectionSession).execute().iterator().next()).getData();
     }
     
     private MetaDataContexts createMetaDataContexts() {

@@ -13660,6 +13660,36 @@
         </from>
     </select>
 
+    <select sql-case-id="select_where_cast_parameter_firebird" parameters="1">
+        <projections start-index="7" stop-index="14">
+            <column-projection name="order_id" start-index="7" stop-index="14" />
+        </projections>
+        <from>
+            <simple-table name="t_order" start-index="21" stop-index="27" />
+        </from>
+        <where start-index="29" stop-index="63">
+            <expr>
+                <binary-operation-expression start-index="35" stop-index="63">
+                    <left>
+                        <column name="order_id" start-index="35" stop-index="42" />
+                    </left>
+                    <operator>=</operator>
+                    <right>
+                        <function function-name="CAST" text="CAST(? AS INTEGER)" literal-text="CAST(1 AS INTEGER)" start-index="46" stop-index="63">
+                            <parameter>
+                                <literal-expression value="1" start-index="51" stop-index="51" />
+                                <parameter-marker-expression parameter-index="0" start-index="51" stop-index="51" />
+                            </parameter>
+                            <parameter>
+                                <data-type value="INTEGER" start-index="56" stop-index="62" />
+                            </parameter>
+                        </function>
+                    </right>
+                </binary-operation-expression>
+            </expr>
+        </where>
+    </select>
+
     <select sql-case-id="select_variable_identifier_firebird">
         <projections start-index="7" stop-index="15">
             <expression-projection text="var" start-index="7" stop-index="15">
