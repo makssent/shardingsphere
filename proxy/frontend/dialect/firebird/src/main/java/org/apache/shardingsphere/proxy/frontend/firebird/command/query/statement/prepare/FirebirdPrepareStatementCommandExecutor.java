@@ -466,20 +466,35 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         }
     }
     
-    private boolean isExactIntegerExpression(final ExpressionSegment expr) {
+    private int getIntegerWidth(final ExpressionSegment expr) {
         if (expr instanceof LiteralExpressionSegment) {
             Object value = ((LiteralExpressionSegment) expr).getLiterals();
-            return value instanceof Integer || value instanceof Long;
+            if (value instanceof Integer) {
+                return Integer.SIZE;
+            }
+            return value instanceof Long ? Long.SIZE : 0;
         }
         if (expr instanceof BinaryOperationExpression) {
-            BinaryOperationExpression operation = (BinaryOperationExpression) expr;
-            return isArithmeticOperator(operation.getOperator()) && isExactIntegerExpression(operation.getLeft()) && isExactIntegerExpression(operation.getRight());
+            return getArithmeticResultWidth((BinaryOperationExpression) expr);
         }
         if (expr instanceof ColumnSegment) {
             ShardingSphereColumn column = findColumn((ColumnSegment) expr);
-            return null != column && isExactIntegerType(column.getDataType());
+            return null == column ? 0 : getIntegerTypeWidth(column.getDataType());
         }
-        return false;
+        return 0;
+    }
+    
+    private int getArithmeticResultWidth(final BinaryOperationExpression expr) {
+        if (!isArithmeticOperator(expr.getOperator())) {
+            return 0;
+        }
+        int leftWidth = getIntegerWidth(expr.getLeft());
+        int rightWidth = getIntegerWidth(expr.getRight());
+        if (0 == leftWidth || 0 == rightWidth) {
+            return 0;
+        }
+        boolean additive = "+".equals(expr.getOperator()) || "-".equals(expr.getOperator());
+        return additive || Integer.SIZE == leftWidth && Integer.SIZE == rightWidth ? Long.SIZE : 0;
     }
     
     private ShardingSphereColumn findColumn(final ColumnSegment columnSegment) {
@@ -493,8 +508,17 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         return null == table ? null : table.getColumn(boundInfo.getOriginalColumn().getValue());
     }
     
-    private boolean isExactIntegerType(final int dataType) {
-        return Types.TINYINT == dataType || Types.SMALLINT == dataType || Types.INTEGER == dataType || Types.BIGINT == dataType;
+    private int getIntegerTypeWidth(final int dataType) {
+        switch (dataType) {
+            case Types.TINYINT:
+            case Types.SMALLINT:
+            case Types.INTEGER:
+                return Integer.SIZE;
+            case Types.BIGINT:
+                return Long.SIZE;
+            default:
+                return 0;
+        }
     }
     
     private boolean isArithmeticOperator(final String operator) {
@@ -505,10 +529,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         if ("||".equals(expr.getOperator())) {
             return 12;
         }
-        if (isArithmeticOperator(expr.getOperator()) && isExactIntegerExpression(expr.getLeft()) && isExactIntegerExpression(expr.getRight())) {
-            return Types.BIGINT;
-        }
-        return 4;
+        return Long.SIZE == getArithmeticResultWidth(expr) ? Types.BIGINT : 4;
     }
     
     private void processCustomColumn(final String tableName, final String columnName, final IdentifierValue columnAlias, final int dataType,

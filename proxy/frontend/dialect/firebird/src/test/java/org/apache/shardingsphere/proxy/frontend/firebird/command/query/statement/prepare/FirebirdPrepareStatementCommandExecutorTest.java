@@ -155,7 +155,7 @@ class FirebirdPrepareStatementCommandExecutorTest {
     
     @Test
     void assertDescribeArithmeticOfIntegerColumns() throws Exception {
-        when(packet.getSQL()).thenReturn("SELECT id + 1, id * 2, id || 'x' FROM foo_tbl");
+        when(packet.getSQL()).thenReturn("SELECT id + 1, id * 2, id / 2, id || 'x' FROM foo_tbl");
         when(packet.nextItem()).thenReturn(true, true, true, true, true, true, false);
         when(packet.getCurrentItem()).thenReturn(
                 FirebirdSQLInfoPacketType.STMT_TYPE,
@@ -168,10 +168,11 @@ class FirebirdPrepareStatementCommandExecutorTest {
                 FirebirdSQLInfoPacketType.DESCRIBE_END);
         FirebirdPrepareStatementCommandExecutor executor = new FirebirdPrepareStatementCommandExecutor(packet, connectionSession);
         FirebirdPrepareStatementReturnPacket returnPacket = (FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) executor.execute().iterator().next()).getData();
-        assertThat(returnPacket.getDescribeSelect().size(), is(3));
+        assertThat(returnPacket.getDescribeSelect().size(), is(4));
         assertArithmeticColumn(returnPacket.getDescribeSelect().get(0), FirebirdBinaryColumnType.INT64, "ADD");
         assertArithmeticColumn(returnPacket.getDescribeSelect().get(1), FirebirdBinaryColumnType.INT64, "MULTIPLY");
-        assertArithmeticColumn(returnPacket.getDescribeSelect().get(2), FirebirdBinaryColumnType.VARYING, "CONCATENATION");
+        assertArithmeticColumn(returnPacket.getDescribeSelect().get(2), FirebirdBinaryColumnType.INT64, "DIVIDE");
+        assertArithmeticColumn(returnPacket.getDescribeSelect().get(3), FirebirdBinaryColumnType.VARYING, "CONCATENATION");
     }
     
     private void assertArithmeticColumn(final FirebirdReturnColumnPacket columnPacket, final FirebirdBinaryColumnType expectedType, final String expectedName) {
