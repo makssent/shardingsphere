@@ -175,7 +175,7 @@ public abstract class FirebirdStatementVisitor extends FirebirdStatementBaseVisi
     @Override
     public final ASTNode visitHexadecimalLiterals(final HexadecimalLiteralsContext ctx) {
         // TODO deal with hexadecimalLiterals
-        return new OtherLiteralValue(ctx.getText());
+        return new OtherLiteralValue(getOriginalText(ctx));
     }
     
     @Override
