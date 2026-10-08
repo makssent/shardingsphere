@@ -201,6 +201,40 @@ class FirebirdPrepareStatementCommandExecutorTest {
         }
     }
     
+    @Test
+    void assertDescribeStringFunctionOfSystemTableColumn() throws Exception {
+        ShardingSphereColumn fieldNameColumn = new ShardingSphereColumn("RDB$FIELD_NAME", Types.CHAR, false, false, false, true, false, true);
+        ShardingSphereTable relationFieldsTable = new ShardingSphereTable("RDB$RELATION_FIELDS", Collections.singleton(fieldNameColumn), Collections.emptyList(), Collections.emptyList());
+        ShardingSphereSchema systemSchema = new ShardingSphereSchema("system_tables", databaseType, Collections.singleton(relationFieldsTable), Collections.emptyList());
+        ShardingSphereDatabase database = ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData().getDatabase("foo_db");
+        doReturn(true).when(database).containsSchema(new IdentifierValue("system_tables"));
+        doReturn(true).when(database).containsSchema("system_tables");
+        doReturn(systemSchema).when(database).getSchema(new IdentifierValue("system_tables"));
+        doReturn(systemSchema).when(database).getSchema("system_tables");
+        FirebirdNonFixedLengthColumnSizeRegistry.refreshTable("foo_db", "RDB$RELATION_FIELDS", Collections.singletonMap("RDB$FIELD_NAME", 63));
+        try {
+            when(packet.getSQL()).thenReturn("SELECT TRIM(RDB$FIELD_NAME) FROM RDB$RELATION_FIELDS");
+            when(packet.nextItem()).thenReturn(true, true, true, true, true, true, true, false);
+            when(packet.getCurrentItem()).thenReturn(
+                    FirebirdSQLInfoPacketType.STMT_TYPE,
+                    FirebirdSQLInfoPacketType.SELECT,
+                    FirebirdSQLInfoPacketType.TYPE,
+                    FirebirdSQLInfoPacketType.TYPE,
+                    FirebirdSQLInfoPacketType.LENGTH,
+                    FirebirdSQLInfoPacketType.LENGTH,
+                    FirebirdSQLInfoPacketType.ALIAS,
+                    FirebirdSQLInfoPacketType.ALIAS,
+                    FirebirdSQLInfoPacketType.DESCRIBE_END,
+                    FirebirdSQLInfoPacketType.DESCRIBE_END);
+            FirebirdPrepareStatementCommandExecutor executor = new FirebirdPrepareStatementCommandExecutor(packet, connectionSession);
+            FirebirdPrepareStatementReturnPacket returnPacket = (FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) executor.execute().iterator().next()).getData();
+            assertThat(returnPacket.getDescribeSelect().size(), is(1));
+            assertStringFunctionColumn(returnPacket.getDescribeSelect().get(0), "TRIM", 63);
+        } finally {
+            FirebirdNonFixedLengthColumnSizeRegistry.refreshTable("foo_db", "RDB$RELATION_FIELDS", Collections.emptyMap());
+        }
+    }
+    
     private void assertStringFunctionColumn(final FirebirdReturnColumnPacket columnPacket, final String expectedAlias, final int expectedLength) {
         FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
         when(payload.getCharset()).thenReturn(StandardCharsets.UTF_8);
