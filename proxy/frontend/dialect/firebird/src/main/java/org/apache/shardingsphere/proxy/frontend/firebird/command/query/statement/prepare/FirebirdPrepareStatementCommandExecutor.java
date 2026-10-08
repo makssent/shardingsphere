@@ -512,9 +512,12 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
     
     private Optional<Integer> findTextColumnLength(final ColumnSegment columnSegment) {
         ColumnSegmentBoundInfo boundInfo = columnSegment.getColumnBoundInfo();
-        ShardingSphereSchema schema = ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData().getDatabase(connectionSession.getCurrentDatabaseName())
-                .findDefaultSchema().orElse(null);
-        ShardingSphereTable table = null == schema ? null : schema.getTable(boundInfo.getOriginalTable().getValue());
+        String tableName = boundInfo.getOriginalTable().getValue();
+        ShardingSphereDatabase database = ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData().getDatabase(connectionSession.getCurrentDatabaseName());
+        ShardingSphereTable table = database.findDefaultSchema().map(optional -> optional.getTable(tableName)).orElse(null);
+        if (null == table && database.containsSchema("system_tables")) {
+            table = database.getSchema("system_tables").getTable(tableName);
+        }
         ShardingSphereColumn column = null == table ? null : table.getColumn(boundInfo.getOriginalColumn().getValue());
         if (null == column || Types.CHAR != column.getDataType() && Types.VARCHAR != column.getDataType()) {
             return Optional.empty();
