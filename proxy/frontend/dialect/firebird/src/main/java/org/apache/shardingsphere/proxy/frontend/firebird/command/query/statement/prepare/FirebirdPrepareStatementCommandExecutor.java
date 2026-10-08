@@ -413,7 +413,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
             processCustomColumn(null, functionName, expr.getAlias().orElse(null), getFunctionType(functionName), describeColumns, requestedItems, columnCount);
         } else if (exprSegment instanceof BinaryOperationExpression) {
             String operationName = getOperationName(((BinaryOperationExpression) exprSegment).getOperator());
-            int operationType = getOperationType(((BinaryOperationExpression) exprSegment).getOperator());
+            int operationType = getOperationType((BinaryOperationExpression) exprSegment);
             processCustomColumn(null, operationName, expr.getAlias().orElse(null), operationType, describeColumns, requestedItems, columnCount);
         } else if (exprSegment instanceof LiteralExpressionSegment) {
             Object value = ((LiteralExpressionSegment) exprSegment).getLiterals();
@@ -453,18 +453,62 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         switch (operationType) {
             case "||":
                 return "CONCATENATION";
+            case "+":
+                return "ADD";
+            case "-":
+                return "SUBTRACT";
+            case "*":
+                return "MULTIPLY";
+            case "/":
+                return "DIVIDE";
             default:
                 return operationType;
         }
     }
     
-    private int getOperationType(final String operationType) {
-        switch (operationType) {
-            case "||":
-                return 12;
-            default:
-                return 4;
+    private boolean isExactIntegerExpression(final ExpressionSegment expr) {
+        if (expr instanceof LiteralExpressionSegment) {
+            Object value = ((LiteralExpressionSegment) expr).getLiterals();
+            return value instanceof Integer || value instanceof Long;
         }
+        if (expr instanceof BinaryOperationExpression) {
+            BinaryOperationExpression operation = (BinaryOperationExpression) expr;
+            return isArithmeticOperator(operation.getOperator()) && isExactIntegerExpression(operation.getLeft()) && isExactIntegerExpression(operation.getRight());
+        }
+        if (expr instanceof ColumnSegment) {
+            ShardingSphereColumn column = findColumn((ColumnSegment) expr);
+            return null != column && isExactIntegerType(column.getDataType());
+        }
+        return false;
+    }
+    
+    private ShardingSphereColumn findColumn(final ColumnSegment columnSegment) {
+        ColumnSegmentBoundInfo boundInfo = columnSegment.getColumnBoundInfo();
+        String tableName = boundInfo.getOriginalTable().getValue();
+        ShardingSphereDatabase database = ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData().getDatabase(connectionSession.getCurrentDatabaseName());
+        ShardingSphereTable table = database.findDefaultSchema().map(optional -> optional.getTable(tableName)).orElse(null);
+        if (null == table && database.containsSchema("system_tables")) {
+            table = database.getSchema("system_tables").getTable(tableName);
+        }
+        return null == table ? null : table.getColumn(boundInfo.getOriginalColumn().getValue());
+    }
+    
+    private boolean isExactIntegerType(final int dataType) {
+        return Types.TINYINT == dataType || Types.SMALLINT == dataType || Types.INTEGER == dataType || Types.BIGINT == dataType;
+    }
+    
+    private boolean isArithmeticOperator(final String operator) {
+        return "+".equals(operator) || "-".equals(operator) || "*".equals(operator) || "/".equals(operator);
+    }
+    
+    private int getOperationType(final BinaryOperationExpression expr) {
+        if ("||".equals(expr.getOperator())) {
+            return 12;
+        }
+        if (isArithmeticOperator(expr.getOperator()) && isExactIntegerExpression(expr.getLeft()) && isExactIntegerExpression(expr.getRight())) {
+            return Types.BIGINT;
+        }
+        return 4;
     }
     
     private void processCustomColumn(final String tableName, final String columnName, final IdentifierValue columnAlias, final int dataType,
