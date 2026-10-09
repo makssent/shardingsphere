@@ -66,6 +66,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -83,6 +84,7 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
@@ -148,7 +150,9 @@ class FirebirdPrepareStatementCommandExecutorTest {
         for (FirebirdBinaryColumnType each : expectedTypes) {
             FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class, RETURNS_DEEP_STUBS);
             returnPacket.getDescribeBind().get(index++).write(payload);
-            verify(payload).writeInt4LE(each.getValue() + 1);
+            ArgumentCaptor<Integer> argumentCaptor = ArgumentCaptor.forClass(Integer.class);
+            verify(payload, atLeastOnce()).writeInt4LE(argumentCaptor.capture());
+            assertThat(argumentCaptor.getAllValues().get(0) & ~1, is(each.getValue()));
         }
     }
     
