@@ -26,6 +26,8 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class FirebirdSRPAuthenticatorTest {
     
@@ -42,6 +44,21 @@ class FirebirdSRPAuthenticatorTest {
         FirebirdSRPAuthenticationData authData = new FirebirdSRPAuthenticationData("SHA-1", user.getGrantee().getUsername(), user.getPassword(), "4");
         String clientProof = ByteArrayHelper.toHexString(authData.serverProof(user.getGrantee().getUsername()));
         assertTrue(authenticator.authenticate(user, new Object[]{null, authData, clientProof}));
+    }
+    
+    @Test
+    void assertAuthenticateWithClientProofWithoutLeadingZeros() {
+        ShardingSphereUser user = new ShardingSphereUser("foo", "password", "");
+        FirebirdSRPAuthenticationData authData = mock(FirebirdSRPAuthenticationData.class);
+        when(authData.serverProof("foo")).thenReturn(new byte[]{0x01, (byte) 0xAB});
+        assertTrue(authenticator.authenticate(user, new Object[]{null, authData, "1AB"}));
+    }
+    
+    @Test
+    void assertAuthenticateWithoutClientProof() {
+        ShardingSphereUser user = new ShardingSphereUser("foo", "password", "");
+        FirebirdSRPAuthenticationData authData = new FirebirdSRPAuthenticationData("SHA-1", user.getGrantee().getUsername(), user.getPassword(), "4");
+        assertFalse(authenticator.authenticate(user, new Object[]{null, authData, null}));
     }
     
     @Test
