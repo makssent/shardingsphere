@@ -109,7 +109,7 @@ import java.util.OptionalInt;
 @RequiredArgsConstructor
 public final class FirebirdPrepareStatementCommandExecutor implements CommandExecutor {
     
-    private static final int MAX_VARCHAR_LENGTH = 32765;
+    private static final int UNKNOWN_PARAMETER_LENGTH = 512;
     
     private final FirebirdPrepareStatementPacket packet;
     
@@ -466,12 +466,12 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         int jdbcType = null == castType ? Types.VARCHAR : castType;
         Integer columnLength = null;
         if (null == castType) {
-            columnLength = MAX_VARCHAR_LENGTH;
+            columnLength = UNKNOWN_PARAMETER_LENGTH;
         } else if (Types.CHAR == castType || Types.VARCHAR == castType) {
             columnLength = null == dataType.getDataLength() ? 1 : dataType.getDataLength().getPrecision();
         }
         ShardingSphereTable table = new ShardingSphereTable(null, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
-        ShardingSphereColumn column = new ShardingSphereColumn(null, jdbcType, false, false, true, true, false, true);
+        ShardingSphereColumn column = new ShardingSphereColumn(null, jdbcType, false, false, true, true, false, null != castType);
         String owner = connectionSession.getConnectionContext().getGrantee().getUsername();
         describeColumns.add(new FirebirdReturnColumnPacket(requestedItems, columnCount, table, column, null, null, owner, columnLength, false, null));
     }

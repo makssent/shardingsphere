@@ -172,7 +172,7 @@ class FirebirdPrepareStatementCommandExecutorTest {
     void assertDescribeTextParameterLength() throws Exception {
         FirebirdPrepareStatementReturnPacket returnPacket = prepareWithDescribeBind("SELECT id FROM foo_tbl WHERE id = CAST(? AS VARCHAR(10)) AND ? = ?");
         assertThat(returnPacket.getDescribeBind().size(), is(3));
-        int[] expectedLengths = {10, 32765, 32765};
+        int[] expectedLengths = {10, 512, 512};
         for (int i = 0; i < expectedLengths.length; i++) {
             FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class, RETURNS_DEEP_STUBS);
             returnPacket.getDescribeBind().get(i).write(payload);
