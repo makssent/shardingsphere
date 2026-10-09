@@ -18,12 +18,12 @@
 package org.apache.shardingsphere.database.protocol.firebird.packet.handshake;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdArchType;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdAuthenticationMethod;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdUserDataType;
 import org.apache.shardingsphere.database.protocol.firebird.constant.protocol.FirebirdProtocol;
 import org.apache.shardingsphere.database.protocol.firebird.constant.protocol.FirebirdProtocolVersion;
-import org.apache.shardingsphere.database.protocol.firebird.packet.command.FirebirdCommandPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,7 +48,6 @@ class FirebirdConnectPacketTest {
     @Test
     void assertConstructor() {
         FirebirdConnectPacket actual = createPacketWithSpecificData();
-        assertThat(actual.getOpCode(), is(FirebirdCommandPacketType.CONNECT));
         assertThat(actual.getConnectVersion(), is(1));
         assertThat(actual.getArchType(), is(FirebirdArchType.ARCH_GENERIC));
         assertThat(actual.getDatabase(), is("db"));
@@ -56,6 +55,21 @@ class FirebirdConnectPacketTest {
         List<FirebirdProtocol> actualProtocols = actual.getUserProtocols();
         assertThat(actualProtocols.size(), is(1));
         assertThat(actualProtocols.get(0).getVersion(), is(FirebirdProtocolVersion.PROTOCOL_VERSION10));
+    }
+    
+    @Test
+    void assertConstructorWithUnusedOperationOfFbclient() {
+        ByteBuf packet = Unpooled.buffer();
+        packet.writeInt(0x00030000).writeInt(3).writeInt(FirebirdArchType.ARCH_GENERIC.getCode());
+        packet.writeInt(6).writeBytes("foo_db".getBytes(StandardCharsets.US_ASCII)).writeZero(2);
+        packet.writeInt(1);
+        packet.writeInt(10).writeByte(FirebirdUserDataType.CNCT_LOGIN.getCode()).writeByte(8).writeBytes("foo_user".getBytes(StandardCharsets.US_ASCII)).writeZero(2);
+        packet.writeInt(FirebirdProtocolVersion.PROTOCOL_VERSION13.getCode()).writeInt(FirebirdArchType.ARCH_GENERIC.getCode()).writeInt(0).writeInt(5).writeInt(2);
+        FirebirdConnectPacket actual = new FirebirdConnectPacket(new FirebirdPacketPayload(packet, StandardCharsets.UTF_8));
+        assertThat(actual.getConnectVersion(), is(3));
+        assertThat(actual.getDatabase(), is("foo_db"));
+        assertThat(actual.getLogin(), is("foo_user"));
+        assertThat(actual.getUserProtocols().get(0).getVersion(), is(FirebirdProtocolVersion.PROTOCOL_VERSION13));
     }
     
     @Test
@@ -94,7 +108,7 @@ class FirebirdConnectPacketTest {
     }
     
     private FirebirdConnectPacket createPacketWithSpecificData() {
-        when(payload.readInt4()).thenReturn(FirebirdCommandPacketType.CONNECT.getValue(), 1, FirebirdArchType.ARCH_GENERIC.getCode(), 1);
+        when(payload.readInt4()).thenReturn(1, FirebirdArchType.ARCH_GENERIC.getCode(), 1);
         when(payload.readString()).thenReturn("db");
         ByteBuf userBuf = mock(ByteBuf.class);
         when(userBuf.toString(StandardCharsets.UTF_8)).thenReturn("user");
@@ -121,7 +135,7 @@ class FirebirdConnectPacketTest {
     }
     
     private FirebirdConnectPacket createPacketWithoutSpecificData() {
-        when(payload.readInt4()).thenReturn(FirebirdCommandPacketType.CONNECT.getValue(), 1, FirebirdArchType.ARCH_GENERIC.getCode(), 0);
+        when(payload.readInt4()).thenReturn(1, FirebirdArchType.ARCH_GENERIC.getCode(), 0);
         when(payload.readString()).thenReturn("db");
         ByteBuf hostBuf = mock(ByteBuf.class);
         when(hostBuf.toString(StandardCharsets.UTF_8)).thenReturn("host");
