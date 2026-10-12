@@ -41,6 +41,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStatement;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStreamBlob;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdBlobParameterBufferUtils;
 
@@ -143,7 +144,8 @@ public final class FirebirdBatchStatementManager {
      * @throws InvalidBatchBlobPolicyException if BLOB policy of batch does not allow BLOB stream
      * @throws BatchTooBigException if the stream portion exceeds the batch buffer size
      */
-    void appendBlobStream(final int connectionId, final FirebirdBatchBlobStreamCommandPacket packet) {
+    @HighFrequencyInvocation
+    public void appendBlobStream(final int connectionId, final FirebirdBatchBlobStreamCommandPacket packet) {
         FirebirdBatchStatement batchStatement = getBatchStatement(connectionId, packet.getStatementHandle());
         ShardingSpherePreconditions.checkNotNull(batchStatement, () -> new InvalidBatchHandleException(packet.getStatementHandle()));
         ShardingSpherePreconditions.checkState(batchStatement.isBlobStreamAllowed(), () -> new InvalidBatchBlobPolicyException("addBlobStream"));
@@ -158,7 +160,7 @@ public final class FirebirdBatchStatementManager {
      * @throws InvalidBatchHandleException if batch statement does not exist
      * @throws BatchDefaultBpbChangeException if batch already contains BLOB stream data
      */
-    void setDefaultBpb(final int connectionId, final FirebirdBatchSetBpbCommandPacket packet) {
+    public void setDefaultBpb(final int connectionId, final FirebirdBatchSetBpbCommandPacket packet) {
         FirebirdBatchStatement batchStatement = getBatchStatement(connectionId, packet.getStatementHandle());
         ShardingSpherePreconditions.checkNotNull(batchStatement, () -> new InvalidBatchHandleException(packet.getStatementHandle()));
         batchStatement.getBlobStream().setDefaultBpb(packet.getBpb());
@@ -182,7 +184,8 @@ public final class FirebirdBatchStatementManager {
      * @throws UnsupportedBlobFilterException if a BLOB parameter buffer requires an unsupported BLOB filter conversion
      * @throws TransliterationFailedException if BLOB data cannot be transliterated as its BLOB parameter buffer requires
      */
-    void registerStreamBlobs(final FirebirdBatchStatement batchStatement, final int connectionCharsetId) {
+    @HighFrequencyInvocation
+    public void registerStreamBlobs(final FirebirdBatchStatement batchStatement, final int connectionCharsetId) {
         for (FirebirdBatchStreamBlob each : batchStatement.readStreamBlobs()) {
             byte[] data = each.getData().toByteArray();
             byte[] content = FirebirdBlobParameterBufferUtils.createTransliterator(each.getBpb(), connectionCharsetId).map(transliterator -> transliterator.put(data)).orElse(data);

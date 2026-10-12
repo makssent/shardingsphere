@@ -189,6 +189,7 @@ public final class FirebirdBlobWriteCache {
      * @param transactionId transaction id of the statement
      * @return BLOB data, or empty if the BLOB cannot be used by transaction
      */
+    @HighFrequencyInvocation
     public Optional<byte[]> useBlobData(final int connectionId, final long blobId, final int transactionId) {
         if (!isAvailable(connectionId, blobId, transactionId)) {
             return Optional.empty();
@@ -238,6 +239,7 @@ public final class FirebirdBlobWriteCache {
      * @param connectionId connection id
      * @param transactionId finished transaction id
      */
+    @HighFrequencyInvocation
     public void clearTransaction(final int connectionId, final int transactionId) {
         for (FirebirdBlobWrite each : getIdMap(connectionId).values()) {
             if (each.getTransactionId() == transactionId) {
