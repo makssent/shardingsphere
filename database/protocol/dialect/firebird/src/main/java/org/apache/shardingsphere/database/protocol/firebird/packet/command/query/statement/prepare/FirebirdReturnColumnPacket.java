@@ -81,6 +81,7 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
      *
      * @return column type
      */
+    @HighFrequencyInvocation
     public FirebirdBinaryColumnType getColumnType() {
         return blobColumn ? FirebirdBinaryColumnType.BLOB : FirebirdBinaryColumnType.valueOfJDBCType(column.getDataType());
     }
