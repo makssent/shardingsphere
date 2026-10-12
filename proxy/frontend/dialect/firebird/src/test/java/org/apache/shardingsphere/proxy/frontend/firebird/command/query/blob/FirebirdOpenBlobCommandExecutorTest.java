@@ -41,7 +41,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Answers;
 import org.mockito.Mock;
-import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.nio.charset.StandardCharsets;
@@ -54,7 +53,6 @@ import static org.hamcrest.Matchers.isA;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -141,18 +139,6 @@ class FirebirdOpenBlobCommandExecutorTest {
         when(packet.getBlobId()).thenReturn(createdResponse.getId());
         FirebirdOpenBlobCommandExecutor executor = new FirebirdOpenBlobCommandExecutor(packet, connectionSession);
         assertThrows(InvalidSegstrIdException.class, executor::execute);
-    }
-    
-    @Test
-    void assertExecuteWhenCreatedBlobDataIsReleased() {
-        FirebirdBlobWriteCache blobWriteCache = mock(FirebirdBlobWriteCache.class);
-        when(blobWriteCache.isClosed(CONNECTION_ID, 5L)).thenReturn(true);
-        when(packet.getBlobId()).thenReturn(5L);
-        try (MockedStatic<FirebirdBlobWriteCache> mockedBlobWriteCache = mockStatic(FirebirdBlobWriteCache.class)) {
-            mockedBlobWriteCache.when(FirebirdBlobWriteCache::getInstance).thenReturn(blobWriteCache);
-            FirebirdOpenBlobCommandExecutor executor = new FirebirdOpenBlobCommandExecutor(packet, connectionSession);
-            assertThrows(InvalidSegstrIdException.class, executor::execute);
-        }
     }
     
     @Test

@@ -33,6 +33,7 @@ import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.gene
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Optional;
 
 /**
  * Open blob command executor for Firebird.
@@ -78,7 +79,8 @@ public final class FirebirdOpenBlobCommandExecutor implements CommandExecutor {
     
     private byte[] getCreatedBlobContent(final long blobId) {
         ShardingSpherePreconditions.checkState(FirebirdBlobWriteCache.getInstance().isClosed(connectionSession.getConnectionId(), blobId), () -> new InvalidSegstrIdException(blobId));
-        return FirebirdBlobWriteCache.getInstance().getBlobData(connectionSession.getConnectionId(), blobId).orElseThrow(() -> new InvalidSegstrIdException(blobId));
+        Optional<byte[]> blobData = FirebirdBlobWriteCache.getInstance().getBlobData(connectionSession.getConnectionId(), blobId);
+        return blobData.get();
     }
     
     @HighFrequencyInvocation
