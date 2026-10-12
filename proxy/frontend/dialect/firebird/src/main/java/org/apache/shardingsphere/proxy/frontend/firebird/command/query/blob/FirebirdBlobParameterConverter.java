@@ -21,7 +21,6 @@ import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.exception.core.exception.SQLDialectException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobTruncationException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ConversionErrorException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.MalformedStringException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.NumericOutOfRangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
@@ -51,7 +50,7 @@ import java.util.Optional;
  * A text BLOB is moved to a text BLOB parameter with transliteration between two different real character sets.
  * A BLOB is moved to another type as text read through the BLOB filter to the parameter character set, or to ASCII for other types, and the text is converted to the parameter type.
  * Firebird describes text parameters in the character set of the connection if it is a real one; otherwise the text keeps the character set of the BLOB.
- * Integer parameters get the value converted as Firebird converts it; other types get the ASCII text, because the proxy does not describe their scale.
+ * Integer, boolean, double and float parameters get the value converted as Firebird converts it; other types get the ASCII text, because the proxy does not describe their scale.
  * An error of the move is reported as {@link ParameterConversionException}.</p>
  */
 @RequiredArgsConstructor
@@ -129,7 +128,16 @@ public final class FirebirdBlobParameterConverter {
             return toText(content, field, parameter.getColumnLength());
         }
         String result = new String(readText(content, field, CHARSET_ASCII), StandardCharsets.ISO_8859_1);
-        return isInteger(type) ? toInteger(result, type) : result;
+        if (isInteger(type)) {
+            return toInteger(result, type);
+        }
+        if (FirebirdBinaryColumnType.BOOLEAN == type) {
+            return FirebirdTextValueParser.parseBoolean(result);
+        }
+        if (FirebirdBinaryColumnType.DOUBLE == type || FirebirdBinaryColumnType.D_FLOAT == type) {
+            return FirebirdTextValueParser.parseDouble(result);
+        }
+        return FirebirdBinaryColumnType.FLOAT == type ? FirebirdTextValueParser.parseFloat(result) : result;
     }
     
     /**
@@ -274,11 +282,11 @@ public final class FirebirdBlobParameterConverter {
         while (digitsEnd < value.length() && '\0' != value.charAt(digitsEnd) && ' ' != value.charAt(digitsEnd)) {
             digitsEnd++;
         }
-        ShardingSpherePreconditions.checkState(isSpacesToEnd(value, digitsEnd) && (value.length() - start) * 4L <= bits, () -> createConversionError(value));
+        ShardingSpherePreconditions.checkState(isSpacesToEnd(value, digitsEnd) && (value.length() - start) * 4L <= bits, () -> FirebirdTextValueParser.createConversionError(value));
         long result = 0L;
         for (int i = start; i < digitsEnd; i++) {
             char each = value.charAt(i);
-            ShardingSpherePreconditions.checkState(each < 128 && Character.digit(each, 16) >= 0, () -> createConversionError(value));
+            ShardingSpherePreconditions.checkState(each < 128 && Character.digit(each, 16) >= 0, () -> FirebirdTextValueParser.createConversionError(value));
             result = result * 16 + Character.digit(each, 16);
         }
         return digitsEnd - start <= 8 ? result & 0xFFFFFFFFL : result;
@@ -291,15 +299,6 @@ public final class FirebirdBlobParameterConverter {
             }
         }
         return true;
-    }
-    
-    private ConversionErrorException createConversionError(final String value) {
-        StringBuilder result = new StringBuilder(value.length());
-        for (int i = 0; i < value.length(); i++) {
-            char each = value.charAt(i);
-            result.append(each < ' ' || each > Byte.MAX_VALUE ? String.format("#x%02x", (int) each) : String.valueOf(each));
-        }
-        return new ConversionErrorException(result.toString());
     }
     
     private long toDecimalLong(final String value, final int start, final long maxValue) {
@@ -331,12 +330,12 @@ public final class FirebirdBlobParameterConverter {
             } else if ('+' == each && !digitSeen && 0 == sign && !fraction) {
                 sign = 1;
             } else {
-                ShardingSpherePreconditions.checkState(' ' == each && isSpacesToEnd(value, index), () -> createConversionError(value));
+                ShardingSpherePreconditions.checkState(' ' == each && isSpacesToEnd(value, index), () -> FirebirdTextValueParser.createConversionError(value));
                 index = value.length();
                 break;
             }
         }
-        ShardingSpherePreconditions.checkState(digitSeen, () -> createConversionError(value));
+        ShardingSpherePreconditions.checkState(digitSeen, () -> FirebirdTextValueParser.createConversionError(value));
         if (-1 == sign && result != -maxValue - 1) {
             result = -result;
         }
@@ -374,11 +373,11 @@ public final class FirebirdBlobParameterConverter {
             } else if ('+' == each && !digitSeen && 0 == sign) {
                 sign = 1;
             } else {
-                ShardingSpherePreconditions.checkState(' ' == each && isSpacesToEnd(value, index), () -> createConversionError(value));
+                ShardingSpherePreconditions.checkState(' ' == each && isSpacesToEnd(value, index), () -> FirebirdTextValueParser.createConversionError(value));
                 break;
             }
         }
-        ShardingSpherePreconditions.checkState(digitSeen, () -> createConversionError(value));
+        ShardingSpherePreconditions.checkState(digitSeen, () -> FirebirdTextValueParser.createConversionError(value));
         return -1 == sign ? -result : result;
     }
     

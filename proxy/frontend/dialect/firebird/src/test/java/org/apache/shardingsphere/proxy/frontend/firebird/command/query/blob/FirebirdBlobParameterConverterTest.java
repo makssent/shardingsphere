@@ -108,7 +108,13 @@ class FirebirdBlobParameterConverterTest {
     
     @Test
     void assertConvertToOtherType() {
-        assertThat(new FirebirdBlobParameterConverter(UTF8).convert("1.5e1".getBytes(StandardCharsets.US_ASCII), createField(1, UTF8), createParameter(Types.DOUBLE, null)), is("1.5e1"));
+        assertThat(new FirebirdBlobParameterConverter(UTF8).convert("2026-10-05".getBytes(StandardCharsets.US_ASCII), createField(1, UTF8), createParameter(Types.DATE, null)), is("2026-10-05"));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("parsedValueArguments")
+    void assertConvertToParsedValue(final String name, final int dataType, final String text, final Object expected) {
+        assertThat(new FirebirdBlobParameterConverter(UTF8).convert(text.getBytes(StandardCharsets.US_ASCII), createField(1, UTF8), createParameter(dataType, null)), is(expected));
     }
     
     @ParameterizedTest(name = "{0}")
@@ -193,6 +199,13 @@ class FirebirdBlobParameterConverterTest {
                 Arguments.of("big_integer_minimum", Types.BIGINT, "-9223372036854775808", Long.MIN_VALUE));
     }
     
+    private static Stream<Arguments> parsedValueArguments() {
+        return Stream.of(
+                Arguments.of("double", Types.DOUBLE, " 1.5e1 ", 15D),
+                Arguments.of("float", Types.REAL, "1.5", 1.5F),
+                Arguments.of("boolean", Types.BOOLEAN, " TRUE ", true));
+    }
+    
     private static Stream<Arguments> failedConversionArguments() {
         return Stream.of(
                 Arguments.of("malformed_text", createField(1, UTF8), new byte[]{(byte) 0xFF, (byte) 0xFE}, createParameter(Types.VARCHAR, 20), UTF8, MalformedStringException.class),
@@ -205,7 +218,9 @@ class FirebirdBlobParameterConverterTest {
                 Arguments.of("fraction_overflow", createField(1, UTF8), "1.23456789012".getBytes(StandardCharsets.US_ASCII), createParameter(Types.INTEGER, null), UTF8,
                         NumericOutOfRangeException.class),
                 Arguments.of("exponent_overflow", createField(1, UTF8), "1e3276".getBytes(StandardCharsets.US_ASCII), createParameter(Types.BIGINT, null), UTF8, NumericOutOfRangeException.class),
-                Arguments.of("scale_overflow", createField(1, UTF8), "400e2".getBytes(StandardCharsets.US_ASCII), createParameter(Types.SMALLINT, null), UTF8, NumericOutOfRangeException.class));
+                Arguments.of("scale_overflow", createField(1, UTF8), "400e2".getBytes(StandardCharsets.US_ASCII), createParameter(Types.SMALLINT, null), UTF8, NumericOutOfRangeException.class),
+                Arguments.of("boolean", createField(1, UTF8), "yes".getBytes(StandardCharsets.US_ASCII), createParameter(Types.BOOLEAN, null), UTF8, ConversionErrorException.class),
+                Arguments.of("double_overflow", createField(1, UTF8), "1e309".getBytes(StandardCharsets.US_ASCII), createParameter(Types.DOUBLE, null), UTF8, NumericOutOfRangeException.class));
     }
     
     private static Stream<Arguments> conversionErrorArguments() {
