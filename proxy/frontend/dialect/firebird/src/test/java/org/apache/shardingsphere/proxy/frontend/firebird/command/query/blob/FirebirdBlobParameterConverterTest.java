@@ -78,13 +78,8 @@ class FirebirdBlobParameterConverterTest {
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("blobArguments")
-    void assertConvertBlob(final String name, final FirebirdBatchColumnDescriptor field, final byte[] content, final Object expected) {
-        assertThat(new FirebirdBlobParameterConverter(UTF8).convertBlob(content, field, createBlobParameter(1)), is(expected));
-    }
-    
-    @Test
-    void assertConvertBlobWithMalformedText() {
-        assertThrows(MalformedStringException.class, () -> new FirebirdBlobParameterConverter(UTF8).convertBlob(new byte[]{(byte) 0xFF}, createField(1, UTF8), createBlobParameter(1)));
+    void assertConvertToBlob(final String name, final FirebirdBatchColumnDescriptor field, final byte[] content, final Object expected) {
+        assertThat(new FirebirdBlobParameterConverter(UTF8).convert(content, field, createBlobParameter(1)), is(expected));
     }
     
     @Test
@@ -165,6 +160,7 @@ class FirebirdBlobParameterConverterTest {
         byte[] octets = {(byte) 0xFF};
         return Stream.of(
                 Arguments.of("well_formed_text", createField(1, UTF8), wellFormedText, new String(wellFormedText, StandardCharsets.UTF_8)),
+                Arguments.of("malformed_text", createField(1, UTF8), octets, octets),
                 Arguments.of("octets_text", createField(1, OCTETS), octets, octets));
     }
     

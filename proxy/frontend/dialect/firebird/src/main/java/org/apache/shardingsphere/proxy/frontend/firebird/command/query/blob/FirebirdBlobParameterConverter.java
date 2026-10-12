@@ -26,7 +26,6 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.NumericOutOfRangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.StringTruncationException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.TransliterationFailedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlobFilterException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchColumnDescriptor;
@@ -136,20 +135,26 @@ public final class FirebirdBlobParameterConverter {
     /**
      * Convert BLOB value of message to BLOB parameter value.
      *
-     * <p>A text BLOB for a text BLOB parameter becomes the text of the parameter character set.
-     * Firebird checks that the text of a text BLOB parameter in a real character set is well formed when the statement uses the parameter,
-     * so a malformed text fails the message; other BLOBs keep their bytes.</p>
+     * <p>A text BLOB for a text BLOB parameter becomes the text of the parameter character set; other BLOBs keep their bytes.
+     * Firebird checks that the text of a text BLOB parameter is well formed when the statement uses the parameter if the parameter has a real character set:
+     * the character set of the connection, unless the column is in NONE or OCTETS, which the parameter keeps. The proxy does not know the character set of the column,
+     * so a malformed text keeps its bytes and the backend database checks it against the column.</p>
      *
      * @param content BLOB content
      * @param field BLOB field of message
      * @param parameter BLOB statement parameter
      * @return parameter value
-     * @throws MalformedStringException if the text is not well formed in the character set of the parameter
-     * @throws TransliterationFailedException if the text cannot be transliterated to the character set of the parameter
      */
-    public Object convertBlob(final byte[] content, final FirebirdBatchColumnDescriptor field, final FirebirdReturnColumnPacket parameter) {
+    private Object convertBlob(final byte[] content, final FirebirdBatchColumnDescriptor field, final FirebirdReturnColumnPacket parameter) {
         Optional<Charset> fieldCharset = findTextBlobCharset(field, parameter);
-        return fieldCharset.isPresent() ? toTextBlob(content, field, fieldCharset.get()) : content;
+        if (!fieldCharset.isPresent()) {
+            return content;
+        }
+        try {
+            return toTextBlob(content, field, fieldCharset.get());
+        } catch (final MalformedStringException ex) {
+            return content;
+        }
     }
     
     private String toTextBlob(final byte[] content, final FirebirdBatchColumnDescriptor field, final Charset fieldCharset) {

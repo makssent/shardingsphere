@@ -24,7 +24,6 @@ import org.apache.shardingsphere.database.exception.core.exception.SQLDialectExc
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.MalformedStringException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnknownBatchBlobIdException;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdConstant;
@@ -130,7 +129,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
             try {
                 params.add(bindRowBlobParameters(each, batchStatement.getColumnDescriptors(), preparedStatement.getParameterColumns(), blobIds, streamBlobContents));
                 continue;
-            } catch (final InvalidSegstrIdException | MalformedStringException | UnknownBatchBlobIdException | ParameterConversionException ex) {
+            } catch (final InvalidSegstrIdException | UnknownBatchBlobIdException | ParameterConversionException ex) {
                 failure = ex;
             }
             FirebirdBatchCompletion completion = executeParameters(preparedStatement, params, batchStatement.isMultiError());
@@ -139,7 +138,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
                 return mergeCompletions(completions);
             }
             params.clear();
-            if (!(failure instanceof InvalidSegstrIdException || failure instanceof MalformedStringException)) {
+            if (!(failure instanceof InvalidSegstrIdException)) {
                 batchStatement.getBlobIds().keySet().retainAll(blobIds.keySet());
                 batchStatement.getStreamBlobContents().keySet().retainAll(streamBlobContents.keySet());
                 throw failure;
@@ -166,7 +165,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
         for (int i = 0; i < columnDescriptors.size(); i++) {
             if (!moved[i] && isBlobValue(columnDescriptors.get(i), result.get(i))) {
                 byte[] content = getBlobContent(result.get(i));
-                result.set(i, i < parameterColumns.size() ? createBlobParameterConverter().convertBlob(content, columnDescriptors.get(i), parameterColumns.get(i)) : content);
+                result.set(i, i < parameterColumns.size() ? createBlobParameterConverter().convert(content, columnDescriptors.get(i), parameterColumns.get(i)) : content);
             }
         }
         return result;
