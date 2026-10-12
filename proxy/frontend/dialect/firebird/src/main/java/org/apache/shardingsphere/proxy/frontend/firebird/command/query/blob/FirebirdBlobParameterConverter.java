@@ -26,6 +26,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.NumericOutOfRangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.StringTruncationException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.TransliterationFailedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlobFilterException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchColumnDescriptor;
@@ -123,8 +124,7 @@ public final class FirebirdBlobParameterConverter {
     private Object convertValue(final byte[] content, final FirebirdBatchColumnDescriptor field, final FirebirdReturnColumnPacket parameter) {
         FirebirdBinaryColumnType type = parameter.getColumnType();
         if (FirebirdBinaryColumnType.BLOB == type) {
-            Optional<Charset> fieldCharset = findTextBlobCharset(field, parameter);
-            return fieldCharset.isPresent() ? toTextBlob(content, field, fieldCharset.get()) : content;
+            return convertBlob(content, field, parameter);
         }
         if (isText(type)) {
             return toText(content, field, parameter.getColumnLength());
@@ -133,9 +133,28 @@ public final class FirebirdBlobParameterConverter {
         return isInteger(type) ? toInteger(result, type) : result;
     }
     
+    /**
+     * Convert BLOB value of message to BLOB parameter value.
+     *
+     * <p>A text BLOB for a text BLOB parameter becomes the text of the parameter character set.
+     * Firebird checks that the text of a text BLOB parameter in a real character set is well formed when the statement uses the parameter,
+     * so a malformed text fails the message; other BLOBs keep their bytes.</p>
+     *
+     * @param content BLOB content
+     * @param field BLOB field of message
+     * @param parameter BLOB statement parameter
+     * @return parameter value
+     * @throws MalformedStringException if the text is not well formed in the character set of the parameter
+     * @throws TransliterationFailedException if the text cannot be transliterated to the character set of the parameter
+     */
+    public Object convertBlob(final byte[] content, final FirebirdBatchColumnDescriptor field, final FirebirdReturnColumnPacket parameter) {
+        Optional<Charset> fieldCharset = findTextBlobCharset(field, parameter);
+        return fieldCharset.isPresent() ? toTextBlob(content, field, fieldCharset.get()) : content;
+    }
+    
     private String toTextBlob(final byte[] content, final FirebirdBatchColumnDescriptor field, final Charset fieldCharset) {
         Optional<Charset> connectionCharset = findJavaCharset(connectionCharsetId);
-        return connectionCharset.isPresent() ? decode(filter(content, field, connectionCharsetId), connectionCharset.get(), false) : decode(content, fieldCharset, false);
+        return connectionCharset.isPresent() ? decode(filter(content, field, connectionCharsetId), connectionCharset.get()) : decode(content, fieldCharset);
     }
     
     private byte[] filter(final byte[] content, final FirebirdBatchColumnDescriptor field, final int charsetId) {
@@ -184,7 +203,7 @@ public final class FirebirdBlobParameterConverter {
         if (!textCharset.isPresent()) {
             return text;
         }
-        String result = decode(text, textCharset.get(), true);
+        String result = decode(text, textCharset.get());
         return null == length ? result : truncate(result, length);
     }
     
@@ -198,9 +217,8 @@ public final class FirebirdBlobParameterConverter {
         return result;
     }
     
-    private String decode(final byte[] text, final Charset charset, final boolean wellFormed) {
-        CharsetDecoder decoder = charset.newDecoder().onMalformedInput(wellFormed ? CodingErrorAction.REPORT : CodingErrorAction.REPLACE)
-                .onUnmappableCharacter(CodingErrorAction.REPLACE).replaceWith(String.valueOf(Character.MIN_VALUE));
+    private String decode(final byte[] text, final Charset charset) {
+        CharsetDecoder decoder = charset.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPLACE).replaceWith(String.valueOf(Character.MIN_VALUE));
         try {
             return decoder.decode(ByteBuffer.wrap(text)).toString();
         } catch (final CharacterCodingException ex) {

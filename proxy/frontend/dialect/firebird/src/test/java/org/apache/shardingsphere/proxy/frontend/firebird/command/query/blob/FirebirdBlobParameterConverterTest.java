@@ -56,6 +56,8 @@ class FirebirdBlobParameterConverterTest {
     
     private static final int NONE = 0;
     
+    private static final int OCTETS = 1;
+    
     private static final int UTF8 = 4;
     
     private static final int WIN1251 = 52;
@@ -72,6 +74,17 @@ class FirebirdBlobParameterConverterTest {
     @MethodSource("textBlobArguments")
     void assertConvertToTextBlob(final String name, final FirebirdBatchColumnDescriptor field, final byte[] content, final int connectionCharsetId, final String expected) {
         assertThat(new FirebirdBlobParameterConverter(connectionCharsetId).convert(content, field, createBlobParameter(1)), is(expected));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("blobArguments")
+    void assertConvertBlob(final String name, final FirebirdBatchColumnDescriptor field, final byte[] content, final Object expected) {
+        assertThat(new FirebirdBlobParameterConverter(UTF8).convertBlob(content, field, createBlobParameter(1)), is(expected));
+    }
+    
+    @Test
+    void assertConvertBlobWithMalformedText() {
+        assertThrows(MalformedStringException.class, () -> new FirebirdBlobParameterConverter(UTF8).convertBlob(new byte[]{(byte) 0xFF}, createField(1, UTF8), createBlobParameter(1)));
     }
     
     @Test
@@ -145,6 +158,14 @@ class FirebirdBlobParameterConverterTest {
                 Arguments.of("transliterated", createField(1, WIN1251), "Привет".getBytes(WIN1251_CHARSET), UTF8, "Привет"),
                 Arguments.of("connection_charset", createField(1, UTF8), "Привет".getBytes(StandardCharsets.UTF_8), UTF8, "Привет"),
                 Arguments.of("without_connection_charset", createField(1, WIN1251), "Привет".getBytes(WIN1251_CHARSET), NONE, "Привет"));
+    }
+    
+    private static Stream<Arguments> blobArguments() {
+        byte[] wellFormedText = {(byte) 0xE2, (byte) 0x82, (byte) 0xAC, (byte) 0xF0, (byte) 0x9F, (byte) 0x98, (byte) 0x80};
+        byte[] octets = {(byte) 0xFF};
+        return Stream.of(
+                Arguments.of("well_formed_text", createField(1, UTF8), wellFormedText, new String(wellFormedText, StandardCharsets.UTF_8)),
+                Arguments.of("octets_text", createField(1, OCTETS), octets, octets));
     }
     
     private static Stream<Arguments> textArguments() {

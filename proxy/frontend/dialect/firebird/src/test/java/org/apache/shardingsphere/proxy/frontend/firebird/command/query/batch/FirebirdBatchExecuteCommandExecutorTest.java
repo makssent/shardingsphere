@@ -47,6 +47,7 @@ import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdS
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
 import org.firebirdsql.gds.BlrConstants;
+import org.firebirdsql.gds.ISCConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -807,6 +808,37 @@ class FirebirdBatchExecuteCommandExecutorTest {
     
     @Test
     @SuppressWarnings("unchecked")
+    void assertExecuteWithMalformedTextBlob() throws SQLException, ReflectiveOperationException {
+        mockBlobParameterBatch(Arrays.asList(Collections.singletonList(1L), Collections.singletonList(2L)), Collections.singletonList(createTextBlobParameterColumn()));
+        ByteBuf fieldBlr = Unpooled.buffer().writeByte(BlrConstants.blr_version5).writeByte(BlrConstants.blr_begin).writeByte(BlrConstants.blr_message).writeByte(0).writeShortLE(2)
+                .writeByte(BlrConstants.blr_blob2).writeShortLE(1).writeShortLE(4).writeByte(BlrConstants.blr_short).writeByte(0).writeByte(BlrConstants.blr_end).writeByte(BlrConstants.blr_eoc);
+        when(batchStatement.getColumnDescriptors()).thenReturn(FirebirdParseBatchBlr.parse(fieldBlr, fieldBlr.readableBytes()).getFields());
+        when(batchStatement.isMultiError()).thenReturn(true);
+        when(batchStatement.isRecordCounts()).thenReturn(true);
+        Map<Long, byte[]> streamBlobContents = new HashMap<>(2, 1F);
+        streamBlobContents.put(1L, new byte[]{(byte) 0xFF});
+        streamBlobContents.put(2L, "ok".getBytes(StandardCharsets.UTF_8));
+        when(batchStatement.getStreamBlobContents()).thenReturn(streamBlobContents);
+        List<List<Object>> actualParams = new ArrayList<>(1);
+        try (
+                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
+                MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+                    actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+                    when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
+                })) {
+            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
+            FirebirdBatchCompletionStateResponse actual = (FirebirdBatchCompletionStateResponse) new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute().iterator().next();
+            assertThat(getUpdateCounts(actual), is(new int[]{FirebirdBatchCompletion.EXECUTE_FAILED, 1}));
+            List<DetailedError> actualErrors = getDetailedErrors(actual);
+            assertThat(actualErrors.size(), is(1));
+            assertThat(actualErrors.get(0).getElement(), is(0));
+            assertThat(actualErrors.get(0).getStatusVector().getGdsCode(), is(ISCConstants.isc_malformed_string));
+            assertThat(actualParams, is(Collections.singletonList(Collections.<Object>singletonList("ok"))));
+        }
+    }
+    
+    @Test
+    @SuppressWarnings("unchecked")
     void assertExecuteWithConvertedBlobParameters() throws SQLException {
         mockBlobParameterBatch(Collections.singletonList(Arrays.asList(10L, 11L)), Arrays.asList(createParameterColumn(Types.INTEGER, null), createParameterColumn(Types.VARCHAR, 20)));
         when(blobWriteCache.useBlobData(CONNECTION_ID, 10L, transactionId)).thenReturn(Optional.of("231".getBytes(StandardCharsets.US_ASCII)));
@@ -897,6 +929,11 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         when(preparedStatement.getParameterColumns()).thenReturn(parameterColumns);
+    }
+    
+    private FirebirdReturnColumnPacket createTextBlobParameterColumn() {
+        ShardingSphereTable table = new ShardingSphereTable("T", Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+        return new FirebirdReturnColumnPacket(Collections.emptyList(), 1, table, new ShardingSphereColumn("C", Types.BLOB, false, false, true, true, false, true), null, null, null, null, true, 1);
     }
     
     private FirebirdReturnColumnPacket createParameterColumn(final int dataType, final Integer length) {
