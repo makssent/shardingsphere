@@ -92,9 +92,7 @@ class FirebirdBlobParameterBufferUtilsTest {
     }
     
     private static Stream<Arguments> writeNotSupportedFilterArguments() {
-        return Stream.of(
-                Arguments.of("blr_to_text", new byte[]{1, 1, 1, 2, 2, 1, 1}, 2),
-                Arguments.of("debug_info_to_text", new byte[]{1, 1, 1, 9, 2, 1, 1}, 9));
+        return Stream.of(Arguments.of("blr_to_text", new byte[]{1, 1, 1, 2, 2, 1, 1}, 2), Arguments.of("debug_info_to_text", new byte[]{1, 1, 1, 9, 2, 1, 1}, 9));
     }
     
     private static Stream<Arguments> storedDataArguments() {
