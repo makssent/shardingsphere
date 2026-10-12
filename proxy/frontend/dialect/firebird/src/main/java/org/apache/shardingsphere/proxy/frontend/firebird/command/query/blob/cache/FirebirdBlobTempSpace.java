@@ -18,6 +18,7 @@
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache;
 
 import lombok.SneakyThrows;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -31,6 +32,7 @@ import java.nio.file.StandardOpenOption;
  * <p>Firebird keeps the data of temporary BLOBs of a transaction in its temporary space, in memory and then on disk, until the transaction ends.
  * The proxy writes the data of a used BLOB to a temporary file, which is created on the first write, emptied when the transaction ends and deleted when it is closed.</p>
  */
+@HighFrequencyInvocation
 final class FirebirdBlobTempSpace {
     
     private FileChannel file;

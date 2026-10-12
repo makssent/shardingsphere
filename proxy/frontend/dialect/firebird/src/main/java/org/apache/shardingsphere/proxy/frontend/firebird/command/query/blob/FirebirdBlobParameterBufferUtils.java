@@ -161,6 +161,7 @@ public final class FirebirdBlobParameterBufferUtils {
     /**
      * Sub types and character sets of a BLOB parameter buffer of version 1.
      */
+    @HighFrequencyInvocation
     private static final class BlobParameters {
         
         private final int sourceType;

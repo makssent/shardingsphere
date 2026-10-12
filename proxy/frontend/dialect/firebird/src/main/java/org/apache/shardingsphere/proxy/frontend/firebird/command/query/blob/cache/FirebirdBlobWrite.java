@@ -19,6 +19,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cac
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 
 import java.io.ByteArrayOutputStream;
 import java.lang.ref.SoftReference;
@@ -115,6 +116,7 @@ public final class FirebirdBlobWrite {
      *
      * @param tempSpace temporary space of the connection
      */
+    @HighFrequencyInvocation
     void markUsed(final FirebirdBlobTempSpace tempSpace) {
         if (null != content) {
             tempSpaceOffset = tempSpace.write(content);
