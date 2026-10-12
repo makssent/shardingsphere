@@ -25,6 +25,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentExceedsBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSmallDataException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
@@ -126,6 +127,7 @@ class FirebirdFrontendEngineTest {
                 Arguments.of("skip when batch segment exceeds blob exception", true, false, new BatchSegmentExceedsBlobException(50, 10), false),
                 Arguments.of("skip when batch segment too big exception", true, false, new BatchSegmentTooBigException(50, 10), false),
                 Arguments.of("skip when batch small data exception", true, false, new BatchSmallDataException("BLOB"), false),
+                Arguments.of("skip when batch too big exception", true, false, new BatchTooBigException(1, 0L, 20L, 16L), false),
                 Arguments.of("skip when blob filter not found exception", true, false, new BlobFilterNotFoundException(0, 2), false),
                 Arguments.of("skip when invalid bpb version exception", true, false, new InvalidBpbVersionException(2, 1), false),
                 Arguments.of("skip when parameter conversion exception", true, false, new ParameterConversionException(new StringTruncationException(20, 32)), false),

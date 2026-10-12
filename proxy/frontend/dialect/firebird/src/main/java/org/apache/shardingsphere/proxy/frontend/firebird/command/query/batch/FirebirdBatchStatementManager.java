@@ -136,6 +136,7 @@ public final class FirebirdBatchStatementManager {
      * @param packet batch BLOB stream packet
      * @throws InvalidBatchHandleException if batch statement does not exist
      * @throws InvalidBatchBlobPolicyException if BLOB policy of batch does not allow BLOB stream
+     * @throws BatchTooBigException if the stream portion exceeds the batch buffer size
      */
     void appendBlobStream(final int connectionId, final FirebirdBatchBlobStreamCommandPacket packet) {
         FirebirdBatchStatement batchStatement = getBatchStatement(connectionId, packet.getStatementHandle());

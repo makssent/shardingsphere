@@ -25,6 +25,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentExceedsBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSmallDataException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
@@ -54,6 +55,7 @@ public final class FirebirdFrontendEngine implements DatabaseProtocolFrontendEng
             BatchSegmentExceedsBlobException.class,
             BatchSegmentTooBigException.class,
             BatchSmallDataException.class,
+            BatchTooBigException.class,
             BlobFilterNotFoundException.class,
             InvalidBpbVersionException.class,
             ParameterConversionException.class,

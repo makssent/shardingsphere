@@ -30,6 +30,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentExceedsBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSmallDataException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.firebirdsql.gds.ISCConstants;
@@ -121,11 +122,16 @@ public final class FirebirdBatchStatement {
     /**
      * Append one portion of the BLOB stream to the BLOB buffer as Firebird restores it.
      *
+     * <p>Firebird reads the portion with the BLOB stream state before it checks the BLOB buffer, which has the size limit of the message buffer,
+     * so a rejected portion advances the BLOB stream state but is not kept.</p>
+     *
      * @param data packet data starting at the stream portion
      * @param length declared length of the stream portion
+     * @throws BatchTooBigException if the portion exceeds the batch buffer size
      */
     public void appendBlobStream(final ByteBuf data, final long length) {
         byte[] portion = blobStream.read(data, length);
+        ShardingSpherePreconditions.checkState(blobStreamSize + portion.length <= bufferSize, () -> new BatchTooBigException(statementHandle, blobStreamSize, portion.length, bufferSize));
         blobBuffer.add(portion);
         blobStreamSize += portion.length;
     }
