@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.exception.core.SQLExceptionTransformEngine;
 import org.apache.shardingsphere.database.exception.core.exception.SQLDialectException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterWriteNotSupportedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
@@ -35,6 +36,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.protocol.FirebirdBlobBinaryProtocolValue;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdReturnColumnPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdBatchCompletionStateResponse;
+import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
@@ -68,7 +70,11 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
             throw new InvalidBatchHandleException(packet.getStatementHandle());
         }
         validateTransactionHandle();
-        registerStreamBlobs(batchStatementManager, batchStatement);
+        try {
+            registerStreamBlobs(batchStatementManager, batchStatement);
+        } catch (final BlobFilterWriteNotSupportedException ex) {
+            return Collections.singleton(new FirebirdGenericResponsePacket());
+        }
         int messageCount = batchStatement.getParameterValues().size();
         if (batchStatement.getParameterValues().isEmpty()) {
             batchStatementManager.resetBatchStatement(batchStatement);

@@ -39,6 +39,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdReturnColumnPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdBatchCompletionStateResponse;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdBatchCompletionStateResponse.DetailedError;
+import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereColumn;
 import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereTable;
@@ -754,6 +755,28 @@ class FirebirdBatchExecuteCommandExecutorTest {
             assertThrows(BatchBlobBufferFormatException.class, () -> new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute());
             assertTrue(mockedExecutor.constructed().isEmpty());
             assertTrue(batchStatement.getBlobBuffer().isEmpty());
+            assertTrue(batchStatement.getParameterValues().isEmpty());
+        }
+    }
+    
+    @Test
+    void assertExecuteWithWriteNotSupportedFilterStreamBlob() throws SQLException {
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
+        when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
+        when(packet.getTransactionHandle()).thenReturn(transactionId);
+        FirebirdBatchStatement batchStatement = createStreamBlobBatchStatement(Unpooled.buffer().writeLong(1L).writeInt(3).writeInt(0).writeBytes(new byte[]{1, 2, 3}));
+        batchStatement.setDefaultBpb(new byte[]{1, 1, 1, 2, 2, 1, 1, 3, 1, 1});
+        batchStatement.addParameterValues(Collections.singletonList(1L));
+        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        try (
+                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
+                MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
+            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
+            Collection<DatabasePacket> actual = new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
+            assertThat(actual.size(), is(1));
+            assertThat(((FirebirdGenericResponsePacket) actual.iterator().next()).getErrorCode(), is(-1));
+            assertTrue(mockedExecutor.constructed().isEmpty());
             assertTrue(batchStatement.getParameterValues().isEmpty());
         }
     }

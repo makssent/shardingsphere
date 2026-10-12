@@ -21,6 +21,7 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import org.apache.shardingsphere.database.exception.core.exception.SQLDialectException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterWriteNotSupportedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlobFilterException;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.firebirdsql.encodings.EncodingDefinition;
@@ -57,6 +58,8 @@ public final class FirebirdBlobParameterBufferUtils {
     
     private static final int BLOB_RANGES = 4;
     
+    private static final int BLOB_RUNTIME = 5;
+    
     /**
      * Create the transliterator of the BLOB filter that Firebird applies to the data of a BLOB created with the BLOB parameter buffer.
      *
@@ -69,39 +72,51 @@ public final class FirebirdBlobParameterBufferUtils {
      * @param connectionCharsetId character set ID of the connection
      * @return transliterator, or empty if Firebird stores the data unchanged
      * @throws BlobFilterNotFoundException if Firebird has no BLOB filter for the sub type conversion
-     * @throws UnsupportedBlobFilterException if Firebird converts the data with another BLOB filter or a character set without Java character set
+     * @throws BlobFilterWriteNotSupportedException if an internal BLOB filter of Firebird does not support writing
+     * @throws UnsupportedBlobFilterException if Firebird converts the data with a character set without Java character set
      */
     public static Optional<FirebirdBlobTransliterator> createTransliterator(final byte[] bpb, final int connectionCharsetId) {
-        if (0 == bpb.length || BPB_VERSION1 != bpb[0]) {
+        return isVersion1(bpb) ? findTransliterator(new BlobParameters(bpb), connectionCharsetId) : Optional.empty();
+    }
+    
+    /**
+     * Get the data that Firebird stores for a BLOB created with the BLOB parameter buffer.
+     *
+     * <p>The BLOB filter in front of the BLOB transliterates text as {@link #createTransliterator(byte[], int)} describes;
+     * the internal filter of sub type 5 ({@code filter_runtime}) accepts the data without writing it,
+     * and the other internal filters to text answer the creation of the BLOB with {@code isc_uns_ext}.</p>
+     *
+     * @param bpb BLOB parameter buffer
+     * @param connectionCharsetId character set ID of the connection
+     * @param data written data
+     * @return stored data
+     * @throws BlobFilterNotFoundException if Firebird has no BLOB filter for the sub type conversion
+     * @throws BlobFilterWriteNotSupportedException if an internal BLOB filter of Firebird does not support writing
+     * @throws UnsupportedBlobFilterException if Firebird converts the data with a character set without Java character set
+     */
+    public static byte[] getStoredData(final byte[] bpb, final int connectionCharsetId, final byte[] data) {
+        if (!isVersion1(bpb)) {
+            return data;
+        }
+        BlobParameters parameters = new BlobParameters(bpb);
+        if (BLOB_TEXT == parameters.targetType && BLOB_RUNTIME == parameters.sourceType) {
+            return new byte[0];
+        }
+        return findTransliterator(parameters, connectionCharsetId).map(each -> each.put(data)).orElse(data);
+    }
+    
+    private static boolean isVersion1(final byte[] bpb) {
+        return 0 != bpb.length && BPB_VERSION1 == bpb[0];
+    }
+    
+    private static Optional<FirebirdBlobTransliterator> findTransliterator(final BlobParameters parameters, final int connectionCharsetId) {
+        if (0 != parameters.targetType && parameters.sourceType != parameters.targetType) {
+            checkSubTypeConversion(parameters.sourceType, parameters.targetType, parameters.targetCharset);
             return Optional.empty();
         }
-        int sourceType = 0;
-        int targetType = 0;
-        int sourceCharset = 0;
-        int targetCharset = 0;
-        int index = 1;
-        while (index + 1 < bpb.length) {
-            int tag = bpb[index];
-            int valueLength = Math.min(bpb[index + 1] & 0xFF, bpb.length - index - 2);
-            int value = readVaxShort(bpb, index + 2, valueLength);
-            if (BPB_SOURCE_TYPE == tag) {
-                sourceType = value;
-            } else if (BPB_TARGET_TYPE == tag) {
-                targetType = value;
-            } else if (BPB_SOURCE_INTERP == tag) {
-                sourceCharset = value;
-            } else if (BPB_TARGET_INTERP == tag) {
-                targetCharset = value;
-            }
-            index += 2 + valueLength;
-        }
-        if (0 != targetType && sourceType != targetType) {
-            checkSubTypeConversion(sourceType, targetType, targetCharset);
-            return Optional.empty();
-        }
-        int actualSourceCharset = getActualCharset(sourceCharset, connectionCharsetId);
-        int actualTargetCharset = getActualCharset(targetCharset, connectionCharsetId);
-        if (BLOB_TEXT != targetType || actualSourceCharset == actualTargetCharset || isPlainCharset(actualSourceCharset) || isPlainCharset(actualTargetCharset)) {
+        int actualSourceCharset = getActualCharset(parameters.sourceCharset, connectionCharsetId);
+        int actualTargetCharset = getActualCharset(parameters.targetCharset, connectionCharsetId);
+        if (BLOB_TEXT != parameters.targetType || actualSourceCharset == actualTargetCharset || isPlainCharset(actualSourceCharset) || isPlainCharset(actualTargetCharset)) {
             return Optional.empty();
         }
         return Optional.of(new FirebirdBlobTransliterator(getJavaCharset(actualSourceCharset), getJavaCharset(actualTargetCharset)));
@@ -111,20 +126,9 @@ public final class FirebirdBlobParameterBufferUtils {
         ShardingSpherePreconditions.checkState(BLOB_TEXT == targetType && (0 == sourceType || CHARSET_BINARY == targetCharset), () -> createFilterException(sourceType, targetType));
     }
     
-    private static int readVaxShort(final byte[] bpb, final int offset, final int length) {
-        if (length <= 0 || length > Integer.BYTES) {
-            return 0;
-        }
-        int result = bpb[offset + length - 1] << 8 * (length - 1);
-        for (int i = 0; i < length - 1; i++) {
-            result += (bpb[offset + i] & 0xFF) << 8 * i;
-        }
-        return (short) result;
-    }
-    
     private static SQLDialectException createFilterException(final int sourceType, final int targetType) {
         boolean internalFilter = BLOB_TEXT == targetType && sourceType >= 0 && sourceType < INTERNAL_FILTER_COUNT && BLOB_RANGES != sourceType;
-        return internalFilter ? new UnsupportedBlobFilterException() : new BlobFilterNotFoundException(sourceType, targetType);
+        return internalFilter ? new BlobFilterWriteNotSupportedException(sourceType) : new BlobFilterNotFoundException(sourceType, targetType);
     }
     
     private static int getActualCharset(final int charset, final int connectionCharsetId) {
@@ -139,5 +143,47 @@ public final class FirebirdBlobParameterBufferUtils {
         EncodingDefinition encodingDefinition = EncodingFactory.getPlatformDefault().getEncodingDefinitionByCharacterSetId(charsetId);
         ShardingSpherePreconditions.checkState(CHARSET_DYNAMIC != charsetId && null != encodingDefinition && !encodingDefinition.isInformationOnly(), UnsupportedBlobFilterException::new);
         return encodingDefinition.getJavaCharset();
+    }
+    
+    /**
+     * Sub types and character sets of a BLOB parameter buffer of version 1.
+     */
+    private static final class BlobParameters {
+        
+        private final int sourceType;
+        
+        private final int targetType;
+        
+        private final int sourceCharset;
+        
+        private final int targetCharset;
+        
+        BlobParameters(final byte[] bpb) {
+            int[] values = new int[BPB_TARGET_INTERP + 1];
+            int index = 1;
+            while (index + 1 < bpb.length) {
+                int tag = bpb[index];
+                int valueLength = Math.min(bpb[index + 1] & 0xFF, bpb.length - index - 2);
+                if (tag >= BPB_SOURCE_TYPE && tag <= BPB_TARGET_INTERP) {
+                    values[tag] = readVaxShort(bpb, index + 2, valueLength);
+                }
+                index += 2 + valueLength;
+            }
+            sourceType = values[BPB_SOURCE_TYPE];
+            targetType = values[BPB_TARGET_TYPE];
+            sourceCharset = values[BPB_SOURCE_INTERP];
+            targetCharset = values[BPB_TARGET_INTERP];
+        }
+        
+        private int readVaxShort(final byte[] bpb, final int offset, final int length) {
+            if (length <= 0 || length > Integer.BYTES) {
+                return 0;
+            }
+            int result = bpb[offset + length - 1] << 8 * (length - 1);
+            for (int i = 0; i < length - 1; i++) {
+                result += (bpb[offset + i] & 0xFF) << 8 * i;
+            }
+            return (short) result;
+        }
     }
 }

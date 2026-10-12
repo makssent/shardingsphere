@@ -18,6 +18,7 @@
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob;
 
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterWriteNotSupportedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlobFilterException;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -59,6 +60,19 @@ class FirebirdBlobParameterBufferUtilsTest {
     }
     
     @ParameterizedTest(name = "{0}")
+    @MethodSource("writeNotSupportedFilterArguments")
+    void assertCreateTransliteratorWithWriteNotSupportedFilter(final String name, final byte[] bpb, final int expectedSourceType) {
+        BlobFilterWriteNotSupportedException actual = assertThrows(BlobFilterWriteNotSupportedException.class, () -> FirebirdBlobParameterBufferUtils.createTransliterator(bpb, 4));
+        assertThat(actual.getSourceType(), is(expectedSourceType));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("storedDataArguments")
+    void assertGetStoredData(final String name, final byte[] bpb, final byte[] data, final byte[] expectedData) {
+        assertThat(FirebirdBlobParameterBufferUtils.getStoredData(bpb, 4, data), is(expectedData));
+    }
+    
+    @ParameterizedTest(name = "{0}")
     @MethodSource("missingFilterArguments")
     void assertCreateTransliteratorWithMissingFilter(final String name, final byte[] bpb, final int expectedSourceType, final int expectedTargetType) {
         BlobFilterNotFoundException actual = assertThrows(BlobFilterNotFoundException.class, () -> FirebirdBlobParameterBufferUtils.createTransliterator(bpb, 4));
@@ -89,9 +103,22 @@ class FirebirdBlobParameterBufferUtilsTest {
     
     private static Stream<Arguments> unsupportedFilterArguments() {
         return Stream.of(
-                Arguments.of("sub_type_conversion", new byte[]{1, 1, 1, 2, 2, 1, 1}, 4),
                 Arguments.of("unknown_connection_charset", new byte[]{1, 1, 1, 1, 2, 1, 1, 4, 1, 127, 5, 1, 4}, 127),
                 Arguments.of("charset_without_java_charset", new byte[]{1, 1, 1, 1, 2, 1, 1, 4, 1, 19, 5, 1, 4}, 4));
+    }
+    
+    private static Stream<Arguments> writeNotSupportedFilterArguments() {
+        return Stream.of(
+                Arguments.of("blr_to_text", new byte[]{1, 1, 1, 2, 2, 1, 1}, 2),
+                Arguments.of("debug_info_to_text", new byte[]{1, 1, 1, 9, 2, 1, 1}, 9));
+    }
+    
+    private static Stream<Arguments> storedDataArguments() {
+        byte[] data = "é".getBytes(StandardCharsets.UTF_8);
+        return Stream.of(
+                Arguments.of("empty_bpb", new byte[0], data, data),
+                Arguments.of("transliteration", new byte[]{1, 1, 1, 1, 2, 1, 1, 4, 1, 4, 5, 1, 53}, data, "é".getBytes(WIN1252)),
+                Arguments.of("runtime_to_text", new byte[]{1, 1, 1, 5, 2, 1, 1}, data, new byte[0]));
     }
     
     private static Stream<Arguments> missingFilterArguments() {

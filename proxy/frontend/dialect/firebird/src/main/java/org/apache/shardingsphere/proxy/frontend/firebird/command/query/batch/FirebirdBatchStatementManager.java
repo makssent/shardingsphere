@@ -29,6 +29,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSmallDataException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterWriteNotSupportedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
@@ -179,14 +180,14 @@ public final class FirebirdBatchStatementManager {
      * @throws BatchSegmentExceedsBlobException if a BLOB segment exceeds its BLOB
      * @throws BatchSegmentTooBigException if a BLOB segment is incomplete
      * @throws BlobFilterNotFoundException if Firebird has no BLOB filter for the sub type conversion of a BLOB parameter buffer
+     * @throws BlobFilterWriteNotSupportedException if a BLOB parameter buffer requires an internal BLOB filter that does not support writing
      * @throws UnsupportedBlobFilterException if a BLOB parameter buffer requires an unsupported BLOB filter conversion
      * @throws TransliterationFailedException if BLOB data cannot be transliterated as its BLOB parameter buffer requires
      */
     void registerStreamBlobs(final FirebirdBatchStatement batchStatement, final int connectionCharsetId) {
         for (FirebirdBatchStreamBlob each : batchStatement.readStreamBlobs()) {
             byte[] data = each.getData().toByteArray();
-            byte[] content = FirebirdBlobParameterBufferUtils.createTransliterator(each.getBpb(), connectionCharsetId).map(transliterator -> transliterator.put(data)).orElse(data);
-            batchStatement.getStreamBlobContents().put(each.getBatchBlobId(), content);
+            batchStatement.getStreamBlobContents().put(each.getBatchBlobId(), FirebirdBlobParameterBufferUtils.getStoredData(each.getBpb(), connectionCharsetId, data));
         }
         batchStatement.clearBlobStream();
     }
