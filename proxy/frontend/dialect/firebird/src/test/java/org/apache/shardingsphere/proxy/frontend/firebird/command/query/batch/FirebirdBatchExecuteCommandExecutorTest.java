@@ -263,6 +263,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     @MethodSource("blobParameterArguments")
     @SuppressWarnings("unchecked")
     void assertExecuteWithBlobParameters(final String name, final long blobId, final byte[] expectedBytes, final boolean batchBlobId) throws SQLException {
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
@@ -319,6 +320,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     @MethodSource("zeroBlobIdArguments")
     @SuppressWarnings("unchecked")
     void assertExecuteWithZeroBlobId(final String name, final boolean batchBlobId, final Map<Long, Long> registeredBlobIds, final long blobId) throws SQLException {
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
@@ -356,6 +358,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     @Test
     @SuppressWarnings("unchecked")
     void assertExecuteWithNullBlobParameter() throws SQLException {
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
@@ -382,6 +385,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     
     @Test
     void assertExecuteWithInvalidUploadedBlob() throws SQLException, ReflectiveOperationException {
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
@@ -407,6 +411,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     
     @Test
     void assertExecuteWithUnknownResultBlob() throws SQLException, ReflectiveOperationException {
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
@@ -432,6 +437,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     @MethodSource("registeredBlobArguments")
     @SuppressWarnings("unchecked")
     void assertExecuteWithRegisteredBlobs(final String name, final long batchBlobId, final long existingBlobId, final byte[] expectedBytes) throws SQLException {
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
@@ -494,6 +500,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     @MethodSource("unregisteredBlobArguments")
     void assertExecuteWithUnregisteredBlob(final String name, final List<List<Object>> params, final Map<Long, Long> registeredBlobIds, final int expectedExecutions,
                                            final Map<Long, Long> expectedBlobIds, final long expectedBatchBlobId) {
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
@@ -538,6 +545,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     @SuppressWarnings("unchecked")
     void assertExecuteWithBlobFailures(final String name, final boolean multiError, final boolean backendFailure, final int[] existingBlobIds,
                                        final int[] expectedCounts, final int[] expectedErrors, final Collection<Integer> expectedExecutedRows) throws SQLException, ReflectiveOperationException {
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
@@ -604,6 +612,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     
     @Test
     void assertExecuteWhenBackendStopsBeforeInvalidBlob() throws SQLException, ReflectiveOperationException {
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
@@ -633,6 +642,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("laterBlobFailureArguments")
     void assertExecuteWithEarlierBackendFailure(final String name, final List<List<Object>> params, final Map<Long, Long> blobIds) throws SQLException, ReflectiveOperationException {
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
@@ -673,6 +683,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     @Test
     @SuppressWarnings("unchecked")
     void assertExecuteWithSharedUpload() throws SQLException {
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
