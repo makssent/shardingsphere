@@ -43,6 +43,8 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobTruncationException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.CannotUpdateOldBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ConversionErrorException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.DateRangeExceededException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.DatetimeRangeExceededException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
@@ -54,6 +56,8 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTimeZoneOffsetException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTimeZoneRegionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.MalformedStringException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.NumericOutOfRangeException;
@@ -217,6 +221,18 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
         }
         if (sqlDialectException instanceof ConversionErrorException) {
             return toFirebirdException(FirebirdVendorError.CONVERSION_ERROR, ((ConversionErrorException) sqlDialectException).getValue());
+        }
+        if (sqlDialectException instanceof DateRangeExceededException) {
+            return toFirebirdException(FirebirdVendorError.DATE_RANGE_EXCEEDED);
+        }
+        if (sqlDialectException instanceof DatetimeRangeExceededException) {
+            return toFirebirdException(FirebirdVendorError.DATETIME_RANGE_EXCEEDED);
+        }
+        if (sqlDialectException instanceof InvalidTimeZoneOffsetException) {
+            return toFirebirdException(FirebirdVendorError.INVALID_TIME_ZONE_OFFSET, ((InvalidTimeZoneOffsetException) sqlDialectException).getTimeZoneOffset());
+        }
+        if (sqlDialectException instanceof InvalidTimeZoneRegionException) {
+            return toFirebirdException(FirebirdVendorError.INVALID_TIME_ZONE_REGION, ((InvalidTimeZoneRegionException) sqlDialectException).getTimeZoneRegion());
         }
         if (sqlDialectException instanceof MalformedStringException) {
             return toSQLException(FirebirdVendorError.MALFORMED_STRING);

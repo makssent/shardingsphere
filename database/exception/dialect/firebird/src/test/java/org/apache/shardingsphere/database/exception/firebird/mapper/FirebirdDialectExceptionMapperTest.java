@@ -45,6 +45,8 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobTruncationException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.CannotUpdateOldBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ConversionErrorException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.DateRangeExceededException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.DatetimeRangeExceededException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
@@ -56,6 +58,8 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTimeZoneOffsetException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTimeZoneRegionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.MalformedStringException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.NumericOutOfRangeException;
@@ -324,6 +328,41 @@ class FirebirdDialectExceptionMapperTest {
         SQLException actual = mapper.convert(new ConversionErrorException("from-blobs"));
         assertFirebirdSQLException(actual, "22018", ISCConstants.isc_convert_error, "conversion error from string \"from-blobs\"");
         assertStatusVector(actual, Collections.singletonList(Arrays.asList(ISCConstants.isc_convert_error, "from-blobs")));
+    }
+    
+    @Test
+    void assertConvertWithDateRangeExceeded() {
+        SQLException actual = mapper.convert(new DateRangeExceededException());
+        assertFirebirdSQLException(actual, "22008", ISCConstants.isc_date_range_exceeded, "value exceeds the range for valid dates");
+        assertStatusVector(actual, Collections.singletonList(Collections.singletonList(ISCConstants.isc_date_range_exceeded)));
+    }
+    
+    @Test
+    void assertConvertWithDatetimeRangeExceeded() {
+        SQLException actual = mapper.convert(new DatetimeRangeExceededException());
+        assertFirebirdSQLException(actual, "22008", ISCConstants.isc_datetime_range_exceeded, "value exceeds the range for valid timestamps");
+        assertStatusVector(actual, Collections.singletonList(Collections.singletonList(ISCConstants.isc_datetime_range_exceeded)));
+    }
+    
+    @Test
+    void assertConvertWithInvalidTimeZoneOffset() {
+        SQLException actual = mapper.convert(new InvalidTimeZoneOffsetException("+25:00"));
+        assertFirebirdSQLException(actual, "22009", ISCConstants.isc_invalid_timezone_offset, "Invalid time zone offset: +25:00 - must use format +/-hours:minutes and be between -14:00 and +14:00");
+        assertStatusVector(actual, Collections.singletonList(Arrays.asList(ISCConstants.isc_invalid_timezone_offset, "+25:00")));
+    }
+    
+    @Test
+    void assertConvertWithInvalidTimeZoneRegion() {
+        SQLException actual = mapper.convert(new InvalidTimeZoneRegionException("Mars/Base"));
+        assertFirebirdSQLException(actual, "22009", ISCConstants.isc_invalid_timezone_region, "Invalid time zone region: Mars/Base");
+        assertStatusVector(actual, Collections.singletonList(Arrays.asList(ISCConstants.isc_invalid_timezone_region, "Mars/Base")));
+    }
+    
+    @Test
+    void assertConvertWithParameterConversionOfTimeZoneRegion() {
+        SQLException actual = mapper.convert(new ParameterConversionException(new InvalidTimeZoneRegionException("Mars/Base")));
+        assertStatusVector(actual, Arrays.asList(Collections.singletonList(ISCConstants.isc_dsql_error), Arrays.asList(ISCConstants.isc_sqlerr, -303),
+                Arrays.asList(ISCConstants.isc_invalid_timezone_region, "Mars/Base")));
     }
     
     @Test

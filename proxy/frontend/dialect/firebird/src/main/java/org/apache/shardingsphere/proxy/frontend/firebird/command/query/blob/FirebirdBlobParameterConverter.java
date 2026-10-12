@@ -41,6 +41,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.util.Optional;
 
 /**
@@ -50,7 +51,8 @@ import java.util.Optional;
  * A text BLOB is moved to a text BLOB parameter with transliteration between two different real character sets.
  * A BLOB is moved to another type as text read through the BLOB filter to the parameter character set, or to ASCII for other types, and the text is converted to the parameter type.
  * Firebird describes text parameters in the character set of the connection if it is a real one; otherwise the text keeps the character set of the BLOB.
- * Integer, boolean, double and float parameters get the value converted as Firebird converts it; other types get the ASCII text, because the proxy does not describe their scale.
+ * Integer, boolean, double, float, date and time parameters get the value converted as Firebird converts it, date and time in the time zone of the proxy as the session time zone;
+ * other types get the ASCII text, because the proxy does not describe their scale.
  * An error of the move is reported as {@link ParameterConversionException}.</p>
  */
 @RequiredArgsConstructor
@@ -67,6 +69,8 @@ public final class FirebirdBlobParameterConverter {
     private static final int EXPONENT_LIMIT = 3276;
     
     private final int connectionCharsetId;
+    
+    private final Clock clock = Clock.systemDefaultZone();
     
     /**
      * Judge whether Firebird reads the BLOB while it moves the message to the parameter.
@@ -127,17 +131,7 @@ public final class FirebirdBlobParameterConverter {
         if (isText(type)) {
             return toText(content, field, parameter.getColumnLength());
         }
-        String result = new String(readText(content, field, CHARSET_ASCII), StandardCharsets.ISO_8859_1);
-        if (isInteger(type)) {
-            return toInteger(result, type);
-        }
-        if (FirebirdBinaryColumnType.BOOLEAN == type) {
-            return FirebirdTextValueParser.parseBoolean(result);
-        }
-        if (FirebirdBinaryColumnType.DOUBLE == type || FirebirdBinaryColumnType.D_FLOAT == type) {
-            return FirebirdTextValueParser.parseDouble(result);
-        }
-        return FirebirdBinaryColumnType.FLOAT == type ? FirebirdTextValueParser.parseFloat(result) : result;
+        return toValue(new String(readText(content, field, CHARSET_ASCII), StandardCharsets.ISO_8859_1), type);
     }
     
     /**
@@ -252,8 +246,34 @@ public final class FirebirdBlobParameterConverter {
         return text.substring(0, text.offsetByCodePoints(0, length));
     }
     
-    private boolean isInteger(final FirebirdBinaryColumnType type) {
-        return FirebirdBinaryColumnType.SHORT == type || FirebirdBinaryColumnType.LONG == type || FirebirdBinaryColumnType.INT64 == type;
+    private Object toValue(final String text, final FirebirdBinaryColumnType type) {
+        switch (type) {
+            case SHORT:
+            case LONG:
+            case INT64:
+                return toInteger(text, type);
+            case BOOLEAN:
+                return FirebirdTextValueParser.parseBoolean(text);
+            case DOUBLE:
+            case D_FLOAT:
+                return FirebirdTextValueParser.parseDouble(text);
+            case FLOAT:
+                return FirebirdTextValueParser.parseFloat(text);
+            case DATE:
+                return FirebirdTextDateTimeParser.parseDate(text, clock);
+            case TIME:
+                return FirebirdTextDateTimeParser.parseTime(text, clock);
+            case TIMESTAMP:
+                return FirebirdTextDateTimeParser.parseTimestamp(text, clock);
+            case TIME_TZ:
+            case TIME_TZ_EX:
+                return FirebirdTextDateTimeParser.parseTimeWithTimeZone(text, clock);
+            case TIMESTAMP_TZ:
+            case TIMESTAMP_TZ_EX:
+                return FirebirdTextDateTimeParser.parseTimestampWithTimeZone(text, clock);
+            default:
+                return text;
+        }
     }
     
     private Number toInteger(final String value, final FirebirdBinaryColumnType type) {

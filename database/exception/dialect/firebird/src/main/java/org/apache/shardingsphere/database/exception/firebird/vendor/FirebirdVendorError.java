@@ -118,6 +118,15 @@ public enum FirebirdVendorError implements VendorError {
     
     CONVERSION_ERROR(FirebirdState.CONVERSION_ERROR, ISCConstants.isc_convert_error, "conversion error from string \"%s\""),
     
+    DATE_RANGE_EXCEEDED(FirebirdState.DATETIME_FIELD_OVERFLOW, ISCConstants.isc_date_range_exceeded, "value exceeds the range for valid dates"),
+    
+    DATETIME_RANGE_EXCEEDED(FirebirdState.DATETIME_FIELD_OVERFLOW, ISCConstants.isc_datetime_range_exceeded, "value exceeds the range for valid timestamps"),
+    
+    INVALID_TIME_ZONE_OFFSET(FirebirdState.INVALID_TIME_ZONE_DISPLACEMENT_VALUE, ISCConstants.isc_invalid_timezone_offset,
+            "Invalid time zone offset: %s - must use format +/-hours:minutes and be between -14:00 and +14:00"),
+    
+    INVALID_TIME_ZONE_REGION(FirebirdState.INVALID_TIME_ZONE_DISPLACEMENT_VALUE, ISCConstants.isc_invalid_timezone_region, "Invalid time zone region: %s"),
+    
     MALFORMED_STRING(XOpenSQLState.DATA_EXCEPTION, ISCConstants.isc_malformed_string, "Malformed string");
     
     private final SQLState sqlState;

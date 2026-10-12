@@ -23,6 +23,10 @@ import org.apache.shardingsphere.database.exception.core.exception.SQLDialectExc
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobTruncationException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ConversionErrorException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.DateRangeExceededException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.DatetimeRangeExceededException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTimeZoneOffsetException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTimeZoneRegionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.MalformedStringException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.NumericOutOfRangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
@@ -43,6 +47,12 @@ import org.junit.jupiter.params.provider.MethodSource;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.sql.Types;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.Collections;
 import java.util.stream.Stream;
 
@@ -108,7 +118,7 @@ class FirebirdBlobParameterConverterTest {
     
     @Test
     void assertConvertToOtherType() {
-        assertThat(new FirebirdBlobParameterConverter(UTF8).convert("2026-10-05".getBytes(StandardCharsets.US_ASCII), createField(1, UTF8), createParameter(Types.DATE, null)), is("2026-10-05"));
+        assertThat(new FirebirdBlobParameterConverter(UTF8).convert(" 1.5 ".getBytes(StandardCharsets.US_ASCII), createField(1, UTF8), createParameter(Types.DECIMAL, null)), is(" 1.5 "));
     }
     
     @ParameterizedTest(name = "{0}")
@@ -203,7 +213,12 @@ class FirebirdBlobParameterConverterTest {
         return Stream.of(
                 Arguments.of("double", Types.DOUBLE, " 1.5e1 ", 15D),
                 Arguments.of("float", Types.REAL, "1.5", 1.5F),
-                Arguments.of("boolean", Types.BOOLEAN, " TRUE ", true));
+                Arguments.of("boolean", Types.BOOLEAN, " TRUE ", true),
+                Arguments.of("date", Types.DATE, "05.10.2026", LocalDate.of(2026, 10, 5)),
+                Arguments.of("time", Types.TIME, "12:34:56.7891", LocalTime.of(12, 34, 56, 789_100_000)),
+                Arguments.of("timestamp", Types.TIMESTAMP, "2026-10-05 12:00", LocalDateTime.of(2026, 10, 5, 12, 0)),
+                Arguments.of("time_with_time_zone", Types.TIME_WITH_TIMEZONE, "12:00 +03:00", ZonedDateTime.of(2020, 1, 1, 12, 0, 0, 0, ZoneOffset.ofHours(3))),
+                Arguments.of("timestamp_with_time_zone", Types.TIMESTAMP_WITH_TIMEZONE, "2026-10-05 12:00 Europe/Moscow", ZonedDateTime.of(2026, 10, 5, 12, 0, 0, 0, ZoneId.of("Europe/Moscow"))));
     }
     
     private static Stream<Arguments> failedConversionArguments() {
@@ -220,7 +235,15 @@ class FirebirdBlobParameterConverterTest {
                 Arguments.of("exponent_overflow", createField(1, UTF8), "1e3276".getBytes(StandardCharsets.US_ASCII), createParameter(Types.BIGINT, null), UTF8, NumericOutOfRangeException.class),
                 Arguments.of("scale_overflow", createField(1, UTF8), "400e2".getBytes(StandardCharsets.US_ASCII), createParameter(Types.SMALLINT, null), UTF8, NumericOutOfRangeException.class),
                 Arguments.of("boolean", createField(1, UTF8), "yes".getBytes(StandardCharsets.US_ASCII), createParameter(Types.BOOLEAN, null), UTF8, ConversionErrorException.class),
-                Arguments.of("double_overflow", createField(1, UTF8), "1e309".getBytes(StandardCharsets.US_ASCII), createParameter(Types.DOUBLE, null), UTF8, NumericOutOfRangeException.class));
+                Arguments.of("double_overflow", createField(1, UTF8), "1e309".getBytes(StandardCharsets.US_ASCII), createParameter(Types.DOUBLE, null), UTF8, NumericOutOfRangeException.class),
+                Arguments.of("date", createField(1, UTF8), "2026-02-30".getBytes(StandardCharsets.US_ASCII), createParameter(Types.DATE, null), UTF8, ConversionErrorException.class),
+                Arguments.of("date_range", createField(1, UTF8), "0000-01-01".getBytes(StandardCharsets.US_ASCII), createParameter(Types.DATE, null), UTF8, DateRangeExceededException.class),
+                Arguments.of("timestamp_range", createField(1, UTF8), "0000-01-01".getBytes(StandardCharsets.US_ASCII), createParameter(Types.TIMESTAMP, null), UTF8,
+                        DatetimeRangeExceededException.class),
+                Arguments.of("time_zone_offset", createField(1, UTF8), "12:00 +15:00".getBytes(StandardCharsets.US_ASCII), createParameter(Types.TIME, null), UTF8,
+                        InvalidTimeZoneOffsetException.class),
+                Arguments.of("time_zone_region", createField(1, UTF8), "2026-10-05 12:00 Mars/Base".getBytes(StandardCharsets.US_ASCII), createParameter(Types.TIMESTAMP_WITH_TIMEZONE, null), UTF8,
+                        InvalidTimeZoneRegionException.class));
     }
     
     private static Stream<Arguments> conversionErrorArguments() {
