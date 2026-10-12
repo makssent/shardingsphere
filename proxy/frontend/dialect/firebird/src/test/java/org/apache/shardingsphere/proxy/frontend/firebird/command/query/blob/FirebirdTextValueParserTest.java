@@ -80,11 +80,7 @@ class FirebirdTextValueParserTest {
     }
     
     private static Stream<Arguments> invalidBooleanArguments() {
-        return Stream.of(
-                Arguments.of("yes", "yes", "yes"),
-                Arguments.of("one", "1", "1"),
-                Arguments.of("empty", "", ""),
-                Arguments.of("control_character", "T" + (char) 1, "T#x01"));
+        return Stream.of(Arguments.of("yes", "yes", "yes"), Arguments.of("one", "1", "1"), Arguments.of("empty", "", ""), Arguments.of("control_character", "T" + (char) 1, "T#x01"));
     }
     
     private static Stream<Arguments> doubleArguments() {
@@ -109,10 +105,6 @@ class FirebirdTextValueParserTest {
     }
     
     private static Stream<Arguments> outOfRangeDoubleArguments() {
-        return Stream.of(
-                Arguments.of("too_large", "1e309"),
-                Arguments.of("too_small", "1e-309"),
-                Arguments.of("long_exponent", "1e3276"),
-                Arguments.of("infinite", "9e308"));
+        return Stream.of(Arguments.of("too_large", "1e309"), Arguments.of("too_small", "1e-309"), Arguments.of("long_exponent", "1e3276"), Arguments.of("infinite", "9e308"));
     }
 }

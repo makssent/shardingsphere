@@ -23,9 +23,11 @@ import org.apache.shardingsphere.database.exception.core.exception.SQLDialectExc
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterWriteNotSupportedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlobFilterException;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.firebirdsql.encodings.EncodingDefinition;
 import org.firebirdsql.encodings.EncodingFactory;
+import org.firebirdsql.gds.ISCConstants;
 
 import java.nio.charset.Charset;
 import java.util.Optional;
@@ -33,58 +35,26 @@ import java.util.Optional;
 /**
  * BLOB parameter buffer utility class for Firebird.
  */
+@HighFrequencyInvocation
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class FirebirdBlobParameterBufferUtils {
     
-    private static final int BPB_VERSION1 = 1;
-    
-    private static final int BPB_SOURCE_TYPE = 1;
-    
-    private static final int BPB_TARGET_TYPE = 2;
-    
-    private static final int BPB_SOURCE_INTERP = 4;
-    
-    private static final int BPB_TARGET_INTERP = 5;
-    
-    private static final int BLOB_TEXT = 1;
-    
-    private static final int CHARSET_NONE = 0;
-    
-    private static final int CHARSET_BINARY = 1;
-    
-    private static final int CHARSET_DYNAMIC = 127;
-    
     private static final int INTERNAL_FILTER_COUNT = 10;
     
-    private static final int BLOB_RANGES = 4;
+    private static final int BLOB_SUB_TYPE_RANGES = 4;
     
-    private static final int BLOB_RUNTIME = 5;
+    private static final int BLOB_SUB_TYPE_RUNTIME = 5;
     
-    /**
-     * Create the transliterator of the BLOB filter that Firebird applies to the data of a BLOB created with the BLOB parameter buffer.
-     *
-     * <p>Mirrors {@code gds__parse_bpb2} and the filter decision of {@code blb::create2}, which replaces {@code CS_dynamic} with the character set of the connection.
-     * Firebird transliterates text between two different character sets other than {@code NONE} and {@code BINARY}; other BLOB filters are not supported.
-     * Firebird has internal BLOB filters from its sub types other than ranges to text; other sub type conversions fail as in a database without declared BLOB filters.
-     * If the character set of the connection is unknown, it is passed as {@code CS_dynamic}, which has no Java character set.</p>
-     *
-     * @param bpb BLOB parameter buffer
-     * @param connectionCharsetId character set ID of the connection
-     * @return transliterator, or empty if Firebird stores the data unchanged
-     * @throws BlobFilterNotFoundException if Firebird has no BLOB filter for the sub type conversion
-     * @throws BlobFilterWriteNotSupportedException if an internal BLOB filter of Firebird does not support writing
-     * @throws UnsupportedBlobFilterException if Firebird converts the data with a character set without Java character set
-     */
-    public static Optional<FirebirdBlobTransliterator> createTransliterator(final byte[] bpb, final int connectionCharsetId) {
-        return isVersion1(bpb) ? findTransliterator(new BlobParameters(bpb), connectionCharsetId) : Optional.empty();
-    }
+    private static final byte[] NO_DATA = new byte[0];
     
     /**
      * Get the data that Firebird stores for a BLOB created with the BLOB parameter buffer.
      *
-     * <p>The BLOB filter in front of the BLOB transliterates text as {@link #createTransliterator(byte[], int)} describes;
-     * the internal filter of sub type 5 ({@code filter_runtime}) accepts the data without writing it,
-     * and the other internal filters to text answer the creation of the BLOB with {@code isc_uns_ext}.</p>
+     * <p>Mirrors {@code gds__parse_bpb2} and the filter decision of {@code blb::create2}, which replaces {@code CS_dynamic} with the character set of the connection.
+     * Firebird transliterates text between two different character sets other than {@code NONE} and {@code BINARY}; other BLOB filters are not supported.
+     * Firebird has internal BLOB filters from its sub types other than ranges to text: the filter of sub type 5 ({@code filter_runtime}) accepts the data without writing it,
+     * and the other internal filters answer the creation of the BLOB with {@code isc_uns_ext}; other sub type conversions fail as in a database without declared BLOB filters.
+     * If the character set of the connection is unknown, it is passed as {@code CS_dynamic}, which has no Java character set.</p>
      *
      * @param bpb BLOB parameter buffer
      * @param connectionCharsetId character set ID of the connection
@@ -95,54 +65,97 @@ public final class FirebirdBlobParameterBufferUtils {
      * @throws UnsupportedBlobFilterException if Firebird converts the data with a character set without Java character set
      */
     public static byte[] getStoredData(final byte[] bpb, final int connectionCharsetId, final byte[] data) {
-        if (!isVersion1(bpb)) {
+        if (0 == bpb.length || ISCConstants.isc_bpb_version1 != bpb[0]) {
             return data;
         }
         BlobParameters parameters = new BlobParameters(bpb);
-        if (BLOB_TEXT == parameters.targetType && BLOB_RUNTIME == parameters.sourceType) {
-            return new byte[0];
+        if (ISCConstants.BLOB_SUB_TYPE_TEXT == parameters.targetType && BLOB_SUB_TYPE_RUNTIME == parameters.sourceType) {
+            return NO_DATA;
         }
-        return findTransliterator(parameters, connectionCharsetId).map(each -> each.put(data)).orElse(data);
-    }
-    
-    private static boolean isVersion1(final byte[] bpb) {
-        return 0 != bpb.length && BPB_VERSION1 == bpb[0];
-    }
-    
-    private static Optional<FirebirdBlobTransliterator> findTransliterator(final BlobParameters parameters, final int connectionCharsetId) {
         if (0 != parameters.targetType && parameters.sourceType != parameters.targetType) {
             checkSubTypeConversion(parameters.sourceType, parameters.targetType, parameters.targetCharset);
-            return Optional.empty();
+            return data;
         }
-        int actualSourceCharset = getActualCharset(parameters.sourceCharset, connectionCharsetId);
-        int actualTargetCharset = getActualCharset(parameters.targetCharset, connectionCharsetId);
-        if (BLOB_TEXT != parameters.targetType || actualSourceCharset == actualTargetCharset || isPlainCharset(actualSourceCharset) || isPlainCharset(actualTargetCharset)) {
-            return Optional.empty();
-        }
-        return Optional.of(new FirebirdBlobTransliterator(getJavaCharset(actualSourceCharset), getJavaCharset(actualTargetCharset)));
+        Optional<FirebirdBlobTransliterator> transliterator = ISCConstants.BLOB_SUB_TYPE_TEXT == parameters.targetType
+                ? createTextTransliterator(parameters.sourceCharset, parameters.targetCharset, connectionCharsetId)
+                : Optional.empty();
+        return transliterator.isPresent() ? transliterator.get().put(data) : data;
     }
     
     private static void checkSubTypeConversion(final int sourceType, final int targetType, final int targetCharset) {
-        ShardingSpherePreconditions.checkState(BLOB_TEXT == targetType && (0 == sourceType || CHARSET_BINARY == targetCharset), () -> createFilterException(sourceType, targetType));
+        ShardingSpherePreconditions.checkState(ISCConstants.BLOB_SUB_TYPE_TEXT == targetType && (ISCConstants.BLOB_SUB_TYPE_BINARY == sourceType || ISCConstants.CS_BINARY == targetCharset),
+                () -> createFilterException(sourceType, targetType));
     }
     
     private static SQLDialectException createFilterException(final int sourceType, final int targetType) {
-        boolean internalFilter = BLOB_TEXT == targetType && sourceType >= 0 && sourceType < INTERNAL_FILTER_COUNT && BLOB_RANGES != sourceType;
-        return internalFilter ? new BlobFilterWriteNotSupportedException(sourceType) : new BlobFilterNotFoundException(sourceType, targetType);
+        return ISCConstants.BLOB_SUB_TYPE_TEXT == targetType && hasInternalTextFilter(sourceType)
+                ? new BlobFilterWriteNotSupportedException(sourceType)
+                : new BlobFilterNotFoundException(sourceType, targetType);
     }
     
-    private static int getActualCharset(final int charset, final int connectionCharsetId) {
-        return CHARSET_DYNAMIC == charset ? connectionCharsetId : charset;
+    /**
+     * Judge whether Firebird has an internal BLOB filter from the sub type to text.
+     *
+     * @param subType BLOB sub type
+     * @return whether Firebird has an internal BLOB filter from the sub type to text
+     */
+    static boolean hasInternalTextFilter(final int subType) {
+        return subType >= 0 && subType < INTERNAL_FILTER_COUNT && BLOB_SUB_TYPE_RANGES != subType;
     }
     
-    private static boolean isPlainCharset(final int charset) {
-        return CHARSET_NONE == charset || CHARSET_BINARY == charset;
+    /**
+     * Create the transliterator of the text BLOB filter of Firebird.
+     *
+     * <p>Firebird transliterates text between two different character sets other than {@code NONE} and {@code BINARY}.</p>
+     *
+     * @param sourceCharsetId character set ID of the source text
+     * @param targetCharsetId character set ID of the target text
+     * @param connectionCharsetId character set ID of the connection
+     * @return transliterator, or empty if Firebird keeps the text unchanged
+     * @throws UnsupportedBlobFilterException if Firebird converts the text with a character set without Java character set
+     */
+    static Optional<FirebirdBlobTransliterator> createTextTransliterator(final int sourceCharsetId, final int targetCharsetId, final int connectionCharsetId) {
+        int actualSourceCharsetId = getActualCharset(sourceCharsetId, connectionCharsetId);
+        int actualTargetCharsetId = getActualCharset(targetCharsetId, connectionCharsetId);
+        if (actualSourceCharsetId == actualTargetCharsetId || isPlainCharset(actualSourceCharsetId) || isPlainCharset(actualTargetCharsetId)) {
+            return Optional.empty();
+        }
+        return Optional.of(new FirebirdBlobTransliterator(getJavaCharset(actualSourceCharsetId), getJavaCharset(actualTargetCharsetId)));
     }
     
     private static Charset getJavaCharset(final int charsetId) {
+        Optional<Charset> result = findJavaCharset(charsetId);
+        ShardingSpherePreconditions.checkState(result.isPresent(), UnsupportedBlobFilterException::new);
+        return result.get();
+    }
+    
+    /**
+     * Get the actual character set: Firebird replaces {@code CS_dynamic} with the character set of the connection.
+     *
+     * @param charsetId character set ID
+     * @param connectionCharsetId character set ID of the connection
+     * @return actual character set ID
+     */
+    static int getActualCharset(final int charsetId, final int connectionCharsetId) {
+        return ISCConstants.CS_dynamic == charsetId ? connectionCharsetId : charsetId;
+    }
+    
+    private static boolean isPlainCharset(final int charsetId) {
+        return ISCConstants.CS_NONE == charsetId || ISCConstants.CS_BINARY == charsetId;
+    }
+    
+    /**
+     * Find the Java character set of a real Firebird character set.
+     *
+     * @param charsetId character set ID
+     * @return Java character set, or empty for {@code NONE}, {@code BINARY}, {@code CS_dynamic} and character sets without Java character set
+     */
+    static Optional<Charset> findJavaCharset(final int charsetId) {
+        if (isPlainCharset(charsetId) || ISCConstants.CS_dynamic == charsetId) {
+            return Optional.empty();
+        }
         EncodingDefinition encodingDefinition = EncodingFactory.getPlatformDefault().getEncodingDefinitionByCharacterSetId(charsetId);
-        ShardingSpherePreconditions.checkState(CHARSET_DYNAMIC != charsetId && null != encodingDefinition && !encodingDefinition.isInformationOnly(), UnsupportedBlobFilterException::new);
-        return encodingDefinition.getJavaCharset();
+        return null == encodingDefinition || encodingDefinition.isInformationOnly() ? Optional.empty() : Optional.of(encodingDefinition.getJavaCharset());
     }
     
     /**
@@ -159,20 +172,20 @@ public final class FirebirdBlobParameterBufferUtils {
         private final int targetCharset;
         
         BlobParameters(final byte[] bpb) {
-            int[] values = new int[BPB_TARGET_INTERP + 1];
+            int[] values = new int[ISCConstants.isc_bpb_target_interp + 1];
             int index = 1;
             while (index + 1 < bpb.length) {
                 int tag = bpb[index];
                 int valueLength = Math.min(bpb[index + 1] & 0xFF, bpb.length - index - 2);
-                if (tag >= BPB_SOURCE_TYPE && tag <= BPB_TARGET_INTERP) {
+                if (tag >= ISCConstants.isc_bpb_source_type && tag <= ISCConstants.isc_bpb_target_interp) {
                     values[tag] = readVaxShort(bpb, index + 2, valueLength);
                 }
                 index += 2 + valueLength;
             }
-            sourceType = values[BPB_SOURCE_TYPE];
-            targetType = values[BPB_TARGET_TYPE];
-            sourceCharset = values[BPB_SOURCE_INTERP];
-            targetCharset = values[BPB_TARGET_INTERP];
+            sourceType = values[ISCConstants.isc_bpb_source_type];
+            targetType = values[ISCConstants.isc_bpb_target_type];
+            sourceCharset = values[ISCConstants.isc_bpb_source_interp];
+            targetCharset = values[ISCConstants.isc_bpb_target_interp];
         }
         
         private int readVaxShort(final byte[] bpb, final int offset, final int length) {

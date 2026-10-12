@@ -38,6 +38,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdBatchCompletionStateResponse;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
@@ -58,10 +59,15 @@ import java.util.Map;
 @RequiredArgsConstructor
 public final class FirebirdBatchExecuteCommandExecutor implements CommandExecutor {
     
+    private static final int[] NO_UPDATE_COUNTS = new int[0];
+    
+    private static final byte[] NO_DATA = new byte[0];
+    
     private final FirebirdBatchExecuteCommandPacket packet;
     
     private final ConnectionSession connectionSession;
     
+    @HighFrequencyInvocation
     @Override
     public Collection<DatabasePacket> execute() throws SQLException {
         FirebirdBatchStatementManager batchStatementManager = FirebirdBatchStatementManager.getInstance();
@@ -78,10 +84,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
         int messageCount = batchStatement.getParameterValues().size();
         if (batchStatement.getParameterValues().isEmpty()) {
             batchStatementManager.resetBatchStatement(batchStatement);
-            return Collections.singleton(new FirebirdBatchCompletionStateResponse()
-                    .setHandle(packet.getStatementHandle())
-                    .setRecordsCount(messageCount)
-                    .setUpdateCounts(new int[0]));
+            return Collections.singleton(new FirebirdBatchCompletionStateResponse().setHandle(packet.getStatementHandle()).setRecordsCount(messageCount).setUpdateCounts(NO_UPDATE_COUNTS));
         }
         FirebirdServerPreparedStatement preparedStatement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(batchStatement.getStatementHandle());
         FirebirdBatchCompletion completion = executeBatch(batchStatement, preparedStatement);
@@ -120,7 +123,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
     
     private FirebirdBatchCompletion executeParameters(final FirebirdServerPreparedStatement preparedStatement, final List<List<Object>> params, final boolean multiError) throws SQLException {
         if (params.isEmpty()) {
-            return new FirebirdBatchCompletion(0, new int[0]);
+            return new FirebirdBatchCompletion(0, NO_UPDATE_COUNTS);
         }
         return new FirebirdBatchedStatementsExecutor(connectionSession, preparedStatement, params, multiError).executeBatch();
     }
@@ -130,10 +133,12 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
         Map<Long, byte[]> streamBlobContents = new HashMap<>(batchStatement.getStreamBlobContents());
         List<List<Object>> params = new ArrayList<>(batchStatement.getParameterValues().size());
         Collection<FirebirdBatchCompletion> completions = new ArrayList<>();
+        FirebirdBlobParameterConverter converter = new FirebirdBlobParameterConverter(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get());
+        DatabaseType databaseType = TypedSPILoader.getService(DatabaseType.class, "Firebird");
         for (List<Object> each : batchStatement.getParameterValues()) {
             SQLDialectException failure;
             try {
-                params.add(bindRowBlobParameters(each, batchStatement.getColumnDescriptors(), preparedStatement.getParameterColumns(), blobIds, streamBlobContents));
+                params.add(bindRowBlobParameters(each, batchStatement.getColumnDescriptors(), preparedStatement.getParameterColumns(), blobIds, streamBlobContents, converter));
                 continue;
             } catch (final InvalidSegstrIdException | UnknownBatchBlobIdException | ParameterConversionException ex) {
                 failure = ex;
@@ -149,7 +154,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
                 batchStatement.getStreamBlobContents().keySet().retainAll(streamBlobContents.keySet());
                 throw failure;
             }
-            SQLException cause = SQLExceptionTransformEngine.toSQLException(failure, TypedSPILoader.getService(DatabaseType.class, "Firebird"));
+            SQLException cause = SQLExceptionTransformEngine.toSQLException(failure, databaseType);
             completions.add(new FirebirdBatchCompletion(1, new int[]{FirebirdBatchCompletion.EXECUTE_FAILED}, Collections.singleton(new FirebirdBatchCompletion.Failure(0, cause))));
             if (!batchStatement.isMultiError()) {
                 return mergeCompletions(completions);
@@ -164,14 +169,14 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
     }
     
     private List<Object> bindRowBlobParameters(final List<Object> params, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final List<FirebirdReturnColumnPacket> parameterColumns,
-                                               final Map<Long, Long> blobIds, final Map<Long, byte[]> streamBlobContents) {
+                                               final Map<Long, Long> blobIds, final Map<Long, byte[]> streamBlobContents, final FirebirdBlobParameterConverter converter) {
         List<Object> result = new ArrayList<>(params);
         resolveBatchBlobIds(result, columnDescriptors, blobIds, streamBlobContents);
-        boolean[] moved = moveReadBlobParameters(result, columnDescriptors, parameterColumns);
+        boolean[] moved = moveReadBlobParameters(result, columnDescriptors, parameterColumns, converter);
         for (int i = 0; i < columnDescriptors.size(); i++) {
             if (!moved[i] && isBlobValue(columnDescriptors.get(i), result.get(i))) {
                 byte[] content = getBlobContent(result.get(i));
-                result.set(i, i < parameterColumns.size() ? createBlobParameterConverter().convert(content, columnDescriptors.get(i), parameterColumns.get(i)) : content);
+                result.set(i, i < parameterColumns.size() ? converter.convert(content, columnDescriptors.get(i), parameterColumns.get(i)) : content);
             }
         }
         return result;
@@ -190,13 +195,13 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
         }
     }
     
-    private boolean[] moveReadBlobParameters(final List<Object> params, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final List<FirebirdReturnColumnPacket> parameterColumns) {
+    private boolean[] moveReadBlobParameters(final List<Object> params, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final List<FirebirdReturnColumnPacket> parameterColumns,
+                                             final FirebirdBlobParameterConverter converter) {
         boolean[] result = new boolean[columnDescriptors.size()];
         for (int i = Math.min(columnDescriptors.size(), parameterColumns.size()) - 1; i >= 0; i--) {
             if (!isBlobValue(columnDescriptors.get(i), params.get(i))) {
                 continue;
             }
-            FirebirdBlobParameterConverter converter = createBlobParameterConverter();
             if (converter.isReadOnMove(columnDescriptors.get(i), parameterColumns.get(i))) {
                 params.set(i, converter.convert(getMovedBlobContent(params.get(i)), columnDescriptors.get(i), parameterColumns.get(i)));
                 result[i] = true;
@@ -207,10 +212,6 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
     
     private boolean isBlobValue(final FirebirdBatchColumnDescriptor columnDescriptor, final Object value) {
         return FirebirdBinaryColumnType.BLOB == columnDescriptor.getType() && (value instanceof Long || value instanceof byte[]);
-    }
-    
-    private FirebirdBlobParameterConverter createBlobParameterConverter() {
-        return new FirebirdBlobParameterConverter(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get());
     }
     
     private byte[] getMovedBlobContent(final Object value) {
@@ -227,7 +228,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
         }
         long blobId = (Long) value;
         if (0L == blobId) {
-            return new byte[0];
+            return NO_DATA;
         }
         if (blobId < 0L) {
             byte[] result = FirebirdBlobBinaryProtocolValue.getBlobContent(connectionSession.getConnectionId(), blobId);
@@ -263,7 +264,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
         FirebirdBatchCompletionStateResponse result = new FirebirdBatchCompletionStateResponse()
                 .setHandle(packet.getStatementHandle())
                 .setRecordsCount(completion.getRecordsCount())
-                .setUpdateCounts(recordCounts ? completion.getUpdateCounts() : new int[0]);
+                .setUpdateCounts(recordCounts ? completion.getUpdateCounts() : NO_UPDATE_COUNTS);
         for (FirebirdBatchCompletion.Failure each : completion.getFailures()) {
             result.addDetailedError(each.getMessageIndex(), new FirebirdStatusVector(each.getCause()));
         }

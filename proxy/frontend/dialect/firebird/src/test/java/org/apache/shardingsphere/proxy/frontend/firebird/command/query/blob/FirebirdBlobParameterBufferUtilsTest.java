@@ -26,14 +26,12 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.hamcrest.Matchers.sameInstance;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FirebirdBlobParameterBufferUtilsTest {
     
@@ -41,41 +39,34 @@ class FirebirdBlobParameterBufferUtilsTest {
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("unchangedDataArguments")
-    void assertCreateTransliteratorWithUnchangedData(final String name, final byte[] bpb, final int connectionCharsetId) {
-        assertFalse(FirebirdBlobParameterBufferUtils.createTransliterator(bpb, connectionCharsetId).isPresent());
-    }
-    
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("transliterationArguments")
-    void assertCreateTransliterator(final String name, final byte[] bpb, final int connectionCharsetId, final byte[] data, final byte[] expectedData) {
-        Optional<FirebirdBlobTransliterator> actual = FirebirdBlobParameterBufferUtils.createTransliterator(bpb, connectionCharsetId);
-        assertTrue(actual.isPresent());
-        assertThat(actual.get().put(data), is(expectedData));
-    }
-    
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("unsupportedFilterArguments")
-    void assertCreateTransliteratorWithUnsupportedFilter(final String name, final byte[] bpb, final int connectionCharsetId) {
-        assertThrows(UnsupportedBlobFilterException.class, () -> FirebirdBlobParameterBufferUtils.createTransliterator(bpb, connectionCharsetId));
-    }
-    
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("writeNotSupportedFilterArguments")
-    void assertCreateTransliteratorWithWriteNotSupportedFilter(final String name, final byte[] bpb, final int expectedSourceType) {
-        BlobFilterWriteNotSupportedException actual = assertThrows(BlobFilterWriteNotSupportedException.class, () -> FirebirdBlobParameterBufferUtils.createTransliterator(bpb, 4));
-        assertThat(actual.getSourceType(), is(expectedSourceType));
+    void assertGetStoredDataWithUnchangedData(final String name, final byte[] bpb, final int connectionCharsetId) {
+        byte[] data = "é".getBytes(StandardCharsets.UTF_8);
+        assertThat(FirebirdBlobParameterBufferUtils.getStoredData(bpb, connectionCharsetId, data), sameInstance(data));
     }
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("storedDataArguments")
-    void assertGetStoredData(final String name, final byte[] bpb, final byte[] data, final byte[] expectedData) {
-        assertThat(FirebirdBlobParameterBufferUtils.getStoredData(bpb, 4, data), is(expectedData));
+    void assertGetStoredData(final String name, final byte[] bpb, final int connectionCharsetId, final byte[] data, final byte[] expectedData) {
+        assertThat(FirebirdBlobParameterBufferUtils.getStoredData(bpb, connectionCharsetId, data), is(expectedData));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("unsupportedFilterArguments")
+    void assertGetStoredDataWithUnsupportedFilter(final String name, final byte[] bpb, final int connectionCharsetId) {
+        assertThrows(UnsupportedBlobFilterException.class, () -> FirebirdBlobParameterBufferUtils.getStoredData(bpb, connectionCharsetId, new byte[]{'a'}));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("writeNotSupportedFilterArguments")
+    void assertGetStoredDataWithWriteNotSupportedFilter(final String name, final byte[] bpb, final int expectedSourceType) {
+        BlobFilterWriteNotSupportedException actual = assertThrows(BlobFilterWriteNotSupportedException.class, () -> FirebirdBlobParameterBufferUtils.getStoredData(bpb, 4, new byte[]{'a'}));
+        assertThat(actual.getSourceType(), is(expectedSourceType));
     }
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("missingFilterArguments")
-    void assertCreateTransliteratorWithMissingFilter(final String name, final byte[] bpb, final int expectedSourceType, final int expectedTargetType) {
-        BlobFilterNotFoundException actual = assertThrows(BlobFilterNotFoundException.class, () -> FirebirdBlobParameterBufferUtils.createTransliterator(bpb, 4));
+    void assertGetStoredDataWithMissingFilter(final String name, final byte[] bpb, final int expectedSourceType, final int expectedTargetType) {
+        BlobFilterNotFoundException actual = assertThrows(BlobFilterNotFoundException.class, () -> FirebirdBlobParameterBufferUtils.getStoredData(bpb, 4, new byte[]{'a'}));
         assertThat(actual.getSourceType(), is(expectedSourceType));
         assertThat(actual.getTargetType(), is(expectedTargetType));
     }
@@ -94,13 +85,6 @@ class FirebirdBlobParameterBufferUtilsTest {
                 Arguments.of("none_connection_charset", new byte[]{1, 1, 1, 1, 2, 1, 1, 4, 1, 127, 5, 1, 53}, 0));
     }
     
-    private static Stream<Arguments> transliterationArguments() {
-        return Stream.of(
-                Arguments.of("charset_conversion", new byte[]{1, 1, 1, 1, 2, 1, 1, 4, 1, 4, 5, 1, 53}, 4, "é".getBytes(StandardCharsets.UTF_8), "é".getBytes(WIN1252)),
-                Arguments.of("target_connection_charset_conversion", new byte[]{1, 1, 1, 1, 2, 1, 1, 4, 1, 4, 5, 1, 127}, 53, "é".getBytes(StandardCharsets.UTF_8), "é".getBytes(WIN1252)),
-                Arguments.of("two_bytes_values", new byte[]{1, 1, 2, 1, 0, 2, 2, 1, 0, 4, 2, 53, 0, 5, 2, 4, 0}, 4, "é".getBytes(WIN1252), "é".getBytes(StandardCharsets.UTF_8)));
-    }
-    
     private static Stream<Arguments> unsupportedFilterArguments() {
         return Stream.of(
                 Arguments.of("unknown_connection_charset", new byte[]{1, 1, 1, 1, 2, 1, 1, 4, 1, 127, 5, 1, 4}, 127),
@@ -116,9 +100,10 @@ class FirebirdBlobParameterBufferUtilsTest {
     private static Stream<Arguments> storedDataArguments() {
         byte[] data = "é".getBytes(StandardCharsets.UTF_8);
         return Stream.of(
-                Arguments.of("empty_bpb", new byte[0], data, data),
-                Arguments.of("transliteration", new byte[]{1, 1, 1, 1, 2, 1, 1, 4, 1, 4, 5, 1, 53}, data, "é".getBytes(WIN1252)),
-                Arguments.of("runtime_to_text", new byte[]{1, 1, 1, 5, 2, 1, 1}, data, new byte[0]));
+                Arguments.of("charset_conversion", new byte[]{1, 1, 1, 1, 2, 1, 1, 4, 1, 4, 5, 1, 53}, 4, data, "é".getBytes(WIN1252)),
+                Arguments.of("target_connection_charset_conversion", new byte[]{1, 1, 1, 1, 2, 1, 1, 4, 1, 4, 5, 1, 127}, 53, data, "é".getBytes(WIN1252)),
+                Arguments.of("two_bytes_values", new byte[]{1, 1, 2, 1, 0, 2, 2, 1, 0, 4, 2, 53, 0, 5, 2, 4, 0}, 4, "é".getBytes(WIN1252), data),
+                Arguments.of("runtime_to_text", new byte[]{1, 1, 1, 5, 2, 1, 1}, 4, data, new byte[0]));
     }
     
     private static Stream<Arguments> missingFilterArguments() {

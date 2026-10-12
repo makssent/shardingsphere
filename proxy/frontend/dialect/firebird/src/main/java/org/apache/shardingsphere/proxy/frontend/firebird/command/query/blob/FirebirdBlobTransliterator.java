@@ -17,8 +17,8 @@
 
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob;
 
-import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.TransliterationFailedException;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 
 import java.nio.ByteBuffer;
@@ -26,6 +26,7 @@ import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CodingErrorAction;
 import java.util.Arrays;
 
@@ -38,18 +39,23 @@ import java.util.Arrays;
  * A byte sequence that the source character set does not map is converted to {@code U+0000}, as Firebird does for undefined bytes of its single-byte character sets.
  * Bytes kept when the BLOB is closed are discarded, because Firebird ignores the result of the filter at close.</p>
  */
-@RequiredArgsConstructor
-public final class FirebirdBlobTransliterator {
+@HighFrequencyInvocation
+final class FirebirdBlobTransliterator {
     
     private static final byte[] EMPTY = new byte[0];
     
     private static final String UNDEFINED_CHARACTER = String.valueOf(Character.MIN_VALUE);
     
-    private final Charset sourceCharset;
+    private final CharsetDecoder decoder;
     
-    private final Charset targetCharset;
+    private final CharsetEncoder encoder;
     
     private byte[] unusedBytes = EMPTY;
+    
+    FirebirdBlobTransliterator(final Charset sourceCharset, final Charset targetCharset) {
+        decoder = sourceCharset.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPLACE).replaceWith(UNDEFINED_CHARACTER);
+        encoder = targetCharset.newEncoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT);
+    }
     
     /**
      * Put BLOB data.
@@ -58,7 +64,7 @@ public final class FirebirdBlobTransliterator {
      * @return converted BLOB data in the target character set
      * @throws TransliterationFailedException if no byte can be converted or the target character set cannot represent a character
      */
-    public byte[] put(final byte[] data) {
+    byte[] put(final byte[] data) {
         ByteBuffer input = ByteBuffer.allocate(unusedBytes.length + data.length).put(unusedBytes).put(data);
         input.flip();
         CharBuffer chars = decode(input);
@@ -69,7 +75,7 @@ public final class FirebirdBlobTransliterator {
     }
     
     private CharBuffer decode(final ByteBuffer input) {
-        CharsetDecoder decoder = sourceCharset.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPLACE).replaceWith(UNDEFINED_CHARACTER);
+        decoder.reset();
         CharBuffer result = CharBuffer.allocate((int) Math.ceil(input.remaining() * (double) decoder.maxCharsPerByte()));
         decoder.decode(input, result, false);
         result.flip();
@@ -78,7 +84,7 @@ public final class FirebirdBlobTransliterator {
     
     private byte[] encode(final CharBuffer chars) {
         try {
-            ByteBuffer result = targetCharset.newEncoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).encode(chars);
+            ByteBuffer result = encoder.encode(chars);
             return Arrays.copyOf(result.array(), result.limit());
         } catch (final CharacterCodingException ex) {
             throw new TransliterationFailedException();

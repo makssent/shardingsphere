@@ -21,6 +21,7 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ConversionErrorException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.NumericOutOfRangeException;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 
 /**
@@ -28,8 +29,9 @@ import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
  *
  * <p>Mirrors how Firebird converts text to a value of another type in {@code CVT_move}: {@code CVT_get_boolean} and {@code CVT_get_double}.</p>
  */
+@HighFrequencyInvocation
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
-public final class FirebirdTextValueParser {
+final class FirebirdTextValueParser {
     
     private static final int SHORT_LIMIT = (1 << 14) / 5;
     
@@ -64,7 +66,7 @@ public final class FirebirdTextValueParser {
      * @return boolean value
      * @throws ConversionErrorException if the text is not a boolean literal
      */
-    public static boolean parseBoolean(final String text) {
+    static boolean parseBoolean(final String text) {
         int start = 0;
         int end = text.length();
         while (start < end && isSpace(text.charAt(start))) {
@@ -96,7 +98,7 @@ public final class FirebirdTextValueParser {
      * @throws ConversionErrorException if the text is not a number
      * @throws NumericOutOfRangeException if the number is out of the range of double
      */
-    public static double parseDouble(final String text) {
+    static double parseDouble(final String text) {
         double result = 0D;
         int scale = 0;
         int sign = 0;
@@ -195,7 +197,7 @@ public final class FirebirdTextValueParser {
      * @throws ConversionErrorException if the text is not a number
      * @throws NumericOutOfRangeException if the number is out of the range of float
      */
-    public static float parseFloat(final String text) {
+    static float parseFloat(final String text) {
         double result = parseDouble(text);
         ShardingSpherePreconditions.checkState(Math.abs(result) <= Float.MAX_VALUE, NumericOutOfRangeException::new);
         return (float) result;
