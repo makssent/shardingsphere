@@ -95,7 +95,7 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
     
     @RequiredArgsConstructor
     @Getter
-    static final class BatchParameters {
+    private static final class BatchParameters {
         
         private final int version;
         

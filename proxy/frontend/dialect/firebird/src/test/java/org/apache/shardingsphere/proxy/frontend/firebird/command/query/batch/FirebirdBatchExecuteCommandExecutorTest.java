@@ -47,6 +47,8 @@ import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
+import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExtension;
+import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockSettings;
 import org.firebirdsql.gds.BlrConstants;
 import org.firebirdsql.jaybird.fb.constants.BatchItems;
 import org.junit.jupiter.api.AfterEach;
@@ -59,9 +61,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.MockedConstruction;
-import org.mockito.MockedStatic;
 import org.mockito.internal.configuration.plugins.Plugins;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
@@ -87,14 +87,20 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
-import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+/**
+ * Test of {@link FirebirdBatchExecuteCommandExecutor}.
+ *
+ * <p>{@link FirebirdBatchedStatementsExecutor} is mocked with a direct {@code mockConstruction} because every test stubs the result of the batch in the initializer of the construction mock,
+ * which {@code AutoMockExtension} does not support.</p>
+ */
+@ExtendWith(AutoMockExtension.class)
+@StaticMockSettings({FirebirdBlobWriteCache.class, FirebirdBlobBinaryProtocolValue.class})
 class FirebirdBatchExecuteCommandExecutorTest {
     
     private static final int CONNECTION_ID = 3;
@@ -111,9 +117,6 @@ class FirebirdBatchExecuteCommandExecutorTest {
     private FirebirdBatchCreateCommandPacket createPacket;
     
     @Mock
-    private FirebirdBatchRegistry batchRegistry;
-    
-    @Mock
     private FirebirdBatchStatement batchStatement;
     
     @Mock
@@ -126,12 +129,14 @@ class FirebirdBatchExecuteCommandExecutorTest {
     
     @BeforeEach
     void setUp() {
+        FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
         FirebirdTransactionIdGenerator.getInstance().registerConnection(CONNECTION_ID);
         transactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
     }
     
     @AfterEach
     void tearDown() {
+        FirebirdBatchRegistry.getInstance().unregisterConnection(CONNECTION_ID);
         FirebirdTransactionIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
     }
     
@@ -143,19 +148,16 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(batchStatement.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(batchStatement.getParameterValues()).thenReturn(Arrays.asList(Arrays.asList(1, "foo_1"), Arrays.asList(2, "foo_2")));
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
                 MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class,
                         (mock, context) -> when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(2, new int[]{5, 5})))) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
             Collection<DatabasePacket> actual = new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
             assertThat(actual.size(), is(1));
             FirebirdBatchCompletionStateResponse actualResponse = (FirebirdBatchCompletionStateResponse) actual.iterator().next();
             assertThat(actualResponse, isA(FirebirdBatchCompletionStateResponse.class));
             assertThat(getRecordsCount(actualResponse), is(2L));
             assertThat(getUpdateCounts(actualResponse), is(new int[0]));
-            verify(batchRegistry).getBatchStatement(CONNECTION_ID, STATEMENT_ID);
             verify(connectionSession.getServerPreparedStatementRegistry()).getPreparedStatement(STATEMENT_ID);
             verify(batchStatement).reset();
         }
@@ -170,12 +172,10 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(batchStatement.isRecordCounts()).thenReturn(true);
         when(batchStatement.getParameterValues()).thenReturn(Arrays.asList(Arrays.asList(1, "foo_1"), Arrays.asList(2, "foo_2")));
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
                 MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class,
                         (mock, context) -> when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(2, new int[]{5, 5})))) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
             FirebirdBatchCompletionStateResponse actual = (FirebirdBatchCompletionStateResponse) new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute().iterator().next();
             assertThat(getRecordsCount(actual), is(2L));
             assertThat(getUpdateCounts(actual), is(new int[]{5, 5}));
@@ -193,17 +193,12 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(createPacket.getBatchMessageLength()).thenReturn(6L);
         when(createPacket.getBatchParametersBuffer()).thenReturn(Unpooled.EMPTY_BUFFER);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
-        FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
-        try {
-            new FirebirdBatchCreateCommandExecutor(createPacket, connectionSession).execute();
-            clearInvocations(connectionSession.getServerPreparedStatementRegistry());
-            FirebirdBatchCompletionStateResponse actual = (FirebirdBatchCompletionStateResponse) new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute().iterator().next();
-            assertThat(getRecordsCount(actual), is(0L));
-            assertThat(getUpdateCounts(actual), is(new int[0]));
-            verify(connectionSession.getServerPreparedStatementRegistry(), never()).getPreparedStatement(anyInt());
-        } finally {
-            FirebirdBatchRegistry.getInstance().unregisterConnection(CONNECTION_ID);
-        }
+        new FirebirdBatchCreateCommandExecutor(createPacket, connectionSession).execute();
+        clearInvocations(connectionSession.getServerPreparedStatementRegistry());
+        FirebirdBatchCompletionStateResponse actual = (FirebirdBatchCompletionStateResponse) new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute().iterator().next();
+        assertThat(getRecordsCount(actual), is(0L));
+        assertThat(getUpdateCounts(actual), is(new int[0]));
+        verify(connectionSession.getServerPreparedStatementRegistry(), never()).getPreparedStatement(anyInt());
     }
     
     @Test
@@ -215,15 +210,13 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(batchStatement.isRecordCounts()).thenReturn(true);
         when(batchStatement.getParameterValues()).thenReturn(Arrays.asList(Arrays.asList(1, "foo_1"), Arrays.asList(2, "foo_2"), Arrays.asList(3, "foo_3")));
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         SQLException failureCause = new SQLException("violation of PRIMARY or UNIQUE KEY constraint", "23000", 335544665);
         FirebirdBatchCompletion completion = new FirebirdBatchCompletion(
                 2, new int[]{1, FirebirdBatchCompletion.EXECUTE_FAILED}, Collections.singletonList(new FirebirdBatchCompletion.Failure(1, failureCause)));
         try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
                 MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class,
                         (mock, context) -> when(mock.executeBatch()).thenReturn(completion))) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
             FirebirdBatchCompletionStateResponse actual = (FirebirdBatchCompletionStateResponse) new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute().iterator().next();
             assertThat(getRecordsCount(actual), is(2L));
             assertThat(getUpdateCounts(actual), is(new int[]{1, FirebirdBatchCompletion.EXECUTE_FAILED}));
@@ -242,15 +235,13 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(batchStatement.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(batchStatement.getParameterValues()).thenReturn(Arrays.asList(Arrays.asList(1, "foo_1"), Arrays.asList(2, "foo_2")));
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         SQLException failureCause = new SQLException("violation", "23000", 335544665);
         FirebirdBatchCompletion completion = new FirebirdBatchCompletion(
                 1, new int[]{FirebirdBatchCompletion.EXECUTE_FAILED}, Collections.singletonList(new FirebirdBatchCompletion.Failure(0, failureCause)));
         try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
                 MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class,
                         (mock, context) -> when(mock.executeBatch()).thenReturn(completion))) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
             FirebirdBatchCompletionStateResponse actual = (FirebirdBatchCompletionStateResponse) new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute().iterator().next();
             assertThat(getRecordsCount(actual), is(1L));
             assertThat(getUpdateCounts(actual), is(new int[0]));
@@ -275,23 +266,18 @@ class FirebirdBatchExecuteCommandExecutorTest {
         FirebirdBatchColumnDescriptor columnDescriptor = createBlobColumnDescriptor(batchBlobId);
         when(batchStatement.getColumnDescriptors()).thenReturn(Arrays.asList(new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.INT64, 8, 0, 0), columnDescriptor));
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         if (blobId > 0L) {
             when(blobWriteCache.useBlobData(CONNECTION_ID, blobId, transactionId)).thenReturn(Optional.of(expectedBytes));
         }
         List<List<Object>> actualParams = new ArrayList<>(2);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedStatic<FirebirdBlobWriteCache> mockedBlobCache = mockStatic(FirebirdBlobWriteCache.class);
-                MockedStatic<FirebirdBlobBinaryProtocolValue> mockedBlobValues = mockStatic(FirebirdBlobBinaryProtocolValue.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
-                    actualParams.addAll((List<List<Object>>) context.arguments().get(2));
-                    when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(2, new int[]{1, 1}));
-                })) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            mockedBlobCache.when(FirebirdBlobWriteCache::getInstance).thenReturn(blobWriteCache);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(2, new int[]{1, 1}));
+        })) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
             if (blobId < 0L) {
-                mockedBlobValues.when(() -> FirebirdBlobBinaryProtocolValue.getBlobContent(CONNECTION_ID, blobId)).thenReturn(expectedBytes);
+                when(FirebirdBlobBinaryProtocolValue.getBlobContent(CONNECTION_ID, blobId)).thenReturn(expectedBytes);
             }
             new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
             assertThat(actualParams.size(), is(2));
@@ -334,15 +320,12 @@ class FirebirdBatchExecuteCommandExecutorTest {
             when(batchStatement.getBlobIds()).thenReturn(new HashMap<>(registeredBlobIds));
         }
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         List<List<Object>> actualParams = new ArrayList<>(1);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
-                    actualParams.addAll((List<List<Object>>) context.arguments().get(2));
-                    when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
-                })) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
+        })) {
             new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
             assertThat(actualParams.size(), is(1));
             assertThat((byte[]) actualParams.get(0).get(0), is(new byte[0]));
@@ -369,15 +352,12 @@ class FirebirdBatchExecuteCommandExecutorTest {
         FirebirdBatchColumnDescriptor columnDescriptor = createBlobColumnDescriptor(true);
         when(batchStatement.getColumnDescriptors()).thenReturn(Collections.singletonList(columnDescriptor));
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         List<List<Object>> actualParams = new ArrayList<>(1);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
-                    actualParams.addAll((List<List<Object>>) context.arguments().get(2));
-                    when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
-                })) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
+        })) {
             new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
             assertThat(actualParams.size(), is(1));
             assertNull(actualParams.get(0).get(0));
@@ -395,13 +375,9 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(batchStatement.getParameterValues()).thenReturn(Collections.singletonList(Collections.singletonList(13L)));
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         when(batchStatement.getColumnDescriptors()).thenReturn(Collections.singletonList(new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.BLOB, 8, 0, 0)));
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedStatic<FirebirdBlobWriteCache> mockedBlobCache = mockStatic(FirebirdBlobWriteCache.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            mockedBlobCache.when(FirebirdBlobWriteCache::getInstance).thenReturn(blobWriteCache);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
             FirebirdBatchCompletionStateResponse actual = (FirebirdBatchCompletionStateResponse) new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute().iterator().next();
             assertThat(getRecordsCount(actual), is(1L));
             assertThat(getDetailedErrors(actual).get(0).getElement(), is(0));
@@ -421,12 +397,8 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(batchStatement.getParameterValues()).thenReturn(Collections.singletonList(Collections.singletonList(-1L)));
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         when(batchStatement.getColumnDescriptors()).thenReturn(Collections.singletonList(new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.BLOB, 8, 0, 0)));
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedStatic<FirebirdBlobBinaryProtocolValue> ignored = mockStatic(FirebirdBlobBinaryProtocolValue.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
             FirebirdBatchCompletionStateResponse actual = (FirebirdBatchCompletionStateResponse) new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute().iterator().next();
             assertThat(getRecordsCount(actual), is(1L));
             assertThat(getDetailedErrors(actual).get(0).getElement(), is(0));
@@ -453,7 +425,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
         blobIds.put(batchBlobId + 1L, existingBlobId);
         when(batchStatement.getBlobIds()).thenReturn(blobIds);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         if (existingBlobId > 0L) {
             Map<Long, byte[]> uploads = new HashMap<>(3);
             uploads.put(1L, new byte[]{99});
@@ -461,18 +433,13 @@ class FirebirdBatchExecuteCommandExecutorTest {
             when(blobWriteCache.useBlobData(anyInt(), anyLong(), anyInt())).thenAnswer(invocation -> Optional.ofNullable(uploads.get(invocation.<Long>getArgument(1))));
         }
         List<List<Object>> actualParams = new ArrayList<>(2);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedStatic<FirebirdBlobWriteCache> mockedBlobCache = mockStatic(FirebirdBlobWriteCache.class);
-                MockedStatic<FirebirdBlobBinaryProtocolValue> mockedBlobValues = mockStatic(FirebirdBlobBinaryProtocolValue.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
-                    actualParams.addAll((List<List<Object>>) context.arguments().get(2));
-                    when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(2, new int[]{1, 1}));
-                })) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            mockedBlobCache.when(FirebirdBlobWriteCache::getInstance).thenReturn(blobWriteCache);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(2, new int[]{1, 1}));
+        })) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
             if (existingBlobId < 0L) {
-                mockedBlobValues.when(() -> FirebirdBlobBinaryProtocolValue.getBlobContent(CONNECTION_ID, existingBlobId)).thenReturn(expectedBytes);
+                when(FirebirdBlobBinaryProtocolValue.getBlobContent(CONNECTION_ID, existingBlobId)).thenReturn(expectedBytes);
             }
             new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
             assertThat(actualParams.size(), is(2));
@@ -516,14 +483,11 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(batchStatement.getColumnDescriptors()).thenReturn(columnDescriptors);
         Map<Long, Long> blobIds = new HashMap<>(registeredBlobIds);
         when(batchStatement.getBlobIds()).thenReturn(blobIds);
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedStatic<FirebirdBlobWriteCache> mockedBlobCache = mockStatic(FirebirdBlobWriteCache.class);
                 MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class,
                         (mock, context) -> when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1})))) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            mockedBlobCache.when(FirebirdBlobWriteCache::getInstance).thenReturn(blobWriteCache);
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
             UnknownBatchBlobIdException actual = assertThrows(UnknownBatchBlobIdException.class, () -> new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute());
             assertThat(actual.getBatchBlobId(), is(expectedBatchBlobId));
             assertThat(mockedExecutor.constructed().size(), is(expectedExecutions));
@@ -564,29 +528,25 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(batchStatement.getBlobIds()).thenReturn(blobIds);
         FirebirdBatchColumnDescriptor columnDescriptor = createBlobColumnDescriptor(true);
         when(batchStatement.getColumnDescriptors()).thenReturn(Arrays.asList(new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.LONG, 4, 0, 0), columnDescriptor));
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         Collection<Integer> actualExecutedRows = new ArrayList<>(existingBlobIds.length);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedStatic<FirebirdBlobWriteCache> mockedBlobCache = mockStatic(FirebirdBlobWriteCache.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
-                    List<List<Object>> boundParams = (List<List<Object>>) context.arguments().get(2);
-                    for (List<Object> each : boundParams) {
-                        actualExecutedRows.add((Integer) each.get(0));
-                    }
-                    int[] updateCounts = new int[boundParams.size()];
-                    Arrays.fill(updateCounts, 1);
-                    if (backendFailure && 0 == (Integer) boundParams.get(0).get(0)) {
-                        updateCounts[0] = FirebirdBatchCompletion.EXECUTE_FAILED;
-                        when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(boundParams.size(), updateCounts,
-                                Collections.singleton(new FirebirdBatchCompletion.Failure(0, new SQLException("duplicate key")))));
-                    } else {
-                        when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(boundParams.size(), updateCounts));
-                    }
-                })) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            mockedBlobCache.when(FirebirdBlobWriteCache::getInstance).thenReturn(blobWriteCache);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            List<List<Object>> boundParams = (List<List<Object>>) context.arguments().get(2);
+            for (List<Object> each : boundParams) {
+                actualExecutedRows.add((Integer) each.get(0));
+            }
+            int[] updateCounts = new int[boundParams.size()];
+            Arrays.fill(updateCounts, 1);
+            if (backendFailure && 0 == (Integer) boundParams.get(0).get(0)) {
+                updateCounts[0] = FirebirdBatchCompletion.EXECUTE_FAILED;
+                when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(boundParams.size(), updateCounts,
+                        Collections.singleton(new FirebirdBatchCompletion.Failure(0, new SQLException("duplicate key")))));
+            } else {
+                when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(boundParams.size(), updateCounts));
+            }
+        })) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
             FirebirdBatchCompletionStateResponse actual = (FirebirdBatchCompletionStateResponse) new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute().iterator().next();
             assertThat(getRecordsCount(actual), is((long) expectedCounts.length));
             assertThat(getUpdateCounts(actual), is(expectedCounts));
@@ -623,15 +583,12 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(batchStatement.isRecordCounts()).thenReturn(true);
         when(batchStatement.getParameterValues()).thenReturn(Arrays.asList(Collections.singletonList(0L), Collections.singletonList(0L), Collections.singletonList(9L), Collections.singletonList(0L)));
         when(batchStatement.getColumnDescriptors()).thenReturn(Collections.singletonList(new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.BLOB, 8, 0, 0)));
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedStatic<FirebirdBlobWriteCache> mockedBlobCache = mockStatic(FirebirdBlobWriteCache.class);
                 MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class,
                         (mock, context) -> when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1})))) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            mockedBlobCache.when(FirebirdBlobWriteCache::getInstance).thenReturn(blobWriteCache);
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
             FirebirdBatchCompletionStateResponse actual = (FirebirdBatchCompletionStateResponse) new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute().iterator().next();
             assertThat(getRecordsCount(actual), is(1L));
             assertThat(getUpdateCounts(actual), is(new int[]{1}));
@@ -654,17 +611,14 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(batchStatement.getBlobIds()).thenReturn(blobIds);
         FirebirdBatchColumnDescriptor columnDescriptor = createBlobColumnDescriptor(true);
         when(batchStatement.getColumnDescriptors()).thenReturn(Collections.singletonList(columnDescriptor));
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         SQLException failure = new SQLException("duplicate key");
         FirebirdBatchCompletion completion = new FirebirdBatchCompletion(1, new int[]{-1}, Collections.singleton(new FirebirdBatchCompletion.Failure(0, failure)));
         try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedStatic<FirebirdBlobWriteCache> mockedBlobCache = mockStatic(FirebirdBlobWriteCache.class);
                 MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class,
                         (mock, context) -> when(mock.executeBatch()).thenReturn(completion))) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            mockedBlobCache.when(FirebirdBlobWriteCache::getInstance).thenReturn(blobWriteCache);
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
             FirebirdBatchCompletionStateResponse actual = (FirebirdBatchCompletionStateResponse) new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute().iterator().next();
             assertThat(getRecordsCount(actual), is(1L));
             assertThat(getUpdateCounts(actual), is(new int[]{-1}));
@@ -699,21 +653,17 @@ class FirebirdBatchExecuteCommandExecutorTest {
         FirebirdBatchStatement secondBatch = new FirebirdBatchStatement(STATEMENT_ID + 1, Collections.singletonList(columnDescriptor), 1024L);
         secondBatch.getBlobIds().put(2L, 9L);
         secondBatch.addParameterValues(Collections.singletonList(2L));
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(firstBatch);
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID + 1)).thenReturn(secondBatch);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, firstBatch);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID + 1, secondBatch);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID + 1)).thenReturn(preparedStatement);
         when(blobWriteCache.useBlobData(CONNECTION_ID, 9L, transactionId)).thenReturn(Optional.of(new byte[]{9}));
         List<List<Object>> actualParams = new ArrayList<>(2);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedStatic<FirebirdBlobWriteCache> mockedBlobCache = mockStatic(FirebirdBlobWriteCache.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
-                    actualParams.addAll((List<List<Object>>) context.arguments().get(2));
-                    when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
-                })) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            mockedBlobCache.when(FirebirdBlobWriteCache::getInstance).thenReturn(blobWriteCache);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
+        })) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
             new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
             new FirebirdBatchExecuteCommandExecutor(otherPacket, connectionSession).execute();
             assertThat(actualParams.size(), is(2));
@@ -732,16 +682,13 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(packet.getTransactionHandle()).thenReturn(transactionId);
         FirebirdBatchStatement batchStatement = createStreamBlobBatchStatement(Unpooled.buffer().writeLong(1L).writeInt(3).writeInt(0).writeBytes(new byte[]{1, 2, 3}));
         batchStatement.addParameterValues(Collections.singletonList(1L));
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         List<List<Object>> actualParams = new ArrayList<>(1);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
-                    actualParams.addAll((List<List<Object>>) context.arguments().get(2));
-                    when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
-                })) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
+        })) {
             new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
             assertThat(actualParams.size(), is(1));
             assertThat((byte[]) actualParams.get(0).get(0), is(new byte[]{1, 2, 3}));
@@ -758,11 +705,8 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(packet.getTransactionHandle()).thenReturn(transactionId);
         FirebirdBatchStatement batchStatement = createStreamBlobBatchStatement(Unpooled.buffer().writeLong(0L).writeInt(3).writeInt(0).writeBytes(new byte[]{1, 2, 3}));
         batchStatement.addParameterValues(Collections.singletonList(1L));
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
             assertThrows(BatchBlobBufferFormatException.class, () -> new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute());
             assertTrue(mockedExecutor.constructed().isEmpty());
             assertTrue(batchStatement.getBlobBuffer().isEmpty());
@@ -779,11 +723,8 @@ class FirebirdBatchExecuteCommandExecutorTest {
         FirebirdBatchStatement batchStatement = createStreamBlobBatchStatement(Unpooled.buffer().writeLong(1L).writeInt(3).writeInt(0).writeBytes(new byte[]{1, 2, 3}));
         batchStatement.setDefaultBpb(new byte[]{1, 1, 1, 2, 2, 1, 1, 3, 1, 1});
         batchStatement.addParameterValues(Collections.singletonList(1L));
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
             Collection<DatabasePacket> actual = new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
             assertThat(actual.size(), is(1));
             assertThat(((FirebirdGenericResponsePacket) actual.iterator().next()).getErrorCode(), is(-1));
@@ -801,11 +742,8 @@ class FirebirdBatchExecuteCommandExecutorTest {
         FirebirdBatchStatement batchStatement = createStreamBlobBatchStatement(Unpooled.buffer().writeLong(1L).writeInt(3).writeInt(0).writeBytes(new byte[]{1, 2, 3}));
         batchStatement.setDefaultBpb(new byte[]{1, 2, 1, 2, 3, 1, 1});
         batchStatement.addParameterValues(Collections.singletonList(1L));
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
             assertThrows(BlobFilterNotFoundException.class, () -> new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute());
             assertTrue(mockedExecutor.constructed().isEmpty());
             assertTrue(batchStatement.getBlobBuffer().isEmpty());
@@ -824,16 +762,13 @@ class FirebirdBatchExecuteCommandExecutorTest {
         FirebirdBatchStatement batchStatement = createStreamBlobBatchStatement(Unpooled.buffer().writeLong(1L).writeInt(3).writeInt(0).writeBytes(new byte[]{1, 2, 3}));
         batchStatement.setDefaultBpb(new byte[]{1, 1, 1, 1, 2, 1, 1, 4, 1, 127, 5, 1, 4, 3, 1, 1});
         batchStatement.addParameterValues(Collections.singletonList(1L));
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         List<List<Object>> actualParams = new ArrayList<>(1);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
-                    actualParams.addAll((List<List<Object>>) context.arguments().get(2));
-                    when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
-                })) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
+        })) {
             new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
             assertThat(actualParams.size(), is(1));
             assertThat((byte[]) actualParams.get(0).get(0), is(new byte[]{1, 2, 3}));
@@ -847,15 +782,11 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(blobWriteCache.useBlobData(CONNECTION_ID, 10L, transactionId)).thenReturn(Optional.of("231".getBytes(StandardCharsets.US_ASCII)));
         when(blobWriteCache.useBlobData(CONNECTION_ID, 11L, transactionId)).thenReturn(Optional.of("short".getBytes(StandardCharsets.US_ASCII)));
         List<List<Object>> actualParams = new ArrayList<>(1);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedStatic<FirebirdBlobWriteCache> mockedBlobCache = mockStatic(FirebirdBlobWriteCache.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
-                    actualParams.addAll((List<List<Object>>) context.arguments().get(2));
-                    when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
-                })) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            mockedBlobCache.when(FirebirdBlobWriteCache::getInstance).thenReturn(blobWriteCache);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
+        })) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
             new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
             assertThat(actualParams, is(Collections.singletonList(Arrays.<Object>asList(231, "short"))));
         }
@@ -869,15 +800,11 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(blobWriteCache.useBlobData(CONNECTION_ID, 10L, transactionId)).thenReturn(Optional.of("ok".getBytes(StandardCharsets.US_ASCII)));
         when(blobWriteCache.useBlobData(CONNECTION_ID, 11L, transactionId)).thenReturn(Optional.of("too-long".getBytes(StandardCharsets.US_ASCII)));
         List<List<Object>> actualParams = new ArrayList<>(1);
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedStatic<FirebirdBlobWriteCache> mockedBlobCache = mockStatic(FirebirdBlobWriteCache.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
-                    actualParams.addAll((List<List<Object>>) context.arguments().get(2));
-                    when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
-                })) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            mockedBlobCache.when(FirebirdBlobWriteCache::getInstance).thenReturn(blobWriteCache);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
+        })) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
             ParameterConversionException actual = assertThrows(ParameterConversionException.class, () -> new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute());
             StringTruncationException actualError = (StringTruncationException) actual.getConversionError();
             assertThat(actualError.getExpectedLength(), is(4));
@@ -893,12 +820,8 @@ class FirebirdBatchExecuteCommandExecutorTest {
     void assertExecuteWithInvalidBlobForConvertedParameter() {
         mockBlobParameterBatch(Collections.singletonList(Collections.singletonList(10L)), Collections.singletonList(createParameterColumn(Types.VARCHAR, 20)));
         when(blobWriteCache.useBlobData(CONNECTION_ID, 10L, transactionId)).thenReturn(Optional.empty());
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedStatic<FirebirdBlobWriteCache> mockedBlobCache = mockStatic(FirebirdBlobWriteCache.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            mockedBlobCache.when(FirebirdBlobWriteCache::getInstance).thenReturn(blobWriteCache);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
             ParameterConversionException actual = assertThrows(ParameterConversionException.class, () -> new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute());
             assertThat(actual.getConversionError(), isA(InvalidSegstrIdException.class));
             assertTrue(mockedExecutor.constructed().isEmpty());
@@ -909,12 +832,8 @@ class FirebirdBatchExecuteCommandExecutorTest {
     void assertExecuteWithLastParameterConversionFailure() {
         mockBlobParameterBatch(Collections.singletonList(Arrays.asList(10L, 11L)), Arrays.asList(createParameterColumn(Types.INTEGER, null), createParameterColumn(Types.VARCHAR, 4)));
         when(blobWriteCache.useBlobData(CONNECTION_ID, 11L, transactionId)).thenReturn(Optional.of("too-long".getBytes(StandardCharsets.US_ASCII)));
-        try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
-                MockedStatic<FirebirdBlobWriteCache> mockedBlobCache = mockStatic(FirebirdBlobWriteCache.class);
-                MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            mockedBlobCache.when(FirebirdBlobWriteCache::getInstance).thenReturn(blobWriteCache);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
             ParameterConversionException actual = assertThrows(ParameterConversionException.class, () -> new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute());
             assertThat(actual.getConversionError(), isA(StringTruncationException.class));
             verify(blobWriteCache, never()).useBlobData(CONNECTION_ID, 10L, transactionId);
@@ -929,7 +848,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(batchStatement.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(batchStatement.getParameterValues()).thenReturn(params);
         when(batchStatement.getColumnDescriptors()).thenReturn(Collections.nCopies(params.get(0).size(), createBlobColumnDescriptor(false)));
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         when(preparedStatement.getParameterColumns()).thenReturn(parameterColumns);
     }
@@ -954,13 +873,11 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(batchStatement.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(batchStatement.getParameterValues()).thenReturn(Collections.singletonList(Collections.singletonList("foo_value")));
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         SQLException expected = new SQLException("batch execution failed");
         try (
-                MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class);
                 MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class,
                         (mock, context) -> when(mock.executeBatch()).thenThrow(expected))) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
             SQLException actual = assertThrows(SQLException.class, () -> new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute());
             assertThat(actual, is(expected));
             verify(batchStatement, never()).reset();
@@ -971,14 +888,9 @@ class FirebirdBatchExecuteCommandExecutorTest {
     void assertExecuteWithNoBatchStatement() {
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(null);
-        try (MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class)) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            FirebirdBatchExecuteCommandExecutor executor = new FirebirdBatchExecuteCommandExecutor(packet, connectionSession);
-            assertThrows(InvalidBatchHandleException.class, executor::execute);
-            verify(batchRegistry).getBatchStatement(CONNECTION_ID, STATEMENT_ID);
-            verify(connectionSession.getServerPreparedStatementRegistry(), never()).getPreparedStatement(anyInt());
-        }
+        FirebirdBatchExecuteCommandExecutor executor = new FirebirdBatchExecuteCommandExecutor(packet, connectionSession);
+        assertThrows(InvalidBatchHandleException.class, executor::execute);
+        verify(connectionSession.getServerPreparedStatementRegistry(), never()).getPreparedStatement(anyInt());
     }
     
     @Test
@@ -986,15 +898,12 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
-        when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
+        FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, batchStatement);
         FirebirdTransactionIdGenerator.getInstance().closeTransaction(CONNECTION_ID, transactionId);
         FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
-        try (MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class)) {
-            mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
-            FirebirdBatchExecuteCommandExecutor executor = new FirebirdBatchExecuteCommandExecutor(packet, connectionSession);
-            assertThrows(InvalidTransactionHandleException.class, executor::execute);
-            verify(connectionSession.getServerPreparedStatementRegistry(), never()).getPreparedStatement(anyInt());
-        }
+        FirebirdBatchExecuteCommandExecutor executor = new FirebirdBatchExecuteCommandExecutor(packet, connectionSession);
+        assertThrows(InvalidTransactionHandleException.class, executor::execute);
+        verify(connectionSession.getServerPreparedStatementRegistry(), never()).getPreparedStatement(anyInt());
     }
     
     private long getRecordsCount(final FirebirdBatchCompletionStateResponse response) throws ReflectiveOperationException {
