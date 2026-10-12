@@ -172,6 +172,35 @@ class FirebirdBlobWriteCacheTest {
         }
     }
     
+    @Test
+    void assertUseBlobDataThroughTransaction() {
+        CACHE.registerConnection(1);
+        try {
+            CACHE.registerBlob(1, 11, 21L, 31, false);
+            CACHE.appendSegment(1, 11, new byte[]{1, 2, 3});
+            CACHE.closeWrite(1, 11);
+            CACHE.registerBlob(1, 12, 22L, 31, false);
+            CACHE.appendSegment(1, 12, new byte[]{4, 5});
+            CACHE.closeWrite(1, 12);
+            CACHE.useBlobData(1, 21L, 31);
+            CACHE.useBlobData(1, 22L, 31);
+            releaseSoftlyReachableData(getIdCache().get(1).get(21L));
+            releaseSoftlyReachableData(getIdCache().get(1).get(22L));
+            assertThat(CACHE.useBlobData(1, 22L, 31).orElse(null), is(new byte[]{4, 5}));
+            assertThat(CACHE.useBlobData(1, 21L, 31).orElse(null), is(new byte[]{1, 2, 3}));
+            CACHE.clearTransaction(1, 31);
+            assertFalse(CACHE.useBlobData(1, 21L, 31).isPresent());
+            CACHE.registerBlob(1, 13, 23L, 32, false);
+            CACHE.appendSegment(1, 13, new byte[]{6});
+            CACHE.closeWrite(1, 13);
+            CACHE.useBlobData(1, 23L, 32);
+            releaseSoftlyReachableData(getIdCache().get(1).get(23L));
+            assertThat(CACHE.useBlobData(1, 23L, 32).orElse(null), is(new byte[]{6}));
+        } finally {
+            CACHE.unregisterConnection(1);
+        }
+    }
+    
     @SneakyThrows(ReflectiveOperationException.class)
     private void releaseSoftlyReachableData(final FirebirdBlobWrite write) {
         ((Reference<?>) Plugins.getMemberAccessor().get(FirebirdBlobWrite.class.getDeclaredField("usedContent"), write)).clear();
