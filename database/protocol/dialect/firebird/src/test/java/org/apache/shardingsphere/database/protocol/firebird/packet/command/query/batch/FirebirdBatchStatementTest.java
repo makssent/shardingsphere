@@ -28,6 +28,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
+import org.firebirdsql.jaybird.fb.constants.BatchItems;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -62,7 +63,7 @@ class FirebirdBatchStatementTest {
     
     @Test
     void assertCreateWithRecordCounts() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 6, 8, 1024L, true, false, false);
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 6, 8, 1024L, true, false, BatchItems.BLOB_NONE);
         assertTrue(batchStatement.isRecordCounts());
         assertFalse(batchStatement.isMultiError());
         assertThat(batchStatement.getBufferSize(), is(1024L));
@@ -70,7 +71,7 @@ class FirebirdBatchStatementTest {
     
     @Test
     void assertCreateWithMultiError() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 6, 8, 1024L, false, true, true);
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 6, 8, 1024L, false, true, BatchItems.BLOB_STREAM);
         assertTrue(batchStatement.isMultiError());
         assertFalse(batchStatement.isRecordCounts());
         assertTrue(batchStatement.isBlobStreamAllowed());
@@ -87,6 +88,21 @@ class FirebirdBatchStatementTest {
     void assertHasBatchBlobIdColumnWithQuadBlob() {
         FirebirdBatchColumnDescriptor quadBlobColumn = new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.BLOB, 8, 0, 0);
         assertFalse(new FirebirdBatchStatement(32, Collections.singletonList(quadBlobColumn), 1024L).hasBatchBlobIdColumn());
+    }
+    
+    @Test
+    void assertGetRegisteredBatchBlobIdWithEngineBlobPolicy() {
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 0, 0, BUFFER_SIZE, false, false, BatchItems.BLOB_ID_ENGINE);
+        assertThat(batchStatement.getRegisteredBatchBlobId(7L), is(1L));
+        assertThat(batchStatement.getRegisteredBatchBlobId(7L), is(2L));
+        batchStatement.reset();
+        assertThat(batchStatement.getRegisteredBatchBlobId(8L), is(1L));
+    }
+    
+    @Test
+    void assertGetRegisteredBatchBlobIdWithUserBlobPolicy() {
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 0, 0, BUFFER_SIZE, false, false, BatchItems.BLOB_ID_USER);
+        assertThat(batchStatement.getRegisteredBatchBlobId(7L), is(7L));
     }
     
     @Test
@@ -229,7 +245,7 @@ class FirebirdBatchStatementTest {
     
     @Test
     void assertGetDataSize() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 14, 16, 1024L, false, false, false);
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 14, 16, 1024L, false, false, BatchItems.BLOB_NONE);
         batchStatement.addParameterValues(Collections.singletonList("foo"));
         batchStatement.addParameterValues(Collections.singletonList("bar"));
         assertThat(batchStatement.getDataSize(), is(32L));
@@ -237,7 +253,7 @@ class FirebirdBatchStatementTest {
     
     @Test
     void assertReset() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(100, Collections.emptyList(), 14, 16, BUFFER_SIZE, false, false, false);
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(100, Collections.emptyList(), 14, 16, BUFFER_SIZE, false, false, BatchItems.BLOB_NONE);
         batchStatement.addParameterValues(Collections.singletonList("foo"));
         batchStatement.getBlobIds().put(1L, 2L);
         batchStatement.getStreamBlobContents().put(3L, new byte[]{1});

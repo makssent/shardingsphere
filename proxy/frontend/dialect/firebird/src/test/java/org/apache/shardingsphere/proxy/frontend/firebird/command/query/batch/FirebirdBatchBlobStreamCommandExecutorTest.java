@@ -45,6 +45,7 @@ import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockS
 import org.apache.shardingsphere.transaction.api.TransactionType;
 import org.apache.shardingsphere.transaction.rule.TransactionRule;
 import org.firebirdsql.gds.ISCConstants;
+import org.firebirdsql.jaybird.fb.constants.BatchItems;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -125,7 +126,7 @@ class FirebirdBatchBlobStreamCommandExecutorTest {
     }
     
     private FirebirdBatchStatement registerBatchStatement(final long bufferSize) {
-        FirebirdBatchStatement result = new FirebirdBatchStatement(STATEMENT_ID, Collections.emptyList(), 0, 0, bufferSize, false, false, true);
+        FirebirdBatchStatement result = new FirebirdBatchStatement(STATEMENT_ID, Collections.emptyList(), 0, 0, bufferSize, false, false, BatchItems.BLOB_STREAM);
         FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, result);
         return result;
     }

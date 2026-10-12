@@ -103,12 +103,12 @@ public final class FirebirdBatchStatementManager {
      * @param bufferSize buffer size
      * @param recordCounts whether record counts are requested
      * @param multiError whether multiple errors are requested
-     * @param blobStreamAllowed whether BLOB policy allows BLOB stream
+     * @param blobPolicy BLOB policy of batch
      */
     public void registerBatchStatement(final int connectionId, final int statementId, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final int messageLength,
-                                       final int alignedMessageLength, final long bufferSize, final boolean recordCounts, final boolean multiError, final boolean blobStreamAllowed) {
+                                       final int alignedMessageLength, final long bufferSize, final boolean recordCounts, final boolean multiError, final int blobPolicy) {
         FirebirdBatchRegistry.getInstance().registerBatchStatement(connectionId, statementId,
-                new FirebirdBatchStatement(statementId, columnDescriptors, messageLength, alignedMessageLength, bufferSize, recordCounts, multiError, blobStreamAllowed));
+                new FirebirdBatchStatement(statementId, columnDescriptors, messageLength, alignedMessageLength, bufferSize, recordCounts, multiError, blobPolicy));
     }
     
     /**

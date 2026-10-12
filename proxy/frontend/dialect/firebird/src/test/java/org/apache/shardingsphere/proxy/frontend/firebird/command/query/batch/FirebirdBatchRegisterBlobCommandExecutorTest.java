@@ -77,6 +77,7 @@ class FirebirdBatchRegisterBlobCommandExecutorTest {
         when(batchStatement.getBlobIds()).thenReturn(blobIds);
         when(packet.getExistingBlobId()).thenReturn(2L);
         when(packet.getBatchBlobId()).thenReturn(1L);
+        when(batchStatement.getRegisteredBatchBlobId(1L)).thenReturn(1L);
         Collection<DatabasePacket> actual = new FirebirdBatchRegisterBlobCommandExecutor(packet, connectionSession).execute();
         assertThat(blobIds, is(Collections.singletonMap(1L, 2L)));
         assertThat(actual.size(), is(1));
@@ -94,6 +95,7 @@ class FirebirdBatchRegisterBlobCommandExecutorTest {
         when(batchStatement.getBlobIds()).thenReturn(blobIds);
         when(packet.getExistingBlobId()).thenReturn(3L);
         when(packet.getBatchBlobId()).thenReturn(1L);
+        when(batchStatement.getRegisteredBatchBlobId(1L)).thenReturn(1L);
         RepeatedBatchBlobIdException actual = assertThrows(RepeatedBatchBlobIdException.class, () -> new FirebirdBatchRegisterBlobCommandExecutor(packet, connectionSession).execute());
         assertThat(actual.getBatchBlobId(), is(1L));
         assertThat(blobIds, is(Collections.singletonMap(1L, 2L)));

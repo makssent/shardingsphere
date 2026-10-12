@@ -34,15 +34,20 @@ import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 import org.firebirdsql.gds.BlrConstants;
+import org.firebirdsql.jaybird.fb.constants.BatchItems;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.sql.SQLException;
 import java.util.Collection;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -76,8 +81,6 @@ class FirebirdBatchCreateCommandExecutorTest {
     private static final int TAG_BUFFER_BYTES_SIZE = 3;
     
     private static final int TAG_BLOB_POLICY = 4;
-    
-    private static final int BLOB_NONE = 0;
     
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private ConnectionSession connectionSession;
@@ -232,7 +235,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertThat(actual.getBufferSize(), is(DEFAULT_BUFFER_SIZE));
         assertFalse(actual.isRecordCounts());
         assertFalse(actual.isMultiError());
-        assertFalse(actual.isBlobStreamAllowed());
+        assertThat(actual.getBlobPolicy(), is(BatchItems.BLOB_NONE));
     }
     
     @Test
@@ -271,10 +274,23 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertFalse(actual.isMultiError());
     }
     
-    @Test
-    void assertParseBatchParametersWithBlobPolicy() {
-        FirebirdBatchCreateCommandExecutor.BatchParameters actual = FirebirdBatchCreateCommandExecutor.BatchParameters.parse(createBatchParametersBuffer(TAG_BLOB_POLICY, BLOB_NONE));
-        assertTrue(actual.isBlobStreamAllowed());
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("blobPolicyArguments")
+    void assertParseBatchParametersWithBlobPolicy(final String name, final int[] blobPolicies, final int expectedBlobPolicy) {
+        ByteBuf batchParametersBuffer = Unpooled.buffer().writeByte(BATCH_VERSION_1);
+        for (int each : blobPolicies) {
+            batchParametersBuffer.writeByte(TAG_BLOB_POLICY).writeIntLE(4).writeIntLE(each);
+        }
+        assertThat(FirebirdBatchCreateCommandExecutor.BatchParameters.parse(batchParametersBuffer).getBlobPolicy(), is(expectedBlobPolicy));
+    }
+    
+    private static Stream<Arguments> blobPolicyArguments() {
+        return Stream.of(
+                Arguments.of("single_none", new int[]{BatchItems.BLOB_NONE}, BatchItems.BLOB_STREAM),
+                Arguments.of("single_user", new int[]{BatchItems.BLOB_ID_USER}, BatchItems.BLOB_STREAM),
+                Arguments.of("stream_then_user", new int[]{BatchItems.BLOB_STREAM, BatchItems.BLOB_ID_USER}, BatchItems.BLOB_ID_USER),
+                Arguments.of("engine_twice", new int[]{BatchItems.BLOB_ID_ENGINE, BatchItems.BLOB_ID_ENGINE}, BatchItems.BLOB_ID_ENGINE),
+                Arguments.of("unknown_last", new int[]{BatchItems.BLOB_STREAM, 9}, BatchItems.BLOB_NONE));
     }
     
     @Test

@@ -32,6 +32,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.generic.Fireb
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor;
+import org.firebirdsql.jaybird.fb.constants.BatchItems;
 
 import java.sql.SQLException;
 import java.util.Collection;
@@ -88,7 +89,7 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
         ByteBuf batchParametersBuffer = packet.getBatchParametersBuffer();
         BatchParameters batchParameters = BatchParameters.parse(batchParametersBuffer);
         FirebirdBatchStatementManager.getInstance().registerBatchStatement(connectionId, statementId, messageFormat.getFields(), messageFormat.getMessageLength(),
-                messageFormat.getAlignedMessageLength(), batchParameters.getBufferSize(), batchParameters.isRecordCounts(), batchParameters.isMultiError(), batchParameters.isBlobStreamAllowed());
+                messageFormat.getAlignedMessageLength(), batchParameters.getBufferSize(), batchParameters.isRecordCounts(), batchParameters.isMultiError(), batchParameters.getBlobPolicy());
         return Collections.singleton(new FirebirdGenericResponsePacket().setHandle(statementId));
     }
     
@@ -104,11 +105,11 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
         
         private final boolean multiError;
         
-        private final boolean blobStreamAllowed;
+        private final int blobPolicy;
         
         static BatchParameters parse(final ByteBuf batchParametersBuffer) {
             if (null == batchParametersBuffer || !batchParametersBuffer.isReadable()) {
-                return new BatchParameters(BATCH_VERSION_1, DEFAULT_BUFFER_SIZE, false, false, false);
+                return new BatchParameters(BATCH_VERSION_1, DEFAULT_BUFFER_SIZE, false, false, BatchItems.BLOB_NONE);
             }
             ByteBuf reader = batchParametersBuffer.duplicate();
             int version = reader.readUnsignedByte();
@@ -118,7 +119,8 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
             long bufferSize = DEFAULT_BUFFER_SIZE;
             boolean recordCounts = false;
             boolean multiError = false;
-            boolean blobStreamAllowed = false;
+            int blobPolicy = BatchItems.BLOB_NONE;
+            boolean blobPolicyRead = false;
             while (reader.isReadable()) {
                 ensureClumpletHeaderReadable(reader);
                 int tag = reader.readUnsignedByte();
@@ -131,18 +133,14 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
                 } else if (TAG_BUFFER_BYTES_SIZE == tag) {
                     bufferSize = getBufferSize(readIntegerValue(reader, tag, valueLength));
                 } else if (TAG_BLOB_POLICY == tag) {
-                    readIntegerValue(reader, tag, valueLength);
-                    blobStreamAllowed = true;
+                    int value = readIntegerValue(reader, tag, valueLength);
+                    blobPolicy = toBlobPolicy(blobPolicyRead ? value : BatchItems.BLOB_STREAM);
+                    blobPolicyRead = true;
                 } else {
                     reader.skipBytes(valueLength);
                 }
             }
-            return new BatchParameters(version, bufferSize, recordCounts, multiError, blobStreamAllowed);
-        }
-        
-        private static long getBufferSize(final int requestedBufferSize) {
-            long result = Integer.toUnsignedLong(requestedBufferSize);
-            return 0L == result ? MAX_BUFFER_SIZE : Math.min(result, MAX_BUFFER_SIZE);
+            return new BatchParameters(version, bufferSize, recordCounts, multiError, blobPolicy);
         }
         
         private static void ensureClumpletHeaderReadable(final ByteBuf reader) {
@@ -162,6 +160,15 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
                 throw new DatabaseProtocolException("Invalid batch parameter integer length for tag %d: %d", tag, valueLength);
             }
             return reader.readIntLE();
+        }
+        
+        private static long getBufferSize(final int requestedBufferSize) {
+            long result = Integer.toUnsignedLong(requestedBufferSize);
+            return 0L == result ? MAX_BUFFER_SIZE : Math.min(result, MAX_BUFFER_SIZE);
+        }
+        
+        private static int toBlobPolicy(final int value) {
+            return BatchItems.BLOB_ID_ENGINE == value || BatchItems.BLOB_ID_USER == value || BatchItems.BLOB_STREAM == value ? value : BatchItems.BLOB_NONE;
         }
     }
 }

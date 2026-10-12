@@ -47,6 +47,7 @@ import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdS
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
 import org.firebirdsql.gds.BlrConstants;
+import org.firebirdsql.jaybird.fb.constants.BatchItems;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -906,7 +907,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     
     private FirebirdBatchStatement createStreamBlobBatchStatement(final ByteBuf blobStream) {
         FirebirdBatchColumnDescriptor columnDescriptor = createBlobColumnDescriptor(true);
-        FirebirdBatchStatement result = new FirebirdBatchStatement(STATEMENT_ID, Collections.singletonList(columnDescriptor), 8, 8, 1024L, false, false, true);
+        FirebirdBatchStatement result = new FirebirdBatchStatement(STATEMENT_ID, Collections.singletonList(columnDescriptor), 8, 8, 1024L, false, false, BatchItems.BLOB_STREAM);
         result.appendBlobStream(blobStream, 20L);
         return result;
     }

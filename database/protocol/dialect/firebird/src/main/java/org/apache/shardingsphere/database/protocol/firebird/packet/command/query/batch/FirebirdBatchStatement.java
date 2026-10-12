@@ -34,6 +34,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.firebirdsql.gds.ISCConstants;
+import org.firebirdsql.jaybird.fb.constants.BatchItems;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -66,7 +67,7 @@ public final class FirebirdBatchStatement {
     
     private final boolean multiError;
     
-    private final boolean blobStreamAllowed;
+    private final int blobPolicy;
     
     private final List<List<Object>> parameterValues = new ArrayList<>();
     
@@ -80,15 +81,17 @@ public final class FirebirdBatchStatement {
     
     private long blobStreamSize;
     
+    private long generatedBlobId;
+    
     @Setter
     private byte[] defaultBpb = {ISCConstants.isc_bpb_version1, ISCConstants.isc_bpb_type, 1, ISCConstants.isc_bpb_type_stream};
     
     public FirebirdBatchStatement(final int statementHandle) {
-        this(statementHandle, Collections.emptyList(), 0, 0, 0L, false, false, false);
+        this(statementHandle, Collections.emptyList(), 0, 0, 0L, false, false, BatchItems.BLOB_NONE);
     }
     
     public FirebirdBatchStatement(final int statementHandle, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final long bufferSize) {
-        this(statementHandle, columnDescriptors, 0, 0, bufferSize, false, false, false);
+        this(statementHandle, columnDescriptors, 0, 0, bufferSize, false, false, BatchItems.BLOB_NONE);
     }
     
     /**
@@ -106,6 +109,25 @@ public final class FirebirdBatchStatement {
      */
     public long getDataSize() {
         return (long) parameterValues.size() * alignedMessageLength;
+    }
+    
+    /**
+     * Judge whether BLOB policy of batch allows BLOB stream.
+     *
+     * @return whether BLOB policy of batch allows BLOB stream
+     */
+    public boolean isBlobStreamAllowed() {
+        return BatchItems.BLOB_STREAM == blobPolicy;
+    }
+    
+    /**
+     * Get batch BLOB ID of a registered BLOB: Firebird generates the next batch BLOB ID of the batch for BLOB policy ID_ENGINE and ignores the batch BLOB ID of the client.
+     *
+     * @param clientBatchBlobId batch BLOB ID sent by the client
+     * @return batch BLOB ID under which the BLOB is registered
+     */
+    public long getRegisteredBatchBlobId(final long clientBatchBlobId) {
+        return BatchItems.BLOB_ID_ENGINE == blobPolicy ? ++generatedBlobId : clientBatchBlobId;
     }
     
     /**
@@ -234,5 +256,6 @@ public final class FirebirdBatchStatement {
         streamBlobContents.clear();
         blobBuffer.clear();
         blobStreamSize = 0L;
+        generatedBlobId = 0L;
     }
 }

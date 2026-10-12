@@ -28,6 +28,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.common.FirebirdCommonInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.firebirdsql.gds.BlrConstants;
+import org.firebirdsql.jaybird.fb.constants.BatchItems;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -54,7 +55,7 @@ class FirebirdBatchInfoReturnPacketTest {
     
     @Test
     void assertWriteDataAndBlobsSize() {
-        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(7, Collections.emptyList(), 30, 32, 1024L, false, false, true);
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(7, Collections.emptyList(), 30, 32, 1024L, false, false, BatchItems.BLOB_STREAM);
         batchStatement.addParameterValues(Collections.singletonList(1));
         batchStatement.appendBlobStream(Unpooled.buffer().writeLong(1L).writeInt(0).writeInt(0), 16L);
         List<FirebirdInfoPacketType> infoItems = Arrays.asList(FirebirdBatchInfoPacketType.DATA_BYTES_SIZE, FirebirdBatchInfoPacketType.BLOBS_BYTES_SIZE);
@@ -114,7 +115,7 @@ class FirebirdBatchInfoReturnPacketTest {
                 .writeShortLE(2).writeByte(BlrConstants.blr_short).writeByte(0).writeByte(BlrConstants.blr_short).writeByte(0).writeByte(BlrConstants.blr_end).writeByte(BlrConstants.blr_eoc);
         FirebirdParseBatchBlr messageFormat = FirebirdParseBatchBlr.parse(blr, blr.readableBytes());
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(7, messageFormat.getFields(), messageFormat.getMessageLength(), messageFormat.getAlignedMessageLength(),
-                1024L, false, false, false);
+                1024L, false, false, BatchItems.BLOB_NONE);
         ByteBuf messages = Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_MSG.getValue()).writeInt(7).writeInt(2).writeInt(0).writeInt(1).writeInt(0).writeInt(2);
         for (List<Object> each : new FirebirdBatchMessageCommandPacket(new FirebirdPacketPayload(messages, StandardCharsets.UTF_8)).readParameterValues(messageFormat.getFields())) {
             batchStatement.addParameterValues(each);

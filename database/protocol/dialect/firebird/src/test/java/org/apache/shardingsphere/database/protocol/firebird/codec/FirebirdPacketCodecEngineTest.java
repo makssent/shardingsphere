@@ -40,6 +40,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.generic.Fireb
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.firebirdsql.gds.BlrConstants;
+import org.firebirdsql.jaybird.fb.constants.BatchItems;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -353,7 +354,7 @@ class FirebirdPacketCodecEngineTest {
     void assertDecodeBatchMessageOverBufferSizeIsStillFramedWithoutCodecError() {
         FirebirdBatchRegistry.getInstance().registerConnection(BATCH_CONNECTION_ID);
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(BATCH_STATEMENT_HANDLE,
-                Collections.singletonList(new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.LONG, Integer.BYTES, 0, 0)), 6, 8, 4L, false, false, false);
+                Collections.singletonList(new FirebirdBatchColumnDescriptor(FirebirdBinaryColumnType.LONG, Integer.BYTES, 0, 0)), 6, 8, 4L, false, false, BatchItems.BLOB_NONE);
         FirebirdBatchRegistry.getInstance().registerBatchStatement(BATCH_CONNECTION_ID, BATCH_STATEMENT_HANDLE, batchStatement);
         try {
             ByteBuf in = buildBatchMessage(BATCH_STATEMENT_HANDLE, 100);
