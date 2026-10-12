@@ -165,12 +165,12 @@ public final class FirebirdBatchStatement {
      * Read BLOBs from the BLOB buffer as Firebird does before executing batch messages.
      *
      * <p>The BLOB buffer is read from its start regardless of the BLOB stream state, which cancelling the batch keeps inside a cancelled BLOB.
-     * A BLOB header with batch BLOB ID zero continues the previous BLOB in its segmentation mode.
+     * A BLOB header with batch BLOB ID zero continues the previous BLOB in its segmentation mode; without a previous BLOB Firebird skips such a header of size zero.
      * Lengths are unsigned 32-bit numbers, so a BLOB parameter buffer longer than its BLOB makes the BLOB take the rest of the BLOB buffer.</p>
      *
      * @return BLOBs in the order of the BLOB buffer
      * @throws BatchSmallDataException if a BLOB header is incomplete
-     * @throws BatchBlobBufferFormatException if a continuation has no BLOB to continue
+     * @throws BatchBlobBufferFormatException if a continuation with data has no BLOB to continue
      * @throws BatchBlobContinuationBpbException if a BLOB continuation contains a BLOB parameter buffer
      * @throws BatchBpbTooBigException if a BLOB parameter buffer is incomplete
      * @throws DatabaseProtocolException if a BLOB parameter buffer is invalid
@@ -199,7 +199,7 @@ public final class FirebirdBatchStatement {
             long bpbLength = buffer.readUnsignedIntLE();
             if (0L == batchBlobId) {
                 ShardingSpherePreconditions.checkState(0L == bpbLength, () -> new BatchBlobContinuationBpbException(bpbLength));
-                ShardingSpherePreconditions.checkNotNull(currentBlob, () -> new BatchBlobBufferFormatException(statementHandle));
+                ShardingSpherePreconditions.checkState(null != currentBlob || 0L == blobRemaining, () -> new BatchBlobBufferFormatException(statementHandle));
                 continue;
             }
             ShardingSpherePreconditions.checkState(bpbLength <= buffer.readableBytes(), () -> new BatchBpbTooBigException(bpbLength, buffer.readableBytes()));

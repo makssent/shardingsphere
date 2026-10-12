@@ -151,6 +151,16 @@ class FirebirdBatchStatementTest {
     }
     
     @Test
+    void assertReadStreamBlobsAfterEmptyLeadingContinuation() {
+        FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), BUFFER_SIZE);
+        batchStatement.appendBlobStream(createBlobHeader(0L, 0, 0).writeBytes(createBlobHeader(7L, 3, 0)).writeBytes(new byte[]{1, 2, 3}), 36L);
+        List<FirebirdBatchStreamBlob> actual = new ArrayList<>(batchStatement.readStreamBlobs());
+        assertThat(actual.size(), is(1));
+        assertThat(actual.get(0).getBatchBlobId(), is(7L));
+        assertThat(actual.get(0).getData().toByteArray(), is(new byte[]{1, 2, 3}));
+    }
+    
+    @Test
     void assertReadSegmentedStreamBlobContinuation() {
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), BUFFER_SIZE);
         ByteBuf data = createBlobHeader(1L, 7, 4).writeBytes(new byte[]{1, 3, 1, 0}).writeInt(1).writeByte(1);
