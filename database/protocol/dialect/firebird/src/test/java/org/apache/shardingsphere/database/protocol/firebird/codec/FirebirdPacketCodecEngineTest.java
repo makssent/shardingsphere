@@ -35,6 +35,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchMessageCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchRegistry;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStatement;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFreeStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
@@ -459,7 +460,7 @@ class FirebirdPacketCodecEngineTest {
                 .writeByte(BlrConstants.blr_version5).writeByte(BlrConstants.blr_begin).writeByte(BlrConstants.blr_message).writeByte(0)
                 .writeShortLE(2).writeByte(BlrConstants.blr_blob2).writeZero(4).writeByte(BlrConstants.blr_short).writeByte(0)
                 .writeByte(BlrConstants.blr_end).writeByte(BlrConstants.blr_eoc);
-        return buildBatchCreate(blr, 8);
+        return buildBatchCreate(blr, 10);
     }
     
     private ByteBuf buildBlobBatchMessage() {
@@ -480,16 +481,26 @@ class FirebirdPacketCodecEngineTest {
     }
     
     @Test
-    void assertDecodeCoalescedBatchCreateWithMalformedBlrWritesErrorResponseAndClosesChannel() {
-        ChannelFuture errorResponseFuture = mock(ChannelFuture.class);
-        when(context.channel().writeAndFlush(any())).thenReturn(errorResponseFuture);
-        ByteBuf in = Unpooled.wrappedUnmodifiableBuffer(buildInvalidBatchCreate(), buildBatchMessage(BATCH_STATEMENT_HANDLE, 100));
+    void assertDecodeCoalescedBatchCreateWithOtherMessageLengthAndMessage() {
+        ByteBuf blr = Unpooled.buffer()
+                .writeByte(BlrConstants.blr_version5).writeByte(BlrConstants.blr_begin).writeByte(BlrConstants.blr_message).writeByte(0)
+                .writeShortLE(2).writeByte(BlrConstants.blr_long).writeByte(0).writeByte(BlrConstants.blr_short).writeByte(0)
+                .writeByte(BlrConstants.blr_end).writeByte(BlrConstants.blr_eoc);
+        ByteBuf in = Unpooled.wrappedUnmodifiableBuffer(buildBatchCreate(blr, 8), buildBatchMessage(BATCH_STATEMENT_HANDLE, 100), createCommandPacket(FirebirdCommandPacketType.BATCH_EXEC, 12));
         List<Object> out = new LinkedList<>();
         codecEngine.decode(context, in, out);
-        assertTrue(out.isEmpty());
-        assertThat(in.readableBytes(), is(0));
-        assertThat(captureErrorResponse().getErrorCode(), is(335544382));
-        verify(errorResponseFuture).addListener(ChannelFutureListener.CLOSE);
+        assertThat(out.size(), is(3));
+        assertThat(((ByteBuf) out.get(1)).readableBytes(), is(20));
+    }
+    
+    @Test
+    void assertDecodeCoalescedBatchCreateWithInvalidBlr() {
+        ByteBuf in = Unpooled.wrappedUnmodifiableBuffer(buildInvalidBatchCreate(), createCommandPacket(FirebirdCommandPacketType.BATCH_EXEC, 12));
+        List<Object> out = new LinkedList<>();
+        codecEngine.decode(context, in, out);
+        verify(context.channel(), never()).close();
+        assertThat(out.size(), is(2));
+        assertThat(((ByteBuf) out.get(1)).readableBytes(), is(12));
     }
     
     private ByteBuf buildInvalidBatchCreate() {
@@ -553,6 +564,67 @@ class FirebirdPacketCodecEngineTest {
         codecEngine.decode(context, in, out);
         assertThat(out.size(), is(3));
         assertThat(((ByteBuf) out.get(2)).readableBytes(), is(28));
+    }
+    
+    @Test
+    void assertDecodeBlobStreamAfterBatchCreateWithOtherParametersVersion() {
+        ByteBuf in = Unpooled.wrappedUnmodifiableBuffer(buildBatchCreate(), buildBlobStream(32, buildBlobHeader(1L, 40, 0).writeZero(16)),
+                Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_RLS.getValue()).writeInt(BATCH_STATEMENT_HANDLE), buildBatchCreate(new byte[]{2}),
+                buildBlobStream(24, buildBlobHeader(2L, 8, 4).writeBytes(new byte[]{2, 3, 1, 1}).writeZero(4)));
+        List<Object> out = new LinkedList<>();
+        codecEngine.decode(context, in, out);
+        assertThat(out.size(), is(5));
+        assertThat(((ByteBuf) out.get(4)).readableBytes(), is(36));
+    }
+    
+    @Test
+    void assertDecodeBlobStreamAfterRepeatedBatchCreate() {
+        ByteBuf in = Unpooled.wrappedUnmodifiableBuffer(buildBatchCreate(), buildSegmentedSetBpb(), buildBlobStream(28, buildBlobHeader(1L, 20, 0).writeInt(10).writeZero(10)), buildBatchCreate(),
+                buildBlobStream(8, Unpooled.buffer().writeInt(6).writeZero(6)), createCommandPacket(FirebirdCommandPacketType.BATCH_EXEC, 12));
+        List<Object> out = new LinkedList<>();
+        codecEngine.decode(context, in, out);
+        assertThat(out.size(), is(6));
+        assertThat(((ByteBuf) out.get(4)).readableBytes(), is(22));
+        assertThat(((ByteBuf) out.get(5)).readableBytes(), is(12));
+    }
+    
+    @Test
+    void assertDecodeBatchMessageAfterRepeatedBatchCreate() {
+        ByteBuf in = Unpooled.wrappedUnmodifiableBuffer(buildBatchCreate(), buildMixedBatchCreate(), buildBatchMessage(BATCH_STATEMENT_HANDLE, 100),
+                createCommandPacket(FirebirdCommandPacketType.BATCH_EXEC, 12));
+        List<Object> out = new LinkedList<>();
+        codecEngine.decode(context, in, out);
+        assertThat(out.size(), is(4));
+        assertThat(((ByteBuf) out.get(2)).readableBytes(), is(20));
+        assertThat(((ByteBuf) out.get(3)).readableBytes(), is(12));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("closeBatchArguments")
+    void assertDecodeBlobStreamAfterBatchClosed(final String name, final ByteBuf closeBatch) {
+        ByteBuf in = Unpooled.wrappedUnmodifiableBuffer(buildBatchCreate(), buildBlobStream(32, buildBlobHeader(1L, 40, 0).writeZero(16)), closeBatch, buildBatchCreate(),
+                buildBlobStream(24, buildBlobHeader(2L, 8, 4).writeBytes(new byte[]{1, 3, 1, 0}).writeInt(2).writeZero(2)), createCommandPacket(FirebirdCommandPacketType.BATCH_EXEC, 12));
+        List<Object> out = new LinkedList<>();
+        codecEngine.decode(context, in, out);
+        assertThat(out.size(), is(6));
+        assertThat(((ByteBuf) out.get(4)).readableBytes(), is(38));
+        assertThat(((ByteBuf) out.get(5)).readableBytes(), is(12));
+    }
+    
+    private static Stream<Arguments> closeBatchArguments() {
+        return Stream.of(
+                Arguments.of("batch_release", Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_RLS.getValue()).writeInt(BATCH_STATEMENT_HANDLE)),
+                Arguments.of("free_statement_close", buildFreeStatement(FirebirdFreeStatementPacket.CLOSE)),
+                Arguments.of("free_statement_drop", buildFreeStatement(FirebirdFreeStatementPacket.DROP)),
+                Arguments.of("free_statement_unprepare", buildFreeStatement(FirebirdFreeStatementPacket.UNPREPARE)));
+    }
+    
+    private static ByteBuf buildFreeStatement(final int option) {
+        return Unpooled.buffer().writeInt(FirebirdCommandPacketType.FREE_STATEMENT.getValue()).writeInt(BATCH_STATEMENT_HANDLE).writeInt(option);
+    }
+    
+    private static ByteBuf buildSegmentedSetBpb() {
+        return Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_SET_BPB.getValue()).writeInt(BATCH_STATEMENT_HANDLE).writeInt(4).writeBytes(new byte[]{1, 3, 1, 0});
     }
     
     @ParameterizedTest(name = "{0}")
@@ -623,17 +695,26 @@ class FirebirdPacketCodecEngineTest {
     }
     
     private ByteBuf buildBatchCreate() {
+        return buildBatchCreate(new byte[0]);
+    }
+    
+    private ByteBuf buildBatchCreate(final byte[] batchParameters) {
         ByteBuf blr = Unpooled.buffer()
                 .writeByte(BlrConstants.blr_version5).writeByte(BlrConstants.blr_begin).writeByte(BlrConstants.blr_message).writeByte(0)
                 .writeShortLE(2).writeByte(BlrConstants.blr_long).writeByte(0).writeByte(BlrConstants.blr_short).writeByte(0)
                 .writeByte(BlrConstants.blr_end).writeByte(BlrConstants.blr_eoc);
-        return buildBatchCreate(blr, 6);
+        return buildBatchCreate(blr, 6, batchParameters);
     }
     
     private ByteBuf buildBatchCreate(final ByteBuf blr, final int messageLength) {
+        return buildBatchCreate(blr, messageLength, new byte[0]);
+    }
+    
+    private ByteBuf buildBatchCreate(final ByteBuf blr, final int messageLength, final byte[] batchParameters) {
         int blrLength = blr.readableBytes();
         return Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_CREATE.getValue()).writeInt(BATCH_STATEMENT_HANDLE)
-                .writeInt(blrLength).writeBytes(blr).writeZero((4 - blrLength % 4) % 4).writeInt(messageLength).writeInt(0);
+                .writeInt(blrLength).writeBytes(blr).writeZero((4 - blrLength % 4) % 4).writeInt(messageLength)
+                .writeInt(batchParameters.length).writeBytes(batchParameters).writeZero((4 - batchParameters.length % 4) % 4);
     }
     
     private ByteBuf buildMixedBatchCreate() {

@@ -31,18 +31,21 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.Fireb
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchBlobStream;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchBlobStreamCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchColumnDescriptor;
-import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchCreateCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchMessageCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdParseBatchBlr;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFreeStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 
 import java.nio.charset.Charset;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * Database packet codec for Firebird.
@@ -55,11 +58,17 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
     
     private static final int FREE_STATEMENT_REQUEST_PAYLOAD_LENGTH = MESSAGE_TYPE_LENGTH + 8;
     
+    private static final int BATCH_PARAMETERS_VERSION1 = 1;
+    
+    private static final int RELEASE_BATCH_FREE_STATEMENT_OPTIONS = FirebirdFreeStatementPacket.CLOSE | FirebirdFreeStatementPacket.DROP | FirebirdFreeStatementPacket.UNPREPARE;
+    
     private final List<ByteBuf> pendingMessages = new LinkedList<>();
     
     private final Map<Integer, List<FirebirdBatchColumnDescriptor>> deferredBatchFormats = new HashMap<>(1, 1F);
     
     private final Map<Integer, FirebirdBatchBlobStream> batchBlobStreams = new HashMap<>(1, 1F);
+    
+    private final Set<Integer> openBatchStatements = new HashSet<>(1, 1F);
     
     private FirebirdCommandPacketType pendingPacketType;
     
@@ -111,6 +120,9 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
     }
     
     private void handleMultiPacket(final ChannelHandlerContext context, final ByteBuf in, final List<Object> out, final int firstPacketLength) {
+        if (FirebirdCommandPacketType.FREE_STATEMENT == pendingPacketType) {
+            freeStatement(in);
+        }
         out.add(in.readRetainedSlice(firstPacketLength));
         if (in.readableBytes() > MESSAGE_TYPE_LENGTH) {
             decode(context, in, out);
@@ -162,10 +174,7 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
                 }
                 return;
             }
-            if (FirebirdCommandPacketType.BATCH_CREATE == commandType && buffer.readableBytes() > packetLength) {
-                rememberBatchFormat(buffer, packetLength, charset);
-            }
-            trackBatchBlobStream(buffer, commandType, packetLength, charset);
+            trackBatchState(buffer, commandType, packetLength, charset);
             pendingPacketType = null;
             out.add(buffer.readRetainedSlice(packetLength));
         }
@@ -223,19 +232,82 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
                 : null;
     }
     
-    private void rememberBatchFormat(final ByteBuf buffer, final int packetLength, final Charset charset) {
-        FirebirdBatchCreateCommandPacket packet = new FirebirdBatchCreateCommandPacket(
-                new FirebirdPacketPayload(buffer.slice(buffer.readerIndex(), packetLength), charset));
-        ByteBuf batchBlr = packet.getBatchBlr();
-        deferredBatchFormats.put(packet.getStatementHandle(), FirebirdParseBatchBlr.parse(batchBlr, batchBlr.readableBytes()).getFields());
-    }
-    
-    private void trackBatchBlobStream(final ByteBuf buffer, final FirebirdCommandPacketType commandType, final int packetLength, final Charset charset) {
+    private void trackBatchState(final ByteBuf buffer, final FirebirdCommandPacketType commandType, final int packetLength, final Charset charset) {
         if (FirebirdCommandPacketType.BATCH_CREATE == commandType) {
-            batchBlobStreams.put(buffer.getInt(buffer.readerIndex() + MESSAGE_TYPE_LENGTH), new FirebirdBatchBlobStream());
+            createBatch(new FirebirdPacketPayload(buffer.slice(buffer.readerIndex(), packetLength), charset));
         } else if (FirebirdCommandPacketType.BATCH_SET_BPB == commandType) {
             FirebirdBatchSetBpbCommandPacket packet = new FirebirdBatchSetBpbCommandPacket(new FirebirdPacketPayload(buffer.slice(buffer.readerIndex(), packetLength), charset));
             batchBlobStreams.computeIfAbsent(packet.getStatementHandle(), key -> new FirebirdBatchBlobStream()).setDefaultBpb(packet.getBpb());
+        } else if (FirebirdCommandPacketType.BATCH_RLS == commandType) {
+            openBatchStatements.remove(buffer.getInt(buffer.readerIndex() + MESSAGE_TYPE_LENGTH));
+        } else if (FirebirdCommandPacketType.FREE_STATEMENT == commandType) {
+            freeStatement(buffer);
+        }
+    }
+    
+    /**
+     * Track {@code op_batch_create} in the order of checks of Firebird {@code batch_create}.
+     *
+     * <p>Firebird rejects a batch of a statement with an open batch before it changes anything, and a missing or invalid message format,
+     * a message length different from it and a batch parameters block of another version before it resets the BLOB stream state;
+     * otherwise it resets the BLOB stream state, and the batch is open if the engine creates it, which requires message parameters.
+     * Batch messages are decoded with the message format of the statement, so the message format parsed from the BLR is used for the messages of the same read
+     * even if the batch is rejected for its message length or batch parameters block.
+     * Statement handle and the other items of the batch parameters block are not checked here: a batch rejected only for them is taken as open.</p>
+     *
+     * @param payload payload of {@code op_batch_create}
+     */
+    private void createBatch(final FirebirdPacketPayload payload) {
+        payload.skipReserved(MESSAGE_TYPE_LENGTH);
+        int statementHandle = payload.readInt4();
+        if (openBatchStatements.contains(statementHandle)) {
+            return;
+        }
+        ByteBuf batchBlr = payload.readBuffer();
+        long messageLength = payload.readInt4Unsigned();
+        ByteBuf batchParametersBuffer = payload.readBuffer();
+        Optional<FirebirdParseBatchBlr> messageFormat = findMessageFormat(batchBlr);
+        if (!messageFormat.isPresent()) {
+            return;
+        }
+        deferredBatchFormats.put(statementHandle, messageFormat.get().getFields());
+        if (messageLength != messageFormat.get().getMessageLength() || !isBatchParametersVersionAccepted(batchParametersBuffer)) {
+            return;
+        }
+        batchBlobStreams.put(statementHandle, new FirebirdBatchBlobStream());
+        if (!messageFormat.get().getFields().isEmpty()) {
+            openBatchStatements.add(statementHandle);
+        }
+    }
+    
+    private Optional<FirebirdParseBatchBlr> findMessageFormat(final ByteBuf batchBlr) {
+        if (!batchBlr.isReadable()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(FirebirdParseBatchBlr.parse(batchBlr, batchBlr.readableBytes()));
+        } catch (final IllegalArgumentException | IndexOutOfBoundsException ex) {
+            return Optional.empty();
+        }
+    }
+    
+    private boolean isBatchParametersVersionAccepted(final ByteBuf batchParametersBuffer) {
+        return !batchParametersBuffer.isReadable() || BATCH_PARAMETERS_VERSION1 == batchParametersBuffer.getByte(batchParametersBuffer.readerIndex());
+    }
+    
+    /**
+     * Track {@code op_free_statement}: Firebird releases the batch of the statement on close, drop and unprepare, and drops the statement with its BLOB stream state.
+     *
+     * @param buffer buffer starting at {@code op_free_statement}
+     */
+    private void freeStatement(final ByteBuf buffer) {
+        int statementHandle = buffer.getInt(buffer.readerIndex() + MESSAGE_TYPE_LENGTH);
+        int option = buffer.getInt(buffer.readerIndex() + MESSAGE_TYPE_LENGTH + 4);
+        if (0 != (option & RELEASE_BATCH_FREE_STATEMENT_OPTIONS)) {
+            openBatchStatements.remove(statementHandle);
+        }
+        if (0 != (option & FirebirdFreeStatementPacket.DROP)) {
+            batchBlobStreams.remove(statementHandle);
         }
     }
     
