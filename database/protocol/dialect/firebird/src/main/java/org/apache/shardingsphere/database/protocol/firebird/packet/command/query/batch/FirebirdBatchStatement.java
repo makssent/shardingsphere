@@ -32,6 +32,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSmallDataException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.firebirdsql.gds.ISCConstants;
 import org.firebirdsql.jaybird.fb.constants.BatchItems;
@@ -47,6 +48,7 @@ import java.util.Map;
 /**
  * Firebird batch statement metadata.
  */
+@HighFrequencyInvocation
 @RequiredArgsConstructor
 @Getter
 public final class FirebirdBatchStatement {
@@ -180,6 +182,7 @@ public final class FirebirdBatchStatement {
      */
     public Collection<FirebirdBatchStreamBlob> readStreamBlobs() {
         ByteBuf buffer = Unpooled.wrappedBuffer(blobBuffer.toArray(new byte[0][]));
+        boolean defaultSegmented = FirebirdBatchBlobStream.isSegmented(defaultBpb);
         Map<Long, FirebirdBatchStreamBlob> result = new LinkedHashMap<>();
         FirebirdBatchStreamBlob currentBlob = null;
         long blobRemaining = 0L;
@@ -205,7 +208,7 @@ public final class FirebirdBatchStatement {
             ShardingSpherePreconditions.checkState(bpbLength <= buffer.readableBytes(), () -> new BatchBpbTooBigException(bpbLength, buffer.readableBytes()));
             byte[] bpb = 0L == bpbLength ? defaultBpb : ByteBufUtil.getBytes(buffer.readSlice((int) bpbLength));
             blobRemaining = Integer.toUnsignedLong((int) (blobRemaining - bpbLength));
-            currentBlob = new FirebirdBatchStreamBlob(batchBlobId, bpb, FirebirdBatchBlobStream.isSegmented(bpb));
+            currentBlob = new FirebirdBatchStreamBlob(batchBlobId, bpb, 0L == bpbLength ? defaultSegmented : FirebirdBatchBlobStream.isSegmented(bpb));
             ShardingSpherePreconditions.checkState(!blobIds.containsKey(batchBlobId) && !streamBlobContents.containsKey(batchBlobId) && !result.containsKey(batchBlobId),
                     () -> new RepeatedBatchBlobIdException(batchBlobId));
             result.put(batchBlobId, currentBlob);
