@@ -23,6 +23,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchWithoutBlobsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterWriteNotSupportedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementStateException;
@@ -248,8 +249,9 @@ class FirebirdBatchStatementManagerTest {
         manager.setDefaultBpb(CONNECTION_ID, setBpbPacket);
         mockBlobStreamPacket(createBlobHeader(1L, 4, 0).writeInt(2).writeBytes(new byte[]{5, 6}), 20L);
         manager.appendBlobStream(CONNECTION_ID, blobStreamPacket);
+        manager.registerStreamBlobs(batchStatement, CONNECTION_ID, TRANSACTION_ID, 4);
         assertThat(batchStatement.getDefaultBpb(), is(new byte[]{1, 3, 1, 0}));
-        assertThat(batchStatement.readStreamBlobs().iterator().next().getData().toByteArray(), is(new byte[]{5, 6}));
+        assertThat(FirebirdBlobWriteCache.getInstance().useBlobData(CONNECTION_ID, 1L, TRANSACTION_ID).orElse(null), is(new byte[]{5, 6}));
     }
     
     @Test
@@ -304,6 +306,34 @@ class FirebirdBatchStatementManagerTest {
         FirebirdBatchStatement batchStatement = registerBlobBatchStatement(128L, true);
         batchStatement.appendBlobStream(batchStatement.readBlobStream(createBlobHeader(1L, 7, 7).writeBytes(new byte[]{1, 2, 1, 2, 3, 1, 1}), 24L));
         assertThrows(BlobFilterNotFoundException.class, () -> manager.registerStreamBlobs(batchStatement, CONNECTION_ID, TRANSACTION_ID, 4));
+        assertThat(FirebirdBlobIdGenerator.getInstance().nextBlobId(CONNECTION_ID, false), is(2L));
+    }
+    
+    @Test
+    void assertRegisterStreamBlobsWithMissingFilterBeforeRepeatedBlobId() {
+        FirebirdBatchStatement batchStatement = registerBlobBatchStatement(128L, true);
+        ByteBuf data = createBlobHeader(1L, 7, 7).writeBytes(new byte[]{1, 2, 1, 2, 3, 1, 1}).writeBytes(createBlobHeader(1L, 0, 0));
+        batchStatement.appendBlobStream(batchStatement.readBlobStream(data, 40L));
+        assertThrows(BlobFilterNotFoundException.class, () -> manager.registerStreamBlobs(batchStatement, CONNECTION_ID, TRANSACTION_ID, 4));
+    }
+    
+    @Test
+    void assertRegisterStreamBlobWithWriteNotSupportedFilterBpb() {
+        FirebirdBatchStatement batchStatement = registerBlobBatchStatement(128L, true);
+        batchStatement.appendBlobStream(batchStatement.readBlobStream(createBlobHeader(1L, 7, 7).writeBytes(new byte[]{1, 1, 1, 2, 2, 1, 1}), 24L));
+        assertThrows(BlobFilterWriteNotSupportedException.class, () -> manager.registerStreamBlobs(batchStatement, CONNECTION_ID, TRANSACTION_ID, 4));
+        assertThat(FirebirdBlobIdGenerator.getInstance().nextBlobId(CONNECTION_ID, false), is(3L));
+    }
+    
+    @Test
+    void assertRegisterStreamBlobsBeforeFailedBlob() {
+        FirebirdBatchStatement batchStatement = registerBlobBatchStatement(128L, true);
+        ByteBuf data = createBlobHeader(1L, 1, 0).writeByte(7).writeBytes(createBlobHeader(2L, 7, 7)).writeBytes(new byte[]{1, 2, 1, 2, 3, 1, 1});
+        batchStatement.appendBlobStream(batchStatement.readBlobStream(data, 44L));
+        assertThrows(BlobFilterNotFoundException.class, () -> manager.registerStreamBlobs(batchStatement, CONNECTION_ID, TRANSACTION_ID, 4));
+        assertThat(batchStatement.getBlobIds(), is(Collections.singletonMap(1L, 1L)));
+        assertThat(FirebirdBlobWriteCache.getInstance().useBlobData(CONNECTION_ID, 1L, TRANSACTION_ID).orElse(null), is(new byte[]{7}));
+        assertFalse(FirebirdBlobWriteCache.getInstance().isClosed(CONNECTION_ID, 2L));
     }
     
     private FirebirdBatchStatement registerBlobBatchStatement(final long bufferSize, final boolean blobStreamAllowed) {

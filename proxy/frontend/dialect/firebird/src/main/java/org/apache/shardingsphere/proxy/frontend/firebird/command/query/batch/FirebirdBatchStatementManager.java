@@ -20,6 +20,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch;
 import io.netty.buffer.ByteBufUtil;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobBufferFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBpbException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBpbTooBigException;
@@ -43,7 +44,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchRegistry;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStatement;
-import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStreamBlob;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStreamBlobWriter;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
@@ -52,6 +53,7 @@ import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cach
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobIdGenerator;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
 
+import java.io.ByteArrayOutputStream;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.UnaryOperator;
@@ -109,6 +111,7 @@ public final class FirebirdBatchStatementManager {
      * @param statementHandle statement handle
      * @throws InvalidStatementStateException if the statement handle is not allocated or the statement is not prepared
      */
+    @HighFrequencyInvocation
     public void checkStatement(final ConnectionSession connectionSession, final int statementHandle) {
         ShardingSpherePreconditions.checkState(FirebirdStatementIdGenerator.getInstance().isAllocated(connectionSession.getConnectionId(), statementHandle),
                 () -> new InvalidStatementStateException(statementHandle, false));
@@ -203,31 +206,27 @@ public final class FirebirdBatchStatementManager {
      * Create temporary BLOBs of the BLOB buffer in the transaction and register them under their batch BLOB IDs, as Firebird does before executing batch messages,
      * and clear the BLOB buffer.
      *
+     * <p>Like Firebird, each BLOB is created and its data is put through its BLOB filter while the BLOB buffer is read, so the first error of the BLOB buffer is reported.</p>
+     *
      * @param batchStatement batch statement
      * @param connectionId connection ID
      * @param transactionId transaction ID of the batch execution
      * @param connectionCharsetId character set ID of the connection
      * @throws BatchSmallDataException if a BLOB header is incomplete
-     * @throws BatchBlobBufferFormatException if a continuation has no BLOB to continue
      * @throws BatchBlobContinuationBpbException if a BLOB continuation contains a BLOB parameter buffer
+     * @throws BatchBlobBufferFormatException if a continuation has no BLOB to continue
      * @throws BatchBpbTooBigException if a BLOB parameter buffer is incomplete
-     * @throws RepeatedBatchBlobIdException if batch BLOB ID is already registered
-     * @throws BatchSegmentExceedsBlobException if a BLOB segment exceeds its BLOB
-     * @throws BatchSegmentTooBigException if a BLOB segment is incomplete
      * @throws BlobFilterNotFoundException if Firebird has no BLOB filter for the sub type conversion of a BLOB parameter buffer
      * @throws BlobFilterWriteNotSupportedException if a BLOB parameter buffer requires an internal BLOB filter that does not support writing
      * @throws UnsupportedBlobFilterException if a BLOB parameter buffer requires an unsupported BLOB filter conversion
+     * @throws RepeatedBatchBlobIdException if batch BLOB ID is already registered
+     * @throws BatchSegmentExceedsBlobException if a BLOB segment exceeds its BLOB
+     * @throws BatchSegmentTooBigException if a BLOB segment is incomplete
      * @throws TransliterationFailedException if BLOB data cannot be transliterated as its BLOB parameter buffer requires
      */
     @HighFrequencyInvocation
     void registerStreamBlobs(final FirebirdBatchStatement batchStatement, final int connectionId, final int transactionId, final int connectionCharsetId) {
-        for (FirebirdBatchStreamBlob each : batchStatement.readStreamBlobs()) {
-            byte[] data = each.getData().toByteArray();
-            Optional<UnaryOperator<byte[]>> blobFilter = FirebirdBlobParameterBufferUtils.findBlobFilter(each.getBpb(), connectionCharsetId);
-            long blobId = FirebirdBlobIdGenerator.getInstance().nextBlobId(connectionId, blobFilter.isPresent());
-            FirebirdBlobWriteCache.getInstance().registerClosedBlob(connectionId, blobId, transactionId, !each.isSegmented(), blobFilter.map(filter -> filter.apply(data)).orElse(data));
-            batchStatement.getBlobIds().put(each.getBatchBlobId(), blobId);
-        }
+        batchStatement.writeStreamBlobs(new TemporaryBlobWriter(connectionId, transactionId, connectionCharsetId));
         batchStatement.clearBlobStream();
     }
     
@@ -248,5 +247,60 @@ public final class FirebirdBatchStatementManager {
      */
     public void unregisterBatchStatement(final int connectionId, final int statementId) {
         FirebirdBatchRegistry.getInstance().unregisterBatchStatement(connectionId, statementId);
+    }
+    
+    /**
+     * Writer of the temporary BLOBs that Firebird creates in the transaction of the batch execution from the BLOB buffer.
+     *
+     * <p>Firebird takes a temporary BLOB ID before it looks for the BLOB filter and another one for the BLOB under the filter ({@code blb::create2}),
+     * so a BLOB without BLOB filter for its conversion takes one ID and a BLOB whose filter cannot write takes two.</p>
+     */
+    @HighFrequencyInvocation
+    @RequiredArgsConstructor
+    private static final class TemporaryBlobWriter implements FirebirdBatchStreamBlobWriter {
+        
+        private final int connectionId;
+        
+        private final int transactionId;
+        
+        private final int connectionCharsetId;
+        
+        private final ByteArrayOutputStream data = new ByteArrayOutputStream();
+        
+        private UnaryOperator<byte[]> blobFilter;
+        
+        private long blobId;
+        
+        private boolean streamBlob;
+        
+        @Override
+        public long create(final byte[] bpb, final boolean segmented) {
+            Optional<UnaryOperator<byte[]>> foundBlobFilter;
+            try {
+                foundBlobFilter = FirebirdBlobParameterBufferUtils.findBlobFilter(bpb, connectionCharsetId);
+            } catch (final BlobFilterNotFoundException ex) {
+                FirebirdBlobIdGenerator.getInstance().nextBlobId(connectionId, false);
+                throw ex;
+            } catch (final BlobFilterWriteNotSupportedException | UnsupportedBlobFilterException ex) {
+                FirebirdBlobIdGenerator.getInstance().nextBlobId(connectionId, true);
+                throw ex;
+            }
+            blobFilter = foundBlobFilter.orElse(UnaryOperator.identity());
+            blobId = FirebirdBlobIdGenerator.getInstance().nextBlobId(connectionId, foundBlobFilter.isPresent());
+            streamBlob = !segmented;
+            data.reset();
+            return blobId;
+        }
+        
+        @Override
+        public void put(final byte[] bytes) {
+            byte[] filtered = blobFilter.apply(bytes);
+            data.write(filtered, 0, filtered.length);
+        }
+        
+        @Override
+        public void close() {
+            FirebirdBlobWriteCache.getInstance().registerClosedBlob(connectionId, blobId, transactionId, streamBlob, data.toByteArray());
+        }
     }
 }

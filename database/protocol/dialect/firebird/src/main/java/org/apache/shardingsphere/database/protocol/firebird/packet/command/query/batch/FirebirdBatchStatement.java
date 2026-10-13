@@ -43,7 +43,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -173,13 +172,15 @@ public final class FirebirdBatchStatement {
     }
     
     /**
-     * Read BLOBs from the BLOB buffer as Firebird does before executing batch messages.
+     * Write BLOBs of the BLOB buffer as Firebird creates them before executing batch messages and register them under their batch BLOB IDs.
      *
      * <p>The BLOB buffer is read from its start regardless of the BLOB stream state, which cancelling the batch keeps inside a cancelled BLOB.
+     * Like Firebird, each BLOB is created right after its header and BLOB parameter buffer and registered under its batch BLOB ID before its data is put,
+     * so an error of a BLOB comes before the errors of the BLOB buffer after it.
      * A BLOB header with batch BLOB ID zero continues the previous BLOB in its segmentation mode; without a previous BLOB Firebird skips such a header of size zero.
      * Lengths are unsigned 32-bit numbers, so a BLOB parameter buffer longer than its BLOB makes the BLOB take the rest of the BLOB buffer.</p>
      *
-     * @return BLOBs in the order of the BLOB buffer
+     * @param writer writer of the BLOBs
      * @throws BatchSmallDataException if a BLOB header is incomplete
      * @throws BatchBlobBufferFormatException if a continuation with data has no BLOB to continue
      * @throws BatchBlobContinuationBpbException if a BLOB continuation contains a BLOB parameter buffer
@@ -190,15 +191,15 @@ public final class FirebirdBatchStatement {
      * @throws BatchSegmentExceedsBlobException if a BLOB segment exceeds its BLOB
      * @throws BatchSegmentTooBigException if a BLOB segment is incomplete
      */
-    public Collection<FirebirdBatchStreamBlob> readStreamBlobs() {
+    public void writeStreamBlobs(final FirebirdBatchStreamBlobWriter writer) {
         ByteBuf buffer = Unpooled.wrappedBuffer(blobBuffer.toArray(new byte[0][]));
         boolean defaultSegmented = FirebirdBatchBlobStream.isSegmented(defaultBpb);
-        Map<Long, FirebirdBatchStreamBlob> result = new LinkedHashMap<>();
-        FirebirdBatchStreamBlob currentBlob = null;
+        boolean blobCreated = false;
+        boolean segmented = false;
         long blobRemaining = 0L;
         while (buffer.isReadable()) {
             if (0L != blobRemaining) {
-                blobRemaining = Integer.toUnsignedLong((int) (blobRemaining - readBlobData(buffer, currentBlob, blobRemaining)));
+                blobRemaining = Integer.toUnsignedLong((int) (blobRemaining - writeBlobData(buffer, writer, segmented, blobRemaining)));
                 continue;
             }
             int padding = FirebirdBatchBlobStream.getPadding(buffer.readerIndex(), FirebirdBatchBlobStream.ALIGNMENT);
@@ -212,22 +213,28 @@ public final class FirebirdBatchStatement {
             long bpbLength = buffer.readUnsignedIntLE();
             if (0L == batchBlobId) {
                 ShardingSpherePreconditions.checkState(0L == bpbLength, () -> new BatchBlobContinuationBpbException(bpbLength));
-                ShardingSpherePreconditions.checkState(null != currentBlob || 0L == blobRemaining, () -> new BatchBlobBufferFormatException(statementHandle));
+                ShardingSpherePreconditions.checkState(blobCreated || 0L == blobRemaining, () -> new BatchBlobBufferFormatException(statementHandle));
                 continue;
             }
             ShardingSpherePreconditions.checkState(bpbLength <= buffer.readableBytes(), () -> new BatchBpbTooBigException(bpbLength, buffer.readableBytes()));
             byte[] bpb = 0L == bpbLength ? defaultBpb : ByteBufUtil.getBytes(buffer.readSlice((int) bpbLength));
             blobRemaining = Integer.toUnsignedLong((int) (blobRemaining - bpbLength));
-            currentBlob = new FirebirdBatchStreamBlob(batchBlobId, bpb, 0L == bpbLength ? defaultSegmented : FirebirdBatchBlobStream.isSegmented(bpb));
-            ShardingSpherePreconditions.checkState(!blobIds.containsKey(batchBlobId) && !result.containsKey(batchBlobId), () -> new RepeatedBatchBlobIdException(batchBlobId));
-            result.put(batchBlobId, currentBlob);
+            segmented = 0L == bpbLength ? defaultSegmented : FirebirdBatchBlobStream.isSegmented(bpb);
+            if (blobCreated) {
+                writer.close();
+            }
+            long blobId = writer.create(bpb, segmented);
+            blobCreated = true;
+            ShardingSpherePreconditions.checkState(null == blobIds.putIfAbsent(batchBlobId, blobId), () -> new RepeatedBatchBlobIdException(batchBlobId));
         }
-        return result.values();
+        if (blobCreated) {
+            writer.close();
+        }
     }
     
-    private int readBlobData(final ByteBuf buffer, final FirebirdBatchStreamBlob blob, final long blobRemaining) {
-        if (!blob.isSegmented()) {
-            return readBytes(buffer, blob, (int) Math.min(blobRemaining, buffer.readableBytes()));
+    private int writeBlobData(final ByteBuf buffer, final FirebirdBatchStreamBlobWriter writer, final boolean segmented, final long blobRemaining) {
+        if (!segmented) {
+            return writeBytes(buffer, writer, (int) Math.min(blobRemaining, buffer.readableBytes()));
         }
         int padding = FirebirdBatchBlobStream.getPadding(buffer.readerIndex(), FirebirdBatchBlobStream.SEGMENT_ALIGNMENT);
         if (padding > 0) {
@@ -238,11 +245,13 @@ public final class FirebirdBatchStatement {
         long segmentBlobRemaining = Integer.toUnsignedLong((int) blobRemaining - FirebirdBatchBlobStream.SEGMENT_LENGTH_SIZE);
         ShardingSpherePreconditions.checkState(segmentLength <= segmentBlobRemaining, () -> new BatchSegmentExceedsBlobException(segmentLength, (int) segmentBlobRemaining));
         ShardingSpherePreconditions.checkState(segmentLength <= buffer.readableBytes(), () -> new BatchSegmentTooBigException(segmentLength, buffer.readableBytes()));
-        return FirebirdBatchBlobStream.SEGMENT_LENGTH_SIZE + readBytes(buffer, blob, segmentLength);
+        return FirebirdBatchBlobStream.SEGMENT_LENGTH_SIZE + writeBytes(buffer, writer, segmentLength);
     }
     
-    private int readBytes(final ByteBuf buffer, final FirebirdBatchStreamBlob blob, final int length) {
-        blob.appendData(ByteBufUtil.getBytes(buffer.readSlice(length)));
+    private int writeBytes(final ByteBuf buffer, final FirebirdBatchStreamBlobWriter writer, final int length) {
+        if (length > 0) {
+            writer.put(ByteBufUtil.getBytes(buffer.readSlice(length)));
+        }
         return length;
     }
     
