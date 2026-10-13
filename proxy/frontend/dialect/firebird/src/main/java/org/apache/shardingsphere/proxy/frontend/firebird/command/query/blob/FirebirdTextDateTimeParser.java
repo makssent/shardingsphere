@@ -52,7 +52,8 @@ import java.util.Set;
  * chosen by the text, then hours, minutes, seconds and fractions of a second) separated by white space, date separators and time separators, English month names,
  * the words {@code NOW}, {@code TODAY}, {@code TOMORROW} and {@code YESTERDAY}, and a time zone after the time parsed as {@code TimeZoneUtil::parse} does.
  * The zone of the clock is the session time zone: a value without time zone is converted to it, and a value with time zone without a zone in the text gets it.
- * A time zone region is a name of the backend driver time zone mapping in any case or a short identifier of {@link ZoneId#SHORT_IDS}.</p>
+ * A time zone region is a name of the backend driver time zone mapping in any case, a short identifier of {@link ZoneId#SHORT_IDS} or a Firebird time zone name
+ * that the backend driver maps to another name, which takes the Java zone of the same name or else the zone of its Firebird time zone ID in the backend driver.</p>
  */
 @HighFrequencyInvocation
 @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
@@ -118,6 +119,8 @@ final class FirebirdTextDateTimeParser {
     
     private static final LocalDate TIME_BASE_DATE = LocalDate.of(2020, 1, 1);
     
+    private static final Map<String, Integer> UNMAPPED_TIME_ZONE_IDS = createUnmappedTimeZoneIds();
+    
     private static final Map<String, ZoneId> TIME_ZONE_REGIONS = createTimeZoneRegions();
     
     private final String text;
@@ -138,18 +141,34 @@ final class FirebirdTextDateTimeParser {
     
     private boolean englishMonth;
     
+    private static Map<String, Integer> createUnmappedTimeZoneIds() {
+        Map<String, Integer> result = new HashMap<>(7, 1F);
+        result.put("CANADA/EAST-SASKATCHEWAN", 65149);
+        result.put("FACTORY", 65034);
+        result.put("GMT+0", 65031);
+        result.put("GMT-0", 65030);
+        result.put("ROC", 64941);
+        result.put("US/PACIFIC-NEW", 64911);
+        result.put("AMERICA/COYHAIQUE", 64898);
+        return result;
+    }
+    
     private static Map<String, ZoneId> createTimeZoneRegions() {
         Set<String> zoneIds = ZoneId.getAvailableZoneIds();
-        Map<String, ZoneId> result = new HashMap<>(zoneIds.size() + ZoneId.SHORT_IDS.size(), 1F);
+        Map<String, ZoneId> result = new HashMap<>(zoneIds.size() + ZoneId.SHORT_IDS.size() + UNMAPPED_TIME_ZONE_IDS.size(), 1F);
         TimeZoneMapping timeZoneMapping = TimeZoneMapping.getInstance();
         for (String each : zoneIds) {
             ZoneId zoneId = ZoneId.of(each);
-            if (!timeZoneMapping.isOffsetTimeZone(timeZoneMapping.toTimeZoneId(zoneId))) {
-                result.put(each.toUpperCase(Locale.ROOT), zoneId);
+            String name = each.toUpperCase(Locale.ROOT);
+            if (UNMAPPED_TIME_ZONE_IDS.containsKey(name) || !timeZoneMapping.isOffsetTimeZone(timeZoneMapping.toTimeZoneId(zoneId))) {
+                result.put(name, zoneId);
             }
         }
         for (Entry<String, String> each : ZoneId.SHORT_IDS.entrySet()) {
             result.putIfAbsent(each.getKey(), ZoneId.of(each.getValue()));
+        }
+        for (Entry<String, Integer> each : UNMAPPED_TIME_ZONE_IDS.entrySet()) {
+            result.putIfAbsent(each.getKey(), timeZoneMapping.timeZoneById(each.getValue()));
         }
         return result;
     }

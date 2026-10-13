@@ -261,6 +261,11 @@ class FirebirdTextDateTimeParserTest {
                 Arguments.of("date_with_time_zone_region", "2026-10-05 Europe/Berlin", LocalDateTime.of(2026, 10, 5, 1, 0)),
                 Arguments.of("date_with_time_zone_offset", "2026-10-05 +00:00", LocalDateTime.of(2026, 10, 5, 3, 0)),
                 Arguments.of("time_zone_offset", "2026-10-05 12:00 +14:00", LocalDateTime.of(2026, 10, 5, 1, 0)),
+                Arguments.of("unmapped_time_zone_region", "2026-10-05 12:00 Factory", LocalDateTime.of(2026, 10, 5, 15, 0)),
+                Arguments.of("unmapped_time_zone_region_in_lower_case", "2026-10-05 12:00 roc", LocalDateTime.of(2026, 10, 5, 7, 0)),
+                Arguments.of("unmapped_time_zone_region_with_offset_sign", "2026-10-05 12:00 GMT-0", LocalDateTime.of(2026, 10, 5, 15, 0)),
+                Arguments.of("unmapped_time_zone_region_of_removed_java_zone", "2026-10-05 12:00 US/Pacific-New", LocalDateTime.of(2026, 10, 5, 22, 0)),
+                Arguments.of("unmapped_time_zone_region_of_java_zone", "2026-10-05 12:00 America/Coyhaique", LocalDateTime.of(2026, 10, 5, 18, 0)),
                 Arguments.of("last_timestamp", "9999-12-31 23:59:59.9999", LocalDateTime.of(9999, 12, 31, 23, 59, 59, 999_900_000)),
                 Arguments.of("yesterday", "YESTERDAY", LocalDateTime.of(2026, 10, 11, 0, 0)),
                 Arguments.of("now", "now", LocalDateTime.of(2026, 10, 12, 13, 15, 30, 123_000_000)));
