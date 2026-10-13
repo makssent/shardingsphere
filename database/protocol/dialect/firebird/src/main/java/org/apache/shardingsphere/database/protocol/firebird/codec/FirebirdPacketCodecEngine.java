@@ -38,6 +38,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
+import org.firebirdsql.jaybird.fb.constants.BatchItems;
 
 import java.nio.charset.Charset;
 import java.util.HashMap;
@@ -58,8 +59,6 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
     private static final int ALLOCATE_STATEMENT_REQUEST_PAYLOAD_LENGTH = MESSAGE_TYPE_LENGTH + 4;
     
     private static final int FREE_STATEMENT_REQUEST_PAYLOAD_LENGTH = MESSAGE_TYPE_LENGTH + 8;
-    
-    private static final int BATCH_PARAMETERS_VERSION1 = 1;
     
     private static final int RELEASE_BATCH_FREE_STATEMENT_OPTIONS = FirebirdFreeStatementPacket.CLOSE | FirebirdFreeStatementPacket.DROP | FirebirdFreeStatementPacket.UNPREPARE;
     
@@ -285,9 +284,6 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
     }
     
     private Optional<FirebirdParseBatchBlr> findMessageFormat(final ByteBuf batchBlr) {
-        if (!batchBlr.isReadable()) {
-            return Optional.empty();
-        }
         try {
             return Optional.of(FirebirdParseBatchBlr.parse(batchBlr, batchBlr.readableBytes()));
         } catch (final IllegalArgumentException | IndexOutOfBoundsException ex) {
@@ -296,7 +292,7 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
     }
     
     private boolean isBatchParametersVersionAccepted(final ByteBuf batchParametersBuffer) {
-        return !batchParametersBuffer.isReadable() || BATCH_PARAMETERS_VERSION1 == batchParametersBuffer.getByte(batchParametersBuffer.readerIndex());
+        return !batchParametersBuffer.isReadable() || BatchItems.BATCH_VERSION_1 == batchParametersBuffer.getByte(batchParametersBuffer.readerIndex());
     }
     
     /**

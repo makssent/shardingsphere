@@ -73,8 +73,6 @@ class FirebirdBlobParameterBufferUtilsTest {
     
     private static Stream<Arguments> unchangedDataArguments() {
         return Stream.of(
-                Arguments.of("empty_bpb", new byte[0], 4),
-                Arguments.of("unknown_version", new byte[]{2, 2, 1, 1, 4, 1, 4, 5, 1, 53}, 4),
                 Arguments.of("blob_type_only", new byte[]{1, 3, 1, 1}, 4),
                 Arguments.of("untyped_to_text", new byte[]{1, 2, 1, 1}, 4),
                 Arguments.of("text_to_binary_charset", new byte[]{1, 1, 1, 2, 2, 1, 1, 5, 1, 1}, 4),

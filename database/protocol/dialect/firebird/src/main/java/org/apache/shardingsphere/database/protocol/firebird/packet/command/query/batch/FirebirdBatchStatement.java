@@ -20,10 +20,10 @@ package org.apache.shardingsphere.database.protocol.firebird.packet.command.quer
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
-import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobBufferFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBpbException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBpbTooBigException;
@@ -31,6 +31,8 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSmallDataException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
@@ -83,6 +85,7 @@ public final class FirebirdBatchStatement {
     
     private long blobStreamSize;
     
+    @Getter(AccessLevel.NONE)
     private long generatedBlobId;
     
     @Setter
@@ -123,12 +126,12 @@ public final class FirebirdBatchStatement {
     }
     
     /**
-     * Get batch BLOB ID of a registered BLOB: Firebird generates the next batch BLOB ID of the batch for BLOB policy ID_ENGINE and ignores the batch BLOB ID of the client.
+     * Assign batch BLOB ID to a registered BLOB: Firebird generates the next batch BLOB ID of the batch for BLOB policy ID_ENGINE and ignores the batch BLOB ID of the client.
      *
      * @param clientBatchBlobId batch BLOB ID sent by the client
      * @return batch BLOB ID under which the BLOB is registered
      */
-    public long getRegisteredBatchBlobId(final long clientBatchBlobId) {
+    public long assignBatchBlobId(final long clientBatchBlobId) {
         return BatchItems.BLOB_ID_ENGINE == blobPolicy ? ++generatedBlobId : clientBatchBlobId;
     }
     
@@ -175,7 +178,8 @@ public final class FirebirdBatchStatement {
      * @throws BatchBlobBufferFormatException if a continuation with data has no BLOB to continue
      * @throws BatchBlobContinuationBpbException if a BLOB continuation contains a BLOB parameter buffer
      * @throws BatchBpbTooBigException if a BLOB parameter buffer is incomplete
-     * @throws DatabaseProtocolException if a BLOB parameter buffer is invalid
+     * @throws InvalidClumpletStructureException if a BLOB parameter buffer has an invalid clumplet structure
+     * @throws InvalidBpbVersionException if a BLOB parameter buffer has an unsupported version
      * @throws RepeatedBatchBlobIdException if batch BLOB ID is already registered
      * @throws BatchSegmentExceedsBlobException if a BLOB segment exceeds its BLOB
      * @throws BatchSegmentTooBigException if a BLOB segment is incomplete

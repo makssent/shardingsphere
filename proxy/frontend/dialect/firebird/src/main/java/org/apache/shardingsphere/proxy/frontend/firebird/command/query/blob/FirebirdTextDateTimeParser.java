@@ -237,38 +237,6 @@ final class FirebirdTextDateTimeParser {
         return zone.equals(clock.getZone()) ? result : toSessionTimeZone(result, zone);
     }
     
-    private LocalDateTime getSpecialLocalDateTime(final String word) {
-        LocalDateTime now = LocalDateTime.now(clock).truncatedTo(ChronoUnit.MILLIS);
-        return NOW.equals(word) ? now : getSpecialDate(word, now.toLocalDate()).atStartOfDay();
-    }
-    
-    private LocalDateTime toSessionTimeZone(final LocalDateTime localDateTime, final ZoneId zone) {
-        if (DateTimeType.TIME == type) {
-            LocalTime time = ZonedDateTime.of(LocalDate.now(clock), localDateTime.toLocalTime(), zone).withZoneSameInstant(clock.getZone()).toLocalTime();
-            return LocalDateTime.of(localDateTime.toLocalDate(), time);
-        }
-        return ZonedDateTime.of(localDateTime, zone).withZoneSameInstant(clock.getZone()).toLocalDateTime();
-    }
-    
-    private ZonedDateTime parseZonedDateTime() {
-        Optional<String> specialWord = parseComponents();
-        if (specialWord.isPresent()) {
-            return getSpecialZonedDateTime(specialWord.get());
-        }
-        ZoneId zone = parseTimeZone();
-        return ZonedDateTime.of(createLocalDateTime(), zone);
-    }
-    
-    private ZonedDateTime getSpecialZonedDateTime(final String word) {
-        Instant now = clock.instant().truncatedTo(ChronoUnit.MILLIS);
-        if (NOW.equals(word)) {
-            return DateTimeType.TIME_WITH_TIME_ZONE == type
-                    ? ZonedDateTime.of(TIME_BASE_DATE, now.atZone(clock.getZone()).toLocalTime(), clock.getZone())
-                    : ZonedDateTime.ofInstant(now, clock.getZone());
-        }
-        return getSpecialDate(word, now.atOffset(ZoneOffset.UTC).toLocalDate()).atStartOfDay(ZoneOffset.UTC).withZoneSameInstant(clock.getZone());
-    }
-    
     private Optional<String> parseComponents() {
         index = type.getStartComponent();
         while (index < COMPONENT_COUNT) {
@@ -301,6 +269,40 @@ final class FirebirdTextDateTimeParser {
         }
         ShardingSpherePreconditions.checkState(index - type.getStartComponent() >= 1 && (DateTimeType.DATE != type || index <= THIRD_DATE_COMPONENT), this::createConversionError);
         return Optional.empty();
+    }
+    
+    private LocalDateTime getSpecialLocalDateTime(final String word) {
+        LocalDateTime now = LocalDateTime.now(clock).truncatedTo(ChronoUnit.MILLIS);
+        return NOW.equals(word) ? now : getSpecialDate(word, now.toLocalDate()).atStartOfDay();
+    }
+    
+    private ZoneId parseTimeZone() {
+        position = skipBlanks(position);
+        if (text.length() == position) {
+            return clock.getZone();
+        }
+        char sign = text.charAt(position);
+        return '-' == sign || '+' == sign ? parseTimeZoneOffset(position) : parseTimeZoneRegion(position);
+    }
+    
+    private LocalDateTime createLocalDateTime() {
+        LocalDate date = type.isTime() ? getTimeBaseDate() : createDate();
+        if (index <= THIRD_DATE_COMPONENT) {
+            return date.atStartOfDay();
+        }
+        int fraction = components[FRACTION_COMPONENT];
+        for (int i = descriptions[FRACTION_COMPONENT]; i < FRACTION_DIGITS; i++) {
+            fraction *= 10;
+        }
+        return LocalDateTime.of(date, LocalTime.of(components[HOUR_COMPONENT], components[MINUTE_COMPONENT], components[SECOND_COMPONENT], fraction * NANOS_PER_FRACTION));
+    }
+    
+    private LocalDateTime toSessionTimeZone(final LocalDateTime localDateTime, final ZoneId zone) {
+        if (DateTimeType.TIME == type) {
+            LocalTime time = ZonedDateTime.of(LocalDate.now(clock), localDateTime.toLocalTime(), zone).withZoneSameInstant(clock.getZone()).toLocalTime();
+            return LocalDateTime.of(localDateTime.toLocalDate(), time);
+        }
+        return ZonedDateTime.of(localDateTime, zone).withZoneSameInstant(clock.getZone()).toLocalDateTime();
     }
     
     private String parseWord() {
@@ -400,15 +402,6 @@ final class FirebirdTextDateTimeParser {
         return today.minusDays(1L);
     }
     
-    private ZoneId parseTimeZone() {
-        position = skipBlanks(position);
-        if (text.length() == position) {
-            return clock.getZone();
-        }
-        char sign = text.charAt(position);
-        return '-' == sign || '+' == sign ? parseTimeZoneOffset(position) : parseTimeZoneRegion(position);
-    }
-    
     private ZoneOffset parseTimeZoneOffset(final int start) {
         int sign = '-' == text.charAt(start) ? -1 : 1;
         position = skipBlanks(start + 1);
@@ -444,18 +437,6 @@ final class FirebirdTextDateTimeParser {
     
     private boolean isTimeZoneRegionCharacter(final char value, final boolean first) {
         return value >= 'a' && value <= 'z' || isLetter(value) || '_' == value || '/' == value || !first && (isDigit(value) || '+' == value || '-' == value);
-    }
-    
-    private LocalDateTime createLocalDateTime() {
-        LocalDate date = type.isTime() ? getTimeBaseDate() : createDate();
-        if (index <= THIRD_DATE_COMPONENT) {
-            return date.atStartOfDay();
-        }
-        int fraction = components[FRACTION_COMPONENT];
-        for (int i = descriptions[FRACTION_COMPONENT]; i < FRACTION_DIGITS; i++) {
-            fraction *= 10;
-        }
-        return LocalDateTime.of(date, LocalTime.of(components[HOUR_COMPONENT], components[MINUTE_COMPONENT], components[SECOND_COMPONENT], fraction * NANOS_PER_FRACTION));
     }
     
     private LocalDate getTimeBaseDate() {
@@ -518,6 +499,25 @@ final class FirebirdTextDateTimeParser {
         return components[HOUR_COMPONENT] <= MAX_HOURS && components[MINUTE_COMPONENT] <= MAX_MINUTES && components[SECOND_COMPONENT] <= MAX_SECONDS
                 && descriptions[HOUR_COMPONENT] <= MAX_FIELD_DIGITS && 0 != descriptions[HOUR_COMPONENT] && descriptions[MINUTE_COMPONENT] <= MAX_FIELD_DIGITS
                 && 0 != descriptions[MINUTE_COMPONENT] && descriptions[SECOND_COMPONENT] <= MAX_FIELD_DIGITS && descriptions[FRACTION_COMPONENT] <= FRACTION_DIGITS;
+    }
+    
+    private ZonedDateTime parseZonedDateTime() {
+        Optional<String> specialWord = parseComponents();
+        if (specialWord.isPresent()) {
+            return getSpecialZonedDateTime(specialWord.get());
+        }
+        ZoneId zone = parseTimeZone();
+        return ZonedDateTime.of(createLocalDateTime(), zone);
+    }
+    
+    private ZonedDateTime getSpecialZonedDateTime(final String word) {
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MILLIS);
+        if (NOW.equals(word)) {
+            return DateTimeType.TIME_WITH_TIME_ZONE == type
+                    ? ZonedDateTime.of(TIME_BASE_DATE, now.atZone(clock.getZone()).toLocalTime(), clock.getZone())
+                    : ZonedDateTime.ofInstant(now, clock.getZone());
+        }
+        return getSpecialDate(word, now.atOffset(ZoneOffset.UTC).toLocalDate()).atStartOfDay(ZoneOffset.UTC).withZoneSameInstant(clock.getZone());
     }
     
     private int skipBlanks(final int start) {

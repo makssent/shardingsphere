@@ -95,18 +95,18 @@ class FirebirdBatchStatementTest {
     }
     
     @Test
-    void assertGetRegisteredBatchBlobIdWithEngineBlobPolicy() {
+    void assertAssignBatchBlobIdWithEngineBlobPolicy() {
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 0, 0, BUFFER_SIZE, false, false, BatchItems.BLOB_ID_ENGINE);
-        assertThat(batchStatement.getRegisteredBatchBlobId(7L), is(1L));
-        assertThat(batchStatement.getRegisteredBatchBlobId(7L), is(2L));
+        assertThat(batchStatement.assignBatchBlobId(7L), is(1L));
+        assertThat(batchStatement.assignBatchBlobId(7L), is(2L));
         batchStatement.reset();
-        assertThat(batchStatement.getRegisteredBatchBlobId(8L), is(1L));
+        assertThat(batchStatement.assignBatchBlobId(8L), is(1L));
     }
     
     @Test
-    void assertGetRegisteredBatchBlobIdWithUserBlobPolicy() {
+    void assertAssignBatchBlobIdWithUserBlobPolicy() {
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 0, 0, BUFFER_SIZE, false, false, BatchItems.BLOB_ID_USER);
-        assertThat(batchStatement.getRegisteredBatchBlobId(7L), is(7L));
+        assertThat(batchStatement.assignBatchBlobId(7L), is(7L));
     }
     
     @Test

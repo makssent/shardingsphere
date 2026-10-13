@@ -17,6 +17,7 @@
 
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache;
 
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
@@ -40,7 +41,7 @@ public final class FirebirdBlobWrite {
     @Getter
     private final long blobId;
     
-    @Getter
+    @Getter(AccessLevel.PACKAGE)
     private final int transactionId;
     
     @Getter
@@ -118,11 +119,12 @@ public final class FirebirdBlobWrite {
      */
     @HighFrequencyInvocation
     void markUsed(final FirebirdBlobTempSpace tempSpace) {
-        if (null != content) {
-            tempSpaceOffset = tempSpace.write(content);
-            this.tempSpace = tempSpace;
-            usedContent = new SoftReference<>(content);
-            content = null;
+        if (null == content) {
+            return;
         }
+        tempSpaceOffset = tempSpace.write(content);
+        this.tempSpace = tempSpace;
+        usedContent = new SoftReference<>(content);
+        content = null;
     }
 }
