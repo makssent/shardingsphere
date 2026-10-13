@@ -30,6 +30,7 @@ import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobReadCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobHandleGenerator;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobIdGenerator;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -58,6 +59,7 @@ public final class FirebirdOpenBlobCommandExecutor implements CommandExecutor {
     @Override
     public Collection<DatabasePacket> execute() {
         long blobId = packet.getBlobId();
+        FirebirdBlobIdGenerator.getInstance().nextBlobId(connectionSession.getConnectionId(), false);
         byte[] blobContent = getBlobContent(blobId);
         int blobHandle = FirebirdBlobHandleGenerator.getInstance().nextBlobHandle(connectionSession.getConnectionId());
         FirebirdBlobReadCache.getInstance().registerBlob(connectionSession.getConnectionId(), blobHandle, blobContent, isStreamBlob(blobId));

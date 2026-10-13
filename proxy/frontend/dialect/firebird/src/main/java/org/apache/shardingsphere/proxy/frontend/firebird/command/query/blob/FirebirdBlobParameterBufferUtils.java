@@ -31,6 +31,7 @@ import org.firebirdsql.gds.ISCConstants;
 
 import java.nio.charset.Charset;
 import java.util.Optional;
+import java.util.function.UnaryOperator;
 
 /**
  * BLOB parameter buffer utility class for Firebird.
@@ -48,35 +49,35 @@ public final class FirebirdBlobParameterBufferUtils {
     private static final byte[] NO_DATA = new byte[0];
     
     /**
-     * Get the data that Firebird stores for a BLOB created with the BLOB parameter buffer.
+     * Find the BLOB filter through which Firebird writes a BLOB created with the BLOB parameter buffer.
      *
      * <p>Mirrors {@code gds__parse_bpb2} and the filter decision of {@code blb::create2}, which replaces {@code CS_dynamic} with the character set of the connection.
      * Firebird transliterates text between two different character sets other than {@code NONE} and {@code BINARY}; other BLOB filters are not supported.
      * Firebird has internal BLOB filters from its sub types other than ranges to text: the filter of sub type 5 ({@code filter_runtime}) accepts the data without writing it,
      * and the other internal filters answer the creation of the BLOB with {@code isc_uns_ext}; other sub type conversions fail as in a database without declared BLOB filters.
-     * If the character set of the connection is unknown, it is passed as {@code CS_dynamic}, which has no Java character set.</p>
+     * If the character set of the connection is unknown, it is passed as {@code CS_dynamic}, which has no Java character set.
+     * A BLOB written through a BLOB filter is created on top of another temporary BLOB.</p>
      *
      * @param bpb BLOB parameter buffer
      * @param connectionCharsetId character set ID of the connection
-     * @param data written data
-     * @return stored data
+     * @return BLOB filter that turns written data into stored data, or empty if Firebird stores the written data unchanged
      * @throws BlobFilterNotFoundException if Firebird has no BLOB filter for the sub type conversion
      * @throws BlobFilterWriteNotSupportedException if an internal BLOB filter of Firebird does not support writing
      * @throws UnsupportedBlobFilterException if Firebird converts the data with a character set without Java character set
      */
-    public static byte[] getStoredData(final byte[] bpb, final int connectionCharsetId, final byte[] data) {
+    public static Optional<UnaryOperator<byte[]>> findBlobFilter(final byte[] bpb, final int connectionCharsetId) {
         BlobParameters parameters = new BlobParameters(bpb);
         if (ISCConstants.BLOB_SUB_TYPE_TEXT == parameters.targetType && BLOB_SUB_TYPE_RUNTIME == parameters.sourceType) {
-            return NO_DATA;
+            return Optional.of(data -> NO_DATA);
         }
         if (0 != parameters.targetType && parameters.sourceType != parameters.targetType) {
             checkSubTypeConversion(parameters.sourceType, parameters.targetType, parameters.targetCharset);
-            return data;
+            return Optional.empty();
         }
-        Optional<FirebirdBlobTransliterator> transliterator = ISCConstants.BLOB_SUB_TYPE_TEXT == parameters.targetType
-                ? createTextTransliterator(parameters.sourceCharset, parameters.targetCharset, connectionCharsetId)
-                : Optional.empty();
-        return transliterator.isPresent() ? transliterator.get().put(data) : data;
+        if (ISCConstants.BLOB_SUB_TYPE_TEXT != parameters.targetType) {
+            return Optional.empty();
+        }
+        return createTextTransliterator(parameters.sourceCharset, parameters.targetCharset, connectionCharsetId).map(each -> each::put);
     }
     
     private static void checkSubTypeConversion(final int sourceType, final int targetType, final int targetCharset) {

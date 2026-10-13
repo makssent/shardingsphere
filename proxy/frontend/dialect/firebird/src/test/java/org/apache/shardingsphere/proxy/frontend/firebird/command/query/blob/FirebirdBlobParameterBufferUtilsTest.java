@@ -26,12 +26,15 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.Optional;
+import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.sameInstance;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FirebirdBlobParameterBufferUtilsTest {
     
@@ -39,34 +42,35 @@ class FirebirdBlobParameterBufferUtilsTest {
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("unchangedDataArguments")
-    void assertGetStoredDataWithUnchangedData(final String name, final byte[] bpb, final int connectionCharsetId) {
-        byte[] data = "é".getBytes(StandardCharsets.UTF_8);
-        assertThat(FirebirdBlobParameterBufferUtils.getStoredData(bpb, connectionCharsetId, data), sameInstance(data));
+    void assertFindBlobFilterWithUnchangedData(final String name, final byte[] bpb, final int connectionCharsetId) {
+        assertFalse(FirebirdBlobParameterBufferUtils.findBlobFilter(bpb, connectionCharsetId).isPresent());
     }
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("storedDataArguments")
-    void assertGetStoredData(final String name, final byte[] bpb, final int connectionCharsetId, final byte[] data, final byte[] expectedData) {
-        assertThat(FirebirdBlobParameterBufferUtils.getStoredData(bpb, connectionCharsetId, data), is(expectedData));
+    void assertFindBlobFilter(final String name, final byte[] bpb, final int connectionCharsetId, final byte[] data, final byte[] expectedData) {
+        Optional<UnaryOperator<byte[]>> actual = FirebirdBlobParameterBufferUtils.findBlobFilter(bpb, connectionCharsetId);
+        assertTrue(actual.isPresent());
+        assertThat(actual.get().apply(data), is(expectedData));
     }
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("unsupportedFilterArguments")
-    void assertGetStoredDataWithUnsupportedFilter(final String name, final byte[] bpb, final int connectionCharsetId) {
-        assertThrows(UnsupportedBlobFilterException.class, () -> FirebirdBlobParameterBufferUtils.getStoredData(bpb, connectionCharsetId, new byte[]{'a'}));
+    void assertFindBlobFilterWithUnsupportedFilter(final String name, final byte[] bpb, final int connectionCharsetId) {
+        assertThrows(UnsupportedBlobFilterException.class, () -> FirebirdBlobParameterBufferUtils.findBlobFilter(bpb, connectionCharsetId));
     }
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("writeNotSupportedFilterArguments")
-    void assertGetStoredDataWithWriteNotSupportedFilter(final String name, final byte[] bpb, final int expectedSourceType) {
-        BlobFilterWriteNotSupportedException actual = assertThrows(BlobFilterWriteNotSupportedException.class, () -> FirebirdBlobParameterBufferUtils.getStoredData(bpb, 4, new byte[]{'a'}));
+    void assertFindBlobFilterWithWriteNotSupportedFilter(final String name, final byte[] bpb, final int expectedSourceType) {
+        BlobFilterWriteNotSupportedException actual = assertThrows(BlobFilterWriteNotSupportedException.class, () -> FirebirdBlobParameterBufferUtils.findBlobFilter(bpb, 4));
         assertThat(actual.getSourceType(), is(expectedSourceType));
     }
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("missingFilterArguments")
-    void assertGetStoredDataWithMissingFilter(final String name, final byte[] bpb, final int expectedSourceType, final int expectedTargetType) {
-        BlobFilterNotFoundException actual = assertThrows(BlobFilterNotFoundException.class, () -> FirebirdBlobParameterBufferUtils.getStoredData(bpb, 4, new byte[]{'a'}));
+    void assertFindBlobFilterWithMissingFilter(final String name, final byte[] bpb, final int expectedSourceType, final int expectedTargetType) {
+        BlobFilterNotFoundException actual = assertThrows(BlobFilterNotFoundException.class, () -> FirebirdBlobParameterBufferUtils.findBlobFilter(bpb, 4));
         assertThat(actual.getSourceType(), is(expectedSourceType));
         assertThat(actual.getTargetType(), is(expectedTargetType));
     }

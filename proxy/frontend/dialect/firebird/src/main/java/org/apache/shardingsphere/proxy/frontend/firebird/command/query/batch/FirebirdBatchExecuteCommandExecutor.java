@@ -52,7 +52,6 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -102,7 +101,8 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
             return;
         }
         try {
-            batchStatementManager.registerStreamBlobs(batchStatement, connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get());
+            batchStatementManager.registerStreamBlobs(batchStatement, connectionSession.getConnectionId(), packet.getTransactionHandle(),
+                    connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get());
         } catch (final SQLDialectException ex) {
             batchStatementManager.resetBatchStatement(batchStatement);
             throw ex;
@@ -129,8 +129,6 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
     }
     
     private FirebirdBatchCompletion executeBlobBatch(final FirebirdBatchStatement batchStatement, final FirebirdServerPreparedStatement preparedStatement) throws SQLException {
-        Map<Long, Long> blobIds = new HashMap<>(batchStatement.getBlobIds());
-        Map<Long, byte[]> streamBlobContents = new HashMap<>(batchStatement.getStreamBlobContents());
         List<List<Object>> params = new ArrayList<>(batchStatement.getParameterValues().size());
         Collection<FirebirdBatchCompletion> completions = new ArrayList<>();
         FirebirdBlobParameterConverter converter = new FirebirdBlobParameterConverter(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get());
@@ -138,7 +136,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
         for (List<Object> each : batchStatement.getParameterValues()) {
             SQLDialectException failure;
             try {
-                params.add(bindRowBlobParameters(each, batchStatement.getColumnDescriptors(), preparedStatement.getParameterColumns(), blobIds, streamBlobContents, converter));
+                params.add(bindRowBlobParameters(each, batchStatement.getColumnDescriptors(), preparedStatement.getParameterColumns(), batchStatement.getBlobIds(), converter));
                 continue;
             } catch (final InvalidSegstrIdException | UnknownBatchBlobIdException | ParameterConversionException ex) {
                 failure = ex;
@@ -150,8 +148,6 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
             }
             params.clear();
             if (!(failure instanceof InvalidSegstrIdException)) {
-                batchStatement.getBlobIds().keySet().retainAll(blobIds.keySet());
-                batchStatement.getStreamBlobContents().keySet().retainAll(streamBlobContents.keySet());
                 throw failure;
             }
             SQLException cause = SQLExceptionTransformEngine.toSQLException(failure, databaseType);
@@ -169,9 +165,9 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
     }
     
     private List<Object> bindRowBlobParameters(final List<Object> params, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final List<FirebirdReturnColumnPacket> parameterColumns,
-                                               final Map<Long, Long> blobIds, final Map<Long, byte[]> streamBlobContents, final FirebirdBlobParameterConverter converter) {
+                                               final Map<Long, Long> blobIds, final FirebirdBlobParameterConverter converter) {
+        resolveBatchBlobIds(params, columnDescriptors, blobIds);
         List<Object> result = new ArrayList<>(params);
-        resolveBatchBlobIds(result, columnDescriptors, blobIds, streamBlobContents);
         boolean[] moved = moveReadBlobParameters(result, columnDescriptors, parameterColumns, converter);
         for (int i = 0; i < columnDescriptors.size(); i++) {
             if (!moved[i] && isBlobValue(columnDescriptors.get(i), result.get(i))) {
@@ -182,16 +178,15 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
         return result;
     }
     
-    private void resolveBatchBlobIds(final List<Object> params, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final Map<Long, Long> blobIds,
-                                     final Map<Long, byte[]> streamBlobContents) {
+    private void resolveBatchBlobIds(final List<Object> params, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final Map<Long, Long> blobIds) {
         for (int i = 0; i < columnDescriptors.size(); i++) {
             if (!columnDescriptors.get(i).isBatchBlobId() || null == params.get(i) || 0L == (Long) params.get(i)) {
                 continue;
             }
             long batchBlobId = (Long) params.get(i);
-            Object blob = blobIds.containsKey(batchBlobId) ? blobIds.remove(batchBlobId) : streamBlobContents.remove(batchBlobId);
-            ShardingSpherePreconditions.checkNotNull(blob, () -> new UnknownBatchBlobIdException(batchBlobId));
-            params.set(i, blob);
+            Long blobId = blobIds.remove(batchBlobId);
+            ShardingSpherePreconditions.checkNotNull(blobId, () -> new UnknownBatchBlobIdException(batchBlobId));
+            params.set(i, blobId);
         }
     }
     
@@ -211,7 +206,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
     }
     
     private boolean isBlobValue(final FirebirdBatchColumnDescriptor columnDescriptor, final Object value) {
-        return FirebirdBinaryColumnType.BLOB == columnDescriptor.getType() && (value instanceof Long || value instanceof byte[]);
+        return FirebirdBinaryColumnType.BLOB == columnDescriptor.getType() && value instanceof Long;
     }
     
     private byte[] getMovedBlobContent(final Object value) {
@@ -223,9 +218,6 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
     }
     
     private byte[] getBlobContent(final Object value) {
-        if (value instanceof byte[]) {
-            return (byte[]) value;
-        }
         long blobId = (Long) value;
         if (0L == blobId) {
             return NO_DATA;

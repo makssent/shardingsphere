@@ -43,7 +43,7 @@ public final class FirebirdCreateBlobCommandExecutor implements CommandExecutor 
     @Override
     public Collection<DatabasePacket> execute() {
         int blobHandle = FirebirdBlobHandleGenerator.getInstance().nextBlobHandle(connectionSession.getConnectionId());
-        long blobId = FirebirdBlobIdGenerator.getInstance().nextBlobId(connectionSession.getConnectionId());
+        long blobId = FirebirdBlobIdGenerator.getInstance().nextBlobId(connectionSession.getConnectionId(), false);
         FirebirdBlobWriteCache.getInstance().registerBlob(connectionSession.getConnectionId(), blobHandle, blobId, packet.getTransactionId(), packet.isStreamBlob());
         return Collections.singleton(new FirebirdGenericResponsePacket().setHandle(blobHandle).setId(blobId));
     }

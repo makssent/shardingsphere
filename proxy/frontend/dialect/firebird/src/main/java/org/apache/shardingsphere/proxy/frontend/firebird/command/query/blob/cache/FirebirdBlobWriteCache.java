@@ -94,6 +94,22 @@ public final class FirebirdBlobWriteCache {
     }
     
     /**
+     * Register data of a temporary BLOB that Firebird creates in a transaction while executing a batch from the batch BLOB stream.
+     *
+     * @param connectionId connection id
+     * @param blobId blob id
+     * @param transactionId owning transaction id
+     * @param streamBlob whether the BLOB is a stream BLOB
+     * @param data BLOB data
+     */
+    @HighFrequencyInvocation
+    public void registerClosedBlob(final int connectionId, final long blobId, final int transactionId, final boolean streamBlob, final byte[] data) {
+        FirebirdBlobWrite write = new FirebirdBlobWrite(0, blobId, transactionId, streamBlob);
+        write.markClosed(data);
+        getIdMap(connectionId).put(blobId, write);
+    }
+    
+    /**
      * Append segment data by handle.
      *
      * @param connectionId connection id

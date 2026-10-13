@@ -22,6 +22,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobIdGenerator;
 import org.apache.shardingsphere.sql.parser.statement.core.enums.TransactionIsolationLevel;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,12 +56,14 @@ class FirebirdStartTransactionCommandExecutorTest {
     @BeforeEach
     void setup() {
         FirebirdTransactionIdGenerator.getInstance().registerConnection(CONNECTION_ID);
+        FirebirdBlobIdGenerator.getInstance().registerConnection(CONNECTION_ID);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
     }
     
     @AfterEach
     void tearDown() {
         FirebirdTransactionIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
+        FirebirdBlobIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
     }
     
     @Test
@@ -76,6 +79,13 @@ class FirebirdStartTransactionCommandExecutorTest {
         verify(connectionSession).setAutoCommit(true);
         verify(connectionSession).setReadOnly(true);
         verify(connectionSession).setIsolationLevel(TransactionIsolationLevel.SERIALIZABLE);
+    }
+    
+    @Test
+    void assertExecuteStartsBlobIdsOfTransaction() {
+        FirebirdBlobIdGenerator.getInstance().nextBlobId(CONNECTION_ID, false);
+        new FirebirdStartTransactionCommandExecutor(packet, connectionSession).execute();
+        assertThat(FirebirdBlobIdGenerator.getInstance().nextBlobId(CONNECTION_ID, false), is(1L));
     }
     
     @Test

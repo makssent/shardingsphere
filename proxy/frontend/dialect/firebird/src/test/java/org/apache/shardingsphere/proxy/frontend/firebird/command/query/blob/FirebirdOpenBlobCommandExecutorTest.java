@@ -128,6 +128,7 @@ class FirebirdOpenBlobCommandExecutorTest {
         Collection<DatabasePacket> actual = new FirebirdOpenBlobCommandExecutor(packet, connectionSession).execute();
         FirebirdGenericResponsePacket actualResponse = (FirebirdGenericResponsePacket) actual.iterator().next();
         assertThat(actualResponse.getId(), is(createdResponse.getId()));
+        assertThat(FirebirdBlobIdGenerator.getInstance().nextBlobId(CONNECTION_ID, false), is(createdResponse.getId() + 2L));
         Optional<BlobSegment> actualSegment = FirebirdBlobReadCache.getInstance().readSegment(CONNECTION_ID, actualResponse.getHandle(), 3);
         assertTrue(actualSegment.isPresent());
         assertThat(actualSegment.get().getData(), is(new byte[]{1, 2, 3}));

@@ -31,6 +31,8 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStatement;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdParseBatchBlr;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobIdGenerator;
 import org.firebirdsql.gds.BlrConstants;
 import org.firebirdsql.jaybird.fb.constants.BatchItems;
 import org.junit.jupiter.api.AfterEach;
@@ -47,7 +49,9 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -68,6 +72,8 @@ class FirebirdBatchStatementManagerTest {
     
     private static final int STATEMENT_ID = 2;
     
+    private static final int TRANSACTION_ID = 3;
+    
     private final FirebirdBatchStatementManager manager = FirebirdBatchStatementManager.getInstance();
     
     @Mock
@@ -82,11 +88,15 @@ class FirebirdBatchStatementManagerTest {
     @BeforeEach
     void setUp() {
         manager.registerConnection(CONNECTION_ID);
+        FirebirdBlobIdGenerator.getInstance().registerConnection(CONNECTION_ID);
+        FirebirdBlobWriteCache.getInstance().registerConnection(CONNECTION_ID);
     }
     
     @AfterEach
     void tearDown() {
         manager.unregisterConnection(CONNECTION_ID);
+        FirebirdBlobIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
+        FirebirdBlobWriteCache.getInstance().unregisterConnection(CONNECTION_ID);
     }
     
     @Test
@@ -231,10 +241,13 @@ class FirebirdBatchStatementManagerTest {
         data.writeBytes(createBlobHeader(0L, 1, 0)).writeByte(3);
         data.writeBytes(createBlobHeader(2L, 1, 0)).writeByte(4);
         batchStatement.appendBlobStream(batchStatement.readBlobStream(data, 60L));
-        manager.registerStreamBlobs(batchStatement, 4);
-        assertThat(batchStatement.getStreamBlobContents().size(), is(2));
-        assertThat(batchStatement.getStreamBlobContents().get(1L), is(new byte[]{1, 2, 3}));
-        assertThat(batchStatement.getStreamBlobContents().get(2L), is(new byte[]{4}));
+        manager.registerStreamBlobs(batchStatement, CONNECTION_ID, TRANSACTION_ID, 4);
+        Map<Long, Long> expectedBlobIds = new HashMap<>(2, 1F);
+        expectedBlobIds.put(1L, 1L);
+        expectedBlobIds.put(2L, 2L);
+        assertThat(batchStatement.getBlobIds(), is(expectedBlobIds));
+        assertThat(FirebirdBlobWriteCache.getInstance().useBlobData(CONNECTION_ID, 1L, TRANSACTION_ID).orElse(null), is(new byte[]{1, 2, 3}));
+        assertThat(FirebirdBlobWriteCache.getInstance().useBlobData(CONNECTION_ID, 2L, TRANSACTION_ID).orElse(null), is(new byte[]{4}));
         assertTrue(batchStatement.getBlobBuffer().isEmpty());
         assertThat(batchStatement.getBlobStreamSize(), is(0L));
     }
@@ -245,15 +258,16 @@ class FirebirdBatchStatementManagerTest {
         batchStatement.setDefaultBpb(new byte[]{1, 1, 1, 1, 2, 1, 1, 4, 1, 4, 5, 1, 53, 3, 1, 1});
         byte[] data = "é".getBytes(StandardCharsets.UTF_8);
         batchStatement.appendBlobStream(batchStatement.readBlobStream(createBlobHeader(1L, data.length, 0).writeBytes(data), 20L));
-        manager.registerStreamBlobs(batchStatement, 4);
-        assertThat(batchStatement.getStreamBlobContents().get(1L), is("é".getBytes(Charset.forName("windows-1252"))));
+        manager.registerStreamBlobs(batchStatement, CONNECTION_ID, TRANSACTION_ID, 4);
+        assertThat(batchStatement.getBlobIds(), is(Collections.singletonMap(1L, 2L)));
+        assertThat(FirebirdBlobWriteCache.getInstance().useBlobData(CONNECTION_ID, 2L, TRANSACTION_ID).orElse(null), is("é".getBytes(Charset.forName("windows-1252"))));
     }
     
     @Test
     void assertRegisterStreamBlobWithMissingFilterBpb() {
         FirebirdBatchStatement batchStatement = registerBlobBatchStatement(128L, true);
         batchStatement.appendBlobStream(batchStatement.readBlobStream(createBlobHeader(1L, 7, 7).writeBytes(new byte[]{1, 2, 1, 2, 3, 1, 1}), 24L));
-        assertThrows(BlobFilterNotFoundException.class, () -> manager.registerStreamBlobs(batchStatement, 4));
+        assertThrows(BlobFilterNotFoundException.class, () -> manager.registerStreamBlobs(batchStatement, CONNECTION_ID, TRANSACTION_ID, 4));
     }
     
     private FirebirdBatchStatement registerBlobBatchStatement(final long bufferSize, final boolean blobStreamAllowed) {

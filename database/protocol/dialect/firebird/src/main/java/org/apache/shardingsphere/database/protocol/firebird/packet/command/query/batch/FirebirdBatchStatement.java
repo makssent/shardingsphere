@@ -81,8 +81,6 @@ public final class FirebirdBatchStatement {
     
     private final Collection<byte[]> blobBuffer = new ArrayList<>();
     
-    private final Map<Long, byte[]> streamBlobContents = new HashMap<>();
-    
     private long blobStreamSize;
     
     @Getter(AccessLevel.NONE)
@@ -221,8 +219,7 @@ public final class FirebirdBatchStatement {
             byte[] bpb = 0L == bpbLength ? defaultBpb : ByteBufUtil.getBytes(buffer.readSlice((int) bpbLength));
             blobRemaining = Integer.toUnsignedLong((int) (blobRemaining - bpbLength));
             currentBlob = new FirebirdBatchStreamBlob(batchBlobId, bpb, 0L == bpbLength ? defaultSegmented : FirebirdBatchBlobStream.isSegmented(bpb));
-            ShardingSpherePreconditions.checkState(!blobIds.containsKey(batchBlobId) && !streamBlobContents.containsKey(batchBlobId) && !result.containsKey(batchBlobId),
-                    () -> new RepeatedBatchBlobIdException(batchBlobId));
+            ShardingSpherePreconditions.checkState(!blobIds.containsKey(batchBlobId) && !result.containsKey(batchBlobId), () -> new RepeatedBatchBlobIdException(batchBlobId));
             result.put(batchBlobId, currentBlob);
         }
         return result.values();
@@ -268,7 +265,6 @@ public final class FirebirdBatchStatement {
     public void reset() {
         parameterValues.clear();
         blobIds.clear();
-        streamBlobContents.clear();
         blobBuffer.clear();
         blobStreamSize = 0L;
         generatedBlobId = 0L;

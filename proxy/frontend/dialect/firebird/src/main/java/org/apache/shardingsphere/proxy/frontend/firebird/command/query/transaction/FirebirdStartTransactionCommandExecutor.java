@@ -24,6 +24,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.generic.Fireb
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobIdGenerator;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -47,6 +48,7 @@ public final class FirebirdStartTransactionCommandExecutor implements CommandExe
         connectionSession.setReadOnly(packet.isReadOnly());
         connectionSession.setIsolationLevel(packet.getIsolationLevel());
         int transactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(connectionSession.getConnectionId());
+        FirebirdBlobIdGenerator.getInstance().resetBlobId(connectionSession.getConnectionId());
         return Collections.singleton(new FirebirdGenericResponsePacket().setHandle(transactionId));
     }
     

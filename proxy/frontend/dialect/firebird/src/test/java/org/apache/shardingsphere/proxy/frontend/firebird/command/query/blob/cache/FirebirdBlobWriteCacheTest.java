@@ -155,6 +155,13 @@ class FirebirdBlobWriteCacheTest {
     }
     
     @Test
+    void assertRegisterClosedBlob() {
+        CACHE.registerClosedBlob(1, 21L, 31, true, new byte[]{1, 2, 3});
+        assertTrue(CACHE.isClosed(1, 21L));
+        assertThat(CACHE.useBlobData(1, 21L, 31).orElse(null), is(new byte[]{1, 2, 3}));
+    }
+    
+    @Test
     void assertUseBlobDataBeforeClose() {
         CACHE.registerBlob(1, 11, 21L, 31, false);
         assertFalse(CACHE.useBlobData(1, 21L, 31).isPresent());

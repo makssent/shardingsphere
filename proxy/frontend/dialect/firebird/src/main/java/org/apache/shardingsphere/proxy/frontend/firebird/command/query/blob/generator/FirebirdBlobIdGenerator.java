@@ -19,6 +19,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.gen
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -48,13 +49,28 @@ public final class FirebirdBlobIdGenerator {
     }
     
     /**
-     * Generate next blob ID for connection.
+     * Generate next temporary BLOB ID for connection.
+     *
+     * <p>Firebird numbers temporary BLOBs with the counter of their transaction.
+     * A BLOB written through a BLOB filter is created on top of another temporary BLOB, whose ID is returned, so it takes two numbers.</p>
      *
      * @param connectionId connection ID
-     * @return generated statement ID
+     * @param filtered whether the BLOB is written through a BLOB filter
+     * @return generated BLOB ID
      */
-    public long nextBlobId(final int connectionId) {
-        return connectionRegistry.get(connectionId).incrementAndGet();
+    @HighFrequencyInvocation
+    public long nextBlobId(final int connectionId, final boolean filtered) {
+        return connectionRegistry.get(connectionId).addAndGet(filtered ? 2L : 1L);
+    }
+    
+    /**
+     * Start numbering temporary BLOBs of a new transaction of connection.
+     *
+     * @param connectionId connection ID
+     */
+    @HighFrequencyInvocation
+    public void resetBlobId(final int connectionId) {
+        connectionRegistry.get(connectionId).set(0L);
     }
     
     /**

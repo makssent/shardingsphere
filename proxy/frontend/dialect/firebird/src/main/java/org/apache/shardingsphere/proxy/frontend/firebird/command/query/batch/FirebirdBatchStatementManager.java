@@ -46,8 +46,12 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdBlobParameterBufferUtils;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobIdGenerator;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.function.UnaryOperator;
 
 /**
  * Batch statement manager for Firebird.
@@ -179,9 +183,12 @@ public final class FirebirdBatchStatementManager {
     }
     
     /**
-     * Register BLOBs of the BLOB buffer under their batch BLOB IDs, as Firebird does before executing batch messages, and clear the BLOB buffer.
+     * Create temporary BLOBs of the BLOB buffer in the transaction and register them under their batch BLOB IDs, as Firebird does before executing batch messages,
+     * and clear the BLOB buffer.
      *
      * @param batchStatement batch statement
+     * @param connectionId connection ID
+     * @param transactionId transaction ID of the batch execution
      * @param connectionCharsetId character set ID of the connection
      * @throws BatchSmallDataException if a BLOB header is incomplete
      * @throws BatchBlobBufferFormatException if a continuation has no BLOB to continue
@@ -196,10 +203,13 @@ public final class FirebirdBatchStatementManager {
      * @throws TransliterationFailedException if BLOB data cannot be transliterated as its BLOB parameter buffer requires
      */
     @HighFrequencyInvocation
-    void registerStreamBlobs(final FirebirdBatchStatement batchStatement, final int connectionCharsetId) {
+    void registerStreamBlobs(final FirebirdBatchStatement batchStatement, final int connectionId, final int transactionId, final int connectionCharsetId) {
         for (FirebirdBatchStreamBlob each : batchStatement.readStreamBlobs()) {
             byte[] data = each.getData().toByteArray();
-            batchStatement.getStreamBlobContents().put(each.getBatchBlobId(), FirebirdBlobParameterBufferUtils.getStoredData(each.getBpb(), connectionCharsetId, data));
+            Optional<UnaryOperator<byte[]>> blobFilter = FirebirdBlobParameterBufferUtils.findBlobFilter(each.getBpb(), connectionCharsetId);
+            long blobId = FirebirdBlobIdGenerator.getInstance().nextBlobId(connectionId, blobFilter.isPresent());
+            FirebirdBlobWriteCache.getInstance().registerClosedBlob(connectionId, blobId, transactionId, !each.isSegmented(), blobFilter.map(filter -> filter.apply(data)).orElse(data));
+            batchStatement.getBlobIds().put(each.getBatchBlobId(), blobId);
         }
         batchStatement.clearBlobStream();
     }

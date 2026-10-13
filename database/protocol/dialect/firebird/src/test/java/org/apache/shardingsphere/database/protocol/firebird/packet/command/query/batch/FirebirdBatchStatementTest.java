@@ -344,11 +344,11 @@ class FirebirdBatchStatementTest {
     void assertClearBlobStream(final String name, final int blobLength, final long expectedBlobStreamSize) {
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), BUFFER_SIZE);
         batchStatement.appendBlobStream(batchStatement.readBlobStream(createBlobHeader(1L, blobLength, 0).writeZero(blobLength), 16L + blobLength));
-        batchStatement.getStreamBlobContents().put(2L, new byte[]{1});
+        batchStatement.getBlobIds().put(2L, 1L);
         batchStatement.clearBlobStream();
         assertTrue(batchStatement.getBlobBuffer().isEmpty());
         assertThat(batchStatement.getBlobStreamSize(), is(expectedBlobStreamSize));
-        assertThat(batchStatement.getStreamBlobContents().size(), is(1));
+        assertThat(batchStatement.getBlobIds().size(), is(1));
     }
     
     private static Stream<Arguments> clearBlobStreamArguments() {
@@ -368,7 +368,6 @@ class FirebirdBatchStatementTest {
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(100, Collections.emptyList(), 14, 16, BUFFER_SIZE, false, false, BatchItems.BLOB_NONE);
         batchStatement.addParameterValues(Collections.singletonList("foo"));
         batchStatement.getBlobIds().put(1L, 2L);
-        batchStatement.getStreamBlobContents().put(3L, new byte[]{1});
         batchStatement.appendBlobStream(batchStatement.readBlobStream(createBlobHeader(4L, 0, 0), 16L));
         FirebirdBatchStatement otherBatchStatement = new FirebirdBatchStatement(101);
         otherBatchStatement.getBlobIds().put(1L, 3L);
@@ -376,7 +375,6 @@ class FirebirdBatchStatementTest {
         assertTrue(batchStatement.getParameterValues().isEmpty());
         assertThat(batchStatement.getDataSize(), is(0L));
         assertTrue(batchStatement.getBlobIds().isEmpty());
-        assertTrue(batchStatement.getStreamBlobContents().isEmpty());
         assertTrue(batchStatement.getBlobBuffer().isEmpty());
         assertThat(batchStatement.getBlobStreamSize(), is(0L));
         assertThat(otherBatchStatement.getBlobIds(), is(Collections.singletonMap(1L, 3L)));
