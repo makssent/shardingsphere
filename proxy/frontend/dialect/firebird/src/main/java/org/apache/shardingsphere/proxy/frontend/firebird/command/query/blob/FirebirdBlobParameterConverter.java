@@ -62,8 +62,6 @@ public final class FirebirdBlobParameterConverter {
     
     private static final int CHARSET_ASCII = 2;
     
-    private static final int EXPONENT_LIMIT = 3276;
-    
     private static final String UNMAPPABLE_REPLACEMENT = String.valueOf(Character.MIN_VALUE);
     
     private final int connectionCharsetId;
@@ -241,7 +239,8 @@ public final class FirebirdBlobParameterConverter {
         while (digitsEnd < value.length() && '\0' != value.charAt(digitsEnd) && ' ' != value.charAt(digitsEnd)) {
             digitsEnd++;
         }
-        ShardingSpherePreconditions.checkState(isSpacesToEnd(value, digitsEnd) && (value.length() - start) * 4L <= bits, () -> FirebirdTextValueParser.createConversionError(value));
+        ShardingSpherePreconditions.checkState(FirebirdTextValueParser.skipSpaces(value, digitsEnd) == value.length() && (value.length() - start) * 4L <= bits,
+                () -> FirebirdTextValueParser.createConversionError(value));
         long result = 0L;
         for (int i = start; i < digitsEnd; i++) {
             char each = value.charAt(i);
@@ -249,15 +248,6 @@ public final class FirebirdBlobParameterConverter {
             result = result * 16 + Character.digit(each, 16);
         }
         return digitsEnd - start <= 8 ? result & 0xFFFFFFFFL : result;
-    }
-    
-    private boolean isSpacesToEnd(final String value, final int start) {
-        for (int i = start; i < value.length(); i++) {
-            if (' ' != value.charAt(i)) {
-                return false;
-            }
-        }
-        return true;
     }
     
     private long toDecimalLong(final String value, final int start, final long maxValue) {
@@ -289,7 +279,7 @@ public final class FirebirdBlobParameterConverter {
             } else if ('+' == each && !digitSeen && 0 == sign && !fraction) {
                 sign = 1;
             } else {
-                ShardingSpherePreconditions.checkState(' ' == each && isSpacesToEnd(value, index), () -> FirebirdTextValueParser.createConversionError(value));
+                FirebirdTextValueParser.checkSpacesToEnd(value, index);
                 index = value.length();
                 break;
             }
@@ -299,7 +289,7 @@ public final class FirebirdBlobParameterConverter {
             result = -result;
         }
         if (index < value.length()) {
-            scale += toExponent(value, index + 1);
+            scale += FirebirdTextValueParser.parseExponent(value, index + 1);
         }
         return adjustForScale(result, -scale, limit);
     }
@@ -315,29 +305,6 @@ public final class FirebirdBlobParameterConverter {
             }
         }
         return true;
-    }
-    
-    private int toExponent(final String value, final int start) {
-        int result = 0;
-        int sign = 0;
-        boolean digitSeen = false;
-        for (int index = start; index < value.length(); index++) {
-            char each = value.charAt(index);
-            if (each >= '0' && each <= '9') {
-                digitSeen = true;
-                result = result * 10 + each - '0';
-                ShardingSpherePreconditions.checkState(result < EXPONENT_LIMIT, NumericOutOfRangeException::new);
-            } else if ('-' == each && !digitSeen && 0 == sign) {
-                sign = -1;
-            } else if ('+' == each && !digitSeen && 0 == sign) {
-                sign = 1;
-            } else {
-                ShardingSpherePreconditions.checkState(' ' == each && isSpacesToEnd(value, index), () -> FirebirdTextValueParser.createConversionError(value));
-                break;
-            }
-        }
-        ShardingSpherePreconditions.checkState(digitSeen, () -> FirebirdTextValueParser.createConversionError(value));
-        return -1 == sign ? -result : result;
     }
     
     private long adjustForScale(final long value, final int scale, final long limit) {

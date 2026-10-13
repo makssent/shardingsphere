@@ -146,7 +146,15 @@ final class FirebirdTextValueParser {
         return result;
     }
     
-    private static int skipSpaces(final String text, final int start) {
+    private static boolean isDigit(final char value) {
+        return value >= '0' && value <= '9';
+    }
+    
+    private static double getPowerOfTen(final int scale) {
+        return UPPER_POWERS_OF_TEN[scale >> 5] * LOWER_POWERS_OF_TEN[scale & 0x1F];
+    }
+    
+    static int skipSpaces(final String text, final int start) {
         int result = start;
         while (result < text.length() && ' ' == text.charAt(result)) {
             result++;
@@ -154,15 +162,11 @@ final class FirebirdTextValueParser {
         return result;
     }
     
-    private static boolean isDigit(final char value) {
-        return value >= '0' && value <= '9';
-    }
-    
-    private static void checkSpacesToEnd(final String text, final int start) {
+    static void checkSpacesToEnd(final String text, final int start) {
         ShardingSpherePreconditions.checkState(' ' == text.charAt(start) && skipSpaces(text, start) == text.length(), () -> createConversionError(text));
     }
     
-    private static int parseExponent(final String text, final int start) {
+    static int parseExponent(final String text, final int start) {
         int result = 0;
         int sign = 0;
         boolean digitSeen = false;
@@ -181,10 +185,6 @@ final class FirebirdTextValueParser {
         }
         ShardingSpherePreconditions.checkState(digitSeen, () -> createConversionError(text));
         return -1 == sign ? -result : result;
-    }
-    
-    private static double getPowerOfTen(final int scale) {
-        return UPPER_POWERS_OF_TEN[scale >> 5] * LOWER_POWERS_OF_TEN[scale & 0x1F];
     }
     
     /**
