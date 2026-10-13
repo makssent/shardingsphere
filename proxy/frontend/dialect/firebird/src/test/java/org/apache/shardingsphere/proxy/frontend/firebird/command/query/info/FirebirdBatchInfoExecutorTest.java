@@ -72,6 +72,7 @@ class FirebirdBatchInfoExecutorTest {
         FirebirdGenericResponsePacket actual = (FirebirdGenericResponsePacket) new FirebirdBatchInfoExecutor(packet, connectionSession).execute().iterator().next();
         ByteBuf actualData = Unpooled.buffer();
         actual.getData().write(new FirebirdPacketPayload(actualData, StandardCharsets.UTF_8));
+        assertThat(actual.getHandle(), is(7));
         assertThat(ByteBufUtil.hexDump(actualData), is("0a04000004000001"));
     }
     

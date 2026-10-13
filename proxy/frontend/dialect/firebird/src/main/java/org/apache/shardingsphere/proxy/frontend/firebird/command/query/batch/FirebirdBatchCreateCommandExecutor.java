@@ -101,7 +101,7 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
         }
         FirebirdBatchStatementManager.getInstance().registerBatchStatement(connectionId, statementId, messageFormat.getFields(), messageFormat.getMessageLength(),
                 messageFormat.getAlignedMessageLength(), batchParameters.getBufferSize(), batchParameters.isRecordCounts(), batchParameters.isMultiError(), batchParameters.getBlobPolicy());
-        return Collections.singleton(new FirebirdGenericResponsePacket().setHandle(statementId));
+        return Collections.singleton(new FirebirdGenericResponsePacket());
     }
     
     private boolean isBatchStatement(final SQLStatement sqlStatement) {
