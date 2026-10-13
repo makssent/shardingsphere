@@ -28,6 +28,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSmallDataException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchWithoutBlobsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterWriteNotSupportedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
@@ -139,9 +140,12 @@ public final class FirebirdBatchStatementManager {
     /**
      * Append BLOB stream portion.
      *
+     * <p>Like Firebird, the restored portion of length zero is accepted before the batch is checked for BLOB fields and BLOB policy.</p>
+     *
      * @param connectionId connection ID
      * @param packet batch BLOB stream packet
      * @throws InvalidBatchHandleException if batch statement does not exist
+     * @throws BatchWithoutBlobsException if batch message contains no BLOB fields
      * @throws InvalidBatchBlobPolicyException if BLOB policy of batch does not allow BLOB stream
      * @throws BatchTooBigException if the stream portion exceeds the batch buffer size
      */
@@ -149,8 +153,13 @@ public final class FirebirdBatchStatementManager {
     void appendBlobStream(final int connectionId, final FirebirdBatchBlobStreamCommandPacket packet) {
         FirebirdBatchStatement batchStatement = getBatchStatement(connectionId, packet.getStatementHandle());
         ShardingSpherePreconditions.checkNotNull(batchStatement, () -> new InvalidBatchHandleException(packet.getStatementHandle()));
+        byte[] portion = batchStatement.readBlobStream(packet.getData(), packet.getLength());
+        if (0 == portion.length) {
+            return;
+        }
+        ShardingSpherePreconditions.checkState(batchStatement.hasBatchBlobIdColumn(), () -> new BatchWithoutBlobsException(packet.getStatementHandle()));
         ShardingSpherePreconditions.checkState(batchStatement.isBlobStreamAllowed(), () -> new InvalidBatchBlobPolicyException("addBlobStream"));
-        batchStatement.appendBlobStream(packet.getData(), packet.getLength());
+        batchStatement.appendBlobStream(portion);
     }
     
     /**

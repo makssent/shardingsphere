@@ -21,6 +21,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchDefaultBpbChangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchWithoutBlobsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
@@ -36,6 +37,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -44,6 +48,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -157,10 +162,36 @@ class FirebirdBatchStatementManagerTest {
     @Test
     void assertAppendBlobStreamWithoutBlobPolicy() {
         FirebirdBatchStatement batchStatement = registerBlobBatchStatement(64L, false);
-        when(blobStreamPacket.getStatementHandle()).thenReturn(STATEMENT_ID);
+        mockBlobStreamPacket(createBlobHeader(1L, 3, 0).writeBytes(new byte[]{1, 2, 3}), 20L);
         assertThrows(InvalidBatchBlobPolicyException.class, () -> manager.appendBlobStream(CONNECTION_ID, blobStreamPacket));
         assertTrue(batchStatement.getBlobBuffer().isEmpty());
         assertThat(batchStatement.getBlobStreamSize(), is(0L));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("blobPolicyArguments")
+    void assertAppendBlobStreamWithoutBlobFields(final String name, final int blobPolicy) {
+        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 8, 8, 64L, false, false, blobPolicy);
+        mockBlobStreamPacket(createBlobHeader(1L, 3, 0).writeBytes(new byte[]{1, 2, 3}), 20L);
+        assertThrows(BatchWithoutBlobsException.class, () -> manager.appendBlobStream(CONNECTION_ID, blobStreamPacket));
+        assertTrue(manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID).getBlobBuffer().isEmpty());
+    }
+    
+    private static Stream<Arguments> blobPolicyArguments() {
+        return Stream.of(Arguments.of("stream_policy", BatchItems.BLOB_STREAM), Arguments.of("none_policy", BatchItems.BLOB_NONE));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("emptyPortionArguments")
+    void assertAppendEmptyBlobStreamWithoutBlobPolicy(final String name, final long length) {
+        manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 8, 8, 64L, false, false, BatchItems.BLOB_NONE);
+        mockBlobStreamPacket(Unpooled.buffer().writeZero((int) length), length);
+        manager.appendBlobStream(CONNECTION_ID, blobStreamPacket);
+        assertTrue(manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID).getBlobBuffer().isEmpty());
+    }
+    
+    private static Stream<Arguments> emptyPortionArguments() {
+        return Stream.of(Arguments.of("zero_length", 0L), Arguments.of("incomplete_blob_header", 8L));
     }
     
     @Test
@@ -199,7 +230,7 @@ class FirebirdBatchStatementManagerTest {
         ByteBuf data = createBlobHeader(1L, 2, 0).writeBytes(new byte[]{1, 2});
         data.writeBytes(createBlobHeader(0L, 1, 0)).writeByte(3);
         data.writeBytes(createBlobHeader(2L, 1, 0)).writeByte(4);
-        batchStatement.appendBlobStream(data, 60L);
+        batchStatement.appendBlobStream(batchStatement.readBlobStream(data, 60L));
         manager.registerStreamBlobs(batchStatement, 4);
         assertThat(batchStatement.getStreamBlobContents().size(), is(2));
         assertThat(batchStatement.getStreamBlobContents().get(1L), is(new byte[]{1, 2, 3}));
@@ -213,7 +244,7 @@ class FirebirdBatchStatementManagerTest {
         FirebirdBatchStatement batchStatement = registerBlobBatchStatement(128L, true);
         batchStatement.setDefaultBpb(new byte[]{1, 1, 1, 1, 2, 1, 1, 4, 1, 4, 5, 1, 53, 3, 1, 1});
         byte[] data = "é".getBytes(StandardCharsets.UTF_8);
-        batchStatement.appendBlobStream(createBlobHeader(1L, data.length, 0).writeBytes(data), 20L);
+        batchStatement.appendBlobStream(batchStatement.readBlobStream(createBlobHeader(1L, data.length, 0).writeBytes(data), 20L));
         manager.registerStreamBlobs(batchStatement, 4);
         assertThat(batchStatement.getStreamBlobContents().get(1L), is("é".getBytes(Charset.forName("windows-1252"))));
     }
@@ -221,7 +252,7 @@ class FirebirdBatchStatementManagerTest {
     @Test
     void assertRegisterStreamBlobWithMissingFilterBpb() {
         FirebirdBatchStatement batchStatement = registerBlobBatchStatement(128L, true);
-        batchStatement.appendBlobStream(createBlobHeader(1L, 7, 7).writeBytes(new byte[]{1, 2, 1, 2, 3, 1, 1}), 24L);
+        batchStatement.appendBlobStream(batchStatement.readBlobStream(createBlobHeader(1L, 7, 7).writeBytes(new byte[]{1, 2, 1, 2, 3, 1, 1}), 24L));
         assertThrows(BlobFilterNotFoundException.class, () -> manager.registerStreamBlobs(batchStatement, 4));
     }
     

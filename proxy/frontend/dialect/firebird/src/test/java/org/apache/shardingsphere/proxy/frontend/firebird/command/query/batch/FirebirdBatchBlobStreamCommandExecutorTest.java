@@ -26,8 +26,10 @@ import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.protocol.constant.CommonConstants;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.FirebirdCommandPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchBlobStreamCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchColumnDescriptor;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchRegistry;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStatement;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdParseBatchBlr;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
@@ -45,6 +47,7 @@ import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExt
 import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockSettings;
 import org.apache.shardingsphere.transaction.api.TransactionType;
 import org.apache.shardingsphere.transaction.rule.TransactionRule;
+import org.firebirdsql.gds.BlrConstants;
 import org.firebirdsql.gds.ISCConstants;
 import org.firebirdsql.jaybird.fb.constants.BatchItems;
 import org.junit.jupiter.api.AfterEach;
@@ -60,6 +63,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Properties;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -100,7 +104,7 @@ class FirebirdBatchBlobStreamCommandExecutorTest {
     
     @Test
     void assertExecute() {
-        FirebirdBatchStatement batchStatement = registerBatchStatement(20L);
+        FirebirdBatchStatement batchStatement = registerBatchStatement(Collections.singletonList(createBatchBlobIdColumn()), 20L);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         FirebirdBatchBlobStreamCommandPacket packet = new FirebirdBatchBlobStreamCommandPacket(new FirebirdPacketPayload(createBlobStreamPacket(), StandardCharsets.UTF_8));
         Collection<DatabasePacket> actual = new FirebirdBatchBlobStreamCommandExecutor(packet, connectionSession).execute();
@@ -111,7 +115,7 @@ class FirebirdBatchBlobStreamCommandExecutorTest {
     
     @Test
     void assertExecuteOverBufferSizeInTransaction() throws SQLException {
-        FirebirdBatchStatement batchStatement = registerBatchStatement(16L);
+        FirebirdBatchStatement batchStatement = registerBatchStatement(Collections.singletonList(createBatchBlobIdColumn()), 16L);
         ConnectionSession transactionSession = createConnectionSessionInTransaction();
         int transactionHandle = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
         DatabaseProtocolFrontendEngine engine = DatabaseTypedSPILoader.getService(DatabaseProtocolFrontendEngine.class, TypedSPILoader.getService(DatabaseType.class, "Firebird"));
@@ -126,10 +130,34 @@ class FirebirdBatchBlobStreamCommandExecutorTest {
         verify(backendConnection, never()).rollback();
     }
     
-    private FirebirdBatchStatement registerBatchStatement(final long bufferSize) {
-        FirebirdBatchStatement result = new FirebirdBatchStatement(STATEMENT_ID, Collections.emptyList(), 0, 0, bufferSize, false, false, BatchItems.BLOB_STREAM);
+    @Test
+    void assertExecuteWithoutBlobFieldsInTransaction() throws SQLException {
+        FirebirdBatchStatement batchStatement = registerBatchStatement(Collections.emptyList(), 64L);
+        ConnectionSession transactionSession = createConnectionSessionInTransaction();
+        int transactionHandle = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
+        DatabaseProtocolFrontendEngine engine = DatabaseTypedSPILoader.getService(DatabaseProtocolFrontendEngine.class, TypedSPILoader.getService(DatabaseType.class, "Firebird"));
+        new CommandExecutorTask(engine, transactionSession, channelHandlerContext, createBlobStreamPacket()).run();
+        new CommandExecutorTask(engine, transactionSession, channelHandlerContext, Unpooled.buffer().writeInt(FirebirdCommandPacketType.COMMIT.getValue()).writeInt(transactionHandle)).run();
+        FirebirdTransactionIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
+        ArgumentCaptor<FirebirdGenericResponsePacket> responseCaptor = ArgumentCaptor.forClass(FirebirdGenericResponsePacket.class);
+        verify(channelHandlerContext, times(2)).write(responseCaptor.capture());
+        assertThat(responseCaptor.getAllValues().get(0).getErrorCode(), is(ISCConstants.isc_dsql_error));
+        assertThat(responseCaptor.getAllValues().get(0).getErrorMessage(), is("There are no blobs in associated with batch statement"));
+        assertThat(batchStatement.getBlobStreamSize(), is(0L));
+        verify(backendConnection).commit();
+        verify(backendConnection, never()).rollback();
+    }
+    
+    private FirebirdBatchStatement registerBatchStatement(final List<FirebirdBatchColumnDescriptor> columnDescriptors, final long bufferSize) {
+        FirebirdBatchStatement result = new FirebirdBatchStatement(STATEMENT_ID, columnDescriptors, 0, 0, bufferSize, false, false, BatchItems.BLOB_STREAM);
         FirebirdBatchRegistry.getInstance().registerBatchStatement(CONNECTION_ID, STATEMENT_ID, result);
         return result;
+    }
+    
+    private FirebirdBatchColumnDescriptor createBatchBlobIdColumn() {
+        ByteBuf blr = Unpooled.buffer().writeByte(BlrConstants.blr_version5).writeByte(BlrConstants.blr_begin).writeByte(BlrConstants.blr_message).writeByte(0).writeShortLE(2)
+                .writeByte(BlrConstants.blr_blob2).writeZero(4).writeByte(BlrConstants.blr_short).writeByte(0).writeByte(BlrConstants.blr_end).writeByte(BlrConstants.blr_eoc);
+        return FirebirdParseBatchBlr.parse(blr, blr.readableBytes()).getFields().get(0);
     }
     
     private ByteBuf createBlobStreamPacket() {

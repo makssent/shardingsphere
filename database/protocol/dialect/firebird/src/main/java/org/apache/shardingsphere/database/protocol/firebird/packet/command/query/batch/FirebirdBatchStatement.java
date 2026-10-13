@@ -150,17 +150,25 @@ public final class FirebirdBatchStatement {
     }
     
     /**
-     * Append one portion of the BLOB stream to the BLOB buffer as Firebird restores it.
+     * Read one portion of the BLOB stream as Firebird restores it.
      *
-     * <p>Firebird reads the portion with the BLOB stream state before it checks the BLOB buffer, which has the size limit of the message buffer,
-     * so a rejected portion advances the BLOB stream state but is not kept.</p>
+     * <p>Firebird reads the portion with the BLOB stream state before it checks the batch, so a rejected portion advances the BLOB stream state.</p>
      *
      * @param data packet data starting at the stream portion
      * @param length declared length of the stream portion
+     * @return restored stream portion, which is empty for a portion of BLOB header bytes not yet complete
+     */
+    public byte[] readBlobStream(final ByteBuf data, final long length) {
+        return blobStream.read(data, length);
+    }
+    
+    /**
+     * Append a restored portion of the BLOB stream to the BLOB buffer, which has the size limit of the message buffer.
+     *
+     * @param portion restored stream portion
      * @throws BatchTooBigException if the portion exceeds the batch buffer size
      */
-    public void appendBlobStream(final ByteBuf data, final long length) {
-        byte[] portion = blobStream.read(data, length);
+    public void appendBlobStream(final byte[] portion) {
         ShardingSpherePreconditions.checkState(blobStreamSize + portion.length <= bufferSize, () -> new BatchTooBigException(statementHandle, blobStreamSize, portion.length, bufferSize));
         blobBuffer.add(portion);
         blobStreamSize += portion.length;

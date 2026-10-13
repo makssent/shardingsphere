@@ -57,7 +57,7 @@ class FirebirdBatchInfoReturnPacketTest {
     void assertWriteDataAndBlobsSize() {
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(7, Collections.emptyList(), 30, 32, 1024L, false, false, BatchItems.BLOB_STREAM);
         batchStatement.addParameterValues(Collections.singletonList(1));
-        batchStatement.appendBlobStream(Unpooled.buffer().writeLong(1L).writeInt(0).writeInt(0), 16L);
+        batchStatement.appendBlobStream(batchStatement.readBlobStream(Unpooled.buffer().writeLong(1L).writeInt(0).writeInt(0), 16L));
         List<FirebirdInfoPacketType> infoItems = Arrays.asList(FirebirdBatchInfoPacketType.DATA_BYTES_SIZE, FirebirdBatchInfoPacketType.BLOBS_BYTES_SIZE);
         assertThat(write(infoItems, batchStatement, 64), is("0b040020000000" + "0c040010000000" + "01"));
     }
