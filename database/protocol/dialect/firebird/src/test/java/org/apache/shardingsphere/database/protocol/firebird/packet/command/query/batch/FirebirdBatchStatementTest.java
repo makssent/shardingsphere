@@ -112,9 +112,9 @@ class FirebirdBatchStatementTest {
     @Test
     void assertAppendBlobStream() {
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), BUFFER_SIZE);
-        batchStatement.appendBlobStream(createBlobHeader(1L, 2, 0).writeBytes(new byte[]{1, 2}), 20L);
+        batchStatement.appendBlobStream(createBlobHeader(0x100000002L, 2, 0).writeBytes(new byte[]{1, 2}), 20L);
         assertThat(batchStatement.getBlobStreamSize(), is(20L));
-        assertThat(batchStatement.getBlobBuffer().iterator().next(), is(new byte[]{0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0}));
+        assertThat(batchStatement.getBlobBuffer().iterator().next(), is(new byte[]{1, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0}));
     }
     
     @Test
@@ -135,17 +135,6 @@ class FirebirdBatchStatementTest {
         assertThat(batchStatement.getBlobBuffer().size(), is(1));
         batchStatement.appendBlobStream(createBlobHeader(3L, 0, 0), 16L);
         assertThat(batchStatement.readStreamBlobs().size(), is(2));
-    }
-    
-    @Test
-    void assertAppendStreamBlob() {
-        ByteBuf data = Unpooled.buffer();
-        writeHeader(data, 0x100000002L, 5, 0);
-        data.writeBytes("abcde".getBytes(StandardCharsets.US_ASCII));
-        byte[] actual = appendBlobStream(createBatchStatement(), data, 24L);
-        ByteBuf expected = Unpooled.buffer().writeIntLE(1).writeIntLE(2).writeIntLE(5).writeIntLE(0).writeBytes("abcde".getBytes(StandardCharsets.US_ASCII)).writeZero(3);
-        assertThat(actual, is(ByteBufUtil.getBytes(expected)));
-        assertThat(data.readerIndex(), is(21));
     }
     
     @Test

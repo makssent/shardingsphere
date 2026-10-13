@@ -311,7 +311,7 @@ class FirebirdExecuteStatementCommandExecutorTest {
     }
     
     @Test
-    void assertBindBlobParameterAndKeepUploadForTransaction() throws SQLException {
+    void assertBindTemporaryBlobParameter() throws SQLException {
         int blobHandle = 13;
         long blobId = 17L;
         byte[] expectedBytes = new byte[]{3, 4};
