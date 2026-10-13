@@ -25,14 +25,18 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementStateException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchBlobStreamCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchColumnDescriptor;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchMessageCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStatement;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdParseBatchBlr;
+import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobIdGenerator;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
 import org.firebirdsql.gds.BlrConstants;
 import org.firebirdsql.jaybird.fb.constants.BatchItems;
 import org.junit.jupiter.api.AfterEach;
@@ -42,6 +46,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -57,10 +62,12 @@ import java.util.stream.Stream;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -85,11 +92,15 @@ class FirebirdBatchStatementManagerTest {
     @Mock
     private FirebirdBatchSetBpbCommandPacket setBpbPacket;
     
+    @Mock(answer = Answers.RETURNS_DEEP_STUBS)
+    private ConnectionSession connectionSession;
+    
     @BeforeEach
     void setUp() {
         manager.registerConnection(CONNECTION_ID);
         FirebirdBlobIdGenerator.getInstance().registerConnection(CONNECTION_ID);
         FirebirdBlobWriteCache.getInstance().registerConnection(CONNECTION_ID);
+        FirebirdStatementIdGenerator.getInstance().registerConnection(CONNECTION_ID);
     }
     
     @AfterEach
@@ -97,6 +108,31 @@ class FirebirdBatchStatementManagerTest {
         manager.unregisterConnection(CONNECTION_ID);
         FirebirdBlobIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
         FirebirdBlobWriteCache.getInstance().unregisterConnection(CONNECTION_ID);
+        FirebirdStatementIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
+    }
+    
+    @Test
+    void assertCheckStatement() {
+        int statementHandle = FirebirdStatementIdGenerator.getInstance().nextStatementId(CONNECTION_ID);
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(statementHandle)).thenReturn(mock(FirebirdServerPreparedStatement.class));
+        assertDoesNotThrow(() -> manager.checkStatement(connectionSession, statementHandle));
+    }
+    
+    @Test
+    void assertCheckStatementWithUnallocatedStatement() {
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        InvalidStatementStateException actual = assertThrows(InvalidStatementStateException.class, () -> manager.checkStatement(connectionSession, STATEMENT_ID));
+        assertFalse(actual.isAllocated());
+    }
+    
+    @Test
+    void assertCheckStatementWithUnpreparedStatement() {
+        int statementHandle = FirebirdStatementIdGenerator.getInstance().nextStatementId(CONNECTION_ID);
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(statementHandle)).thenReturn(null);
+        InvalidStatementStateException actual = assertThrows(InvalidStatementStateException.class, () -> manager.checkStatement(connectionSession, statementHandle));
+        assertTrue(actual.isAllocated());
     }
     
     @Test

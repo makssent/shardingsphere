@@ -19,6 +19,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch;
 
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchWithoutBlobsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementStateException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchRegisterBlobCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchRegistry;
@@ -26,11 +27,14 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExtension;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockSettings;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Answers;
 import org.mockito.Mock;
 
 import java.util.Collection;
@@ -41,16 +45,19 @@ import java.util.Map;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(AutoMockExtension.class)
-@StaticMockSettings(FirebirdBatchRegistry.class)
+@StaticMockSettings({FirebirdBatchRegistry.class, FirebirdStatementIdGenerator.class})
 class FirebirdBatchRegisterBlobCommandExecutorTest {
     
-    @Mock
+    @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private ConnectionSession connectionSession;
     
     @Mock
@@ -66,11 +73,11 @@ class FirebirdBatchRegisterBlobCommandExecutorTest {
     void setUp() {
         when(connectionSession.getConnectionId()).thenReturn(9);
         when(packet.getStatementHandle()).thenReturn(7);
-        when(FirebirdBatchRegistry.getInstance()).thenReturn(batchRegistry);
     }
     
     @Test
     void assertExecute() {
+        mockPreparedStatement();
         when(batchRegistry.getBatchStatement(9, 7)).thenReturn(batchStatement);
         when(batchStatement.hasBatchBlobIdColumn()).thenReturn(true);
         Map<Long, Long> blobIds = new HashMap<>(2);
@@ -88,6 +95,7 @@ class FirebirdBatchRegisterBlobCommandExecutorTest {
     
     @Test
     void assertExecuteWithDuplicateBlob() {
+        mockPreparedStatement();
         when(batchRegistry.getBatchStatement(9, 7)).thenReturn(batchStatement);
         when(batchStatement.hasBatchBlobIdColumn()).thenReturn(true);
         Map<Long, Long> blobIds = new HashMap<>(2);
@@ -103,6 +111,7 @@ class FirebirdBatchRegisterBlobCommandExecutorTest {
     
     @Test
     void assertExecuteWithoutBlobColumns() {
+        mockPreparedStatement();
         when(batchRegistry.getBatchStatement(9, 7)).thenReturn(batchStatement);
         BatchWithoutBlobsException actual = assertThrows(BatchWithoutBlobsException.class, () -> new FirebirdBatchRegisterBlobCommandExecutor(packet, connectionSession).execute());
         assertThat(actual.getStatementHandle(), is(7));
@@ -110,7 +119,28 @@ class FirebirdBatchRegisterBlobCommandExecutorTest {
     }
     
     @Test
+    void assertExecuteWithUnallocatedStatement() {
+        InvalidStatementStateException actual = assertThrows(InvalidStatementStateException.class, () -> new FirebirdBatchRegisterBlobCommandExecutor(packet, connectionSession).execute());
+        assertFalse(actual.isAllocated());
+    }
+    
+    @Test
+    void assertExecuteWithUnpreparedStatement() {
+        when(FirebirdStatementIdGenerator.getInstance().isAllocated(9, 7)).thenReturn(true);
+        when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(7)).thenReturn(null);
+        InvalidStatementStateException actual = assertThrows(InvalidStatementStateException.class, () -> new FirebirdBatchRegisterBlobCommandExecutor(packet, connectionSession).execute());
+        assertTrue(actual.isAllocated());
+    }
+    
+    @Test
     void assertExecuteWithUnknownBatch() {
+        mockPreparedStatement();
         assertThrows(InvalidBatchHandleException.class, () -> new FirebirdBatchRegisterBlobCommandExecutor(packet, connectionSession).execute());
+    }
+    
+    private void mockPreparedStatement() {
+        when(FirebirdStatementIdGenerator.getInstance().isAllocated(9, 7)).thenReturn(true);
+        when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(7)).thenReturn(mock(FirebirdServerPreparedStatement.class));
+        when(FirebirdBatchRegistry.getInstance()).thenReturn(batchRegistry);
     }
 }

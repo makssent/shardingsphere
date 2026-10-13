@@ -18,9 +18,11 @@
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch;
 
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdConnectionClosePacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExtension;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockSettings;
 import org.junit.jupiter.api.Test;
@@ -32,11 +34,12 @@ import java.util.Collection;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(AutoMockExtension.class)
-@StaticMockSettings(FirebirdBatchStatementManager.class)
+@StaticMockSettings({FirebirdBatchStatementManager.class, FirebirdStatementIdGenerator.class})
 class FirebirdBatchSetBpbCommandExecutorTest {
     
     @Mock
@@ -51,10 +54,23 @@ class FirebirdBatchSetBpbCommandExecutorTest {
     @Test
     void assertExecute() {
         when(connectionSession.getConnectionId()).thenReturn(1);
+        when(packet.getStatementHandle()).thenReturn(7);
+        when(FirebirdStatementIdGenerator.getInstance().isAllocated(1, 7)).thenReturn(true);
         when(FirebirdBatchStatementManager.getInstance()).thenReturn(batchStatementManager);
         Collection<DatabasePacket> actual = new FirebirdBatchSetBpbCommandExecutor(packet, connectionSession).execute();
         assertThat(actual.size(), is(1));
         assertThat(actual.iterator().next(), isA(FirebirdGenericResponsePacket.class));
+        verify(batchStatementManager).checkStatement(connectionSession, 7);
         verify(batchStatementManager).setDefaultBpb(1, packet);
+    }
+    
+    @Test
+    void assertExecuteWithUnallocatedStatement() {
+        when(connectionSession.getConnectionId()).thenReturn(1);
+        when(packet.getStatementHandle()).thenReturn(7);
+        Collection<DatabasePacket> actual = new FirebirdBatchSetBpbCommandExecutor(packet, connectionSession).execute();
+        assertThat(actual.size(), is(1));
+        assertThat(actual.iterator().next(), isA(FirebirdConnectionClosePacket.class));
+        verify(batchStatementManager, never()).setDefaultBpb(1, packet);
     }
 }

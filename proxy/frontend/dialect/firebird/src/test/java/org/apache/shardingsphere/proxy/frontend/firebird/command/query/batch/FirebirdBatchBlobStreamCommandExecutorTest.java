@@ -30,6 +30,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchRegistry;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStatement;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdParseBatchBlr;
+import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdConnectionClosePacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
@@ -40,7 +41,10 @@ import org.apache.shardingsphere.infra.metadata.user.Grantee;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
 import org.apache.shardingsphere.proxy.backend.context.ProxyContext;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.proxy.backend.session.ServerPreparedStatementRegistry;
 import org.apache.shardingsphere.proxy.frontend.command.CommandExecutorTask;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
 import org.apache.shardingsphere.proxy.frontend.spi.DatabaseProtocolFrontendEngine;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExtension;
@@ -81,7 +85,7 @@ class FirebirdBatchBlobStreamCommandExecutorTest {
     
     private static final int CONNECTION_ID = 3;
     
-    private static final int STATEMENT_ID = 7;
+    private static final int STATEMENT_ID = 1;
     
     @Mock
     private ConnectionSession connectionSession;
@@ -95,22 +99,39 @@ class FirebirdBatchBlobStreamCommandExecutorTest {
     @BeforeEach
     void setUp() {
         FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
+        FirebirdStatementIdGenerator.getInstance().registerConnection(CONNECTION_ID);
+        FirebirdStatementIdGenerator.getInstance().nextStatementId(CONNECTION_ID);
     }
     
     @AfterEach
     void tearDown() {
         FirebirdBatchRegistry.getInstance().unregisterConnection(CONNECTION_ID);
+        FirebirdStatementIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
     }
     
     @Test
     void assertExecute() {
         FirebirdBatchStatement batchStatement = registerBatchStatement(Collections.singletonList(createBatchBlobIdColumn()), 20L);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
-        FirebirdBatchBlobStreamCommandPacket packet = new FirebirdBatchBlobStreamCommandPacket(new FirebirdPacketPayload(createBlobStreamPacket(), StandardCharsets.UTF_8));
+        ServerPreparedStatementRegistry preparedStatementRegistry = new ServerPreparedStatementRegistry();
+        preparedStatementRegistry.addPreparedStatement(STATEMENT_ID, mock(FirebirdServerPreparedStatement.class));
+        when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(preparedStatementRegistry);
+        FirebirdBatchBlobStreamCommandPacket packet = new FirebirdBatchBlobStreamCommandPacket(new FirebirdPacketPayload(createBlobStreamPacket(STATEMENT_ID), StandardCharsets.UTF_8));
         Collection<DatabasePacket> actual = new FirebirdBatchBlobStreamCommandExecutor(packet, connectionSession).execute();
         assertThat(actual.size(), is(1));
         assertThat(actual.iterator().next(), isA(FirebirdGenericResponsePacket.class));
         assertThat(batchStatement.getBlobStreamSize(), is(20L));
+    }
+    
+    @Test
+    void assertExecuteWithUnallocatedStatement() {
+        FirebirdBatchStatement batchStatement = registerBatchStatement(Collections.singletonList(createBatchBlobIdColumn()), 20L);
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        FirebirdBatchBlobStreamCommandPacket packet = new FirebirdBatchBlobStreamCommandPacket(new FirebirdPacketPayload(createBlobStreamPacket(STATEMENT_ID + 1), StandardCharsets.UTF_8));
+        Collection<DatabasePacket> actual = new FirebirdBatchBlobStreamCommandExecutor(packet, connectionSession).execute();
+        assertThat(actual.size(), is(1));
+        assertThat(actual.iterator().next(), isA(FirebirdConnectionClosePacket.class));
+        assertThat(batchStatement.getBlobStreamSize(), is(0L));
     }
     
     @Test
@@ -119,7 +140,7 @@ class FirebirdBatchBlobStreamCommandExecutorTest {
         ConnectionSession transactionSession = createConnectionSessionInTransaction();
         int transactionHandle = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
         DatabaseProtocolFrontendEngine engine = DatabaseTypedSPILoader.getService(DatabaseProtocolFrontendEngine.class, TypedSPILoader.getService(DatabaseType.class, "Firebird"));
-        new CommandExecutorTask(engine, transactionSession, channelHandlerContext, createBlobStreamPacket()).run();
+        new CommandExecutorTask(engine, transactionSession, channelHandlerContext, createBlobStreamPacket(STATEMENT_ID)).run();
         new CommandExecutorTask(engine, transactionSession, channelHandlerContext, Unpooled.buffer().writeInt(FirebirdCommandPacketType.COMMIT.getValue()).writeInt(transactionHandle)).run();
         FirebirdTransactionIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
         ArgumentCaptor<FirebirdGenericResponsePacket> responseCaptor = ArgumentCaptor.forClass(FirebirdGenericResponsePacket.class);
@@ -136,7 +157,7 @@ class FirebirdBatchBlobStreamCommandExecutorTest {
         ConnectionSession transactionSession = createConnectionSessionInTransaction();
         int transactionHandle = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
         DatabaseProtocolFrontendEngine engine = DatabaseTypedSPILoader.getService(DatabaseProtocolFrontendEngine.class, TypedSPILoader.getService(DatabaseType.class, "Firebird"));
-        new CommandExecutorTask(engine, transactionSession, channelHandlerContext, createBlobStreamPacket()).run();
+        new CommandExecutorTask(engine, transactionSession, channelHandlerContext, createBlobStreamPacket(STATEMENT_ID)).run();
         new CommandExecutorTask(engine, transactionSession, channelHandlerContext, Unpooled.buffer().writeInt(FirebirdCommandPacketType.COMMIT.getValue()).writeInt(transactionHandle)).run();
         FirebirdTransactionIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
         ArgumentCaptor<FirebirdGenericResponsePacket> responseCaptor = ArgumentCaptor.forClass(FirebirdGenericResponsePacket.class);
@@ -160,8 +181,8 @@ class FirebirdBatchBlobStreamCommandExecutorTest {
         return FirebirdParseBatchBlr.parse(blr, blr.readableBytes()).getFields().get(0);
     }
     
-    private ByteBuf createBlobStreamPacket() {
-        return Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_BLOB_STREAM.getValue()).writeInt(STATEMENT_ID).writeInt(20).writeLong(1L).writeInt(4).writeInt(0).writeInt(1);
+    private ByteBuf createBlobStreamPacket(final int statementHandle) {
+        return Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_BLOB_STREAM.getValue()).writeInt(statementHandle).writeInt(20).writeLong(1L).writeInt(4).writeInt(0).writeInt(1);
     }
     
     private ConnectionSession createConnectionSessionInTransaction() {
@@ -176,6 +197,7 @@ class FirebirdBatchBlobStreamCommandExecutorTest {
         result.setAutoCommit(false);
         result.getDatabaseConnectionManager().handleAutoCommit();
         result.getDatabaseConnectionManager().getCachedConnections().put("foo_db.foo_ds", backendConnection);
+        result.getServerPreparedStatementRegistry().addPreparedStatement(STATEMENT_ID, mock(FirebirdServerPreparedStatement.class));
         FirebirdTransactionIdGenerator.getInstance().registerConnection(CONNECTION_ID);
         return result;
     }

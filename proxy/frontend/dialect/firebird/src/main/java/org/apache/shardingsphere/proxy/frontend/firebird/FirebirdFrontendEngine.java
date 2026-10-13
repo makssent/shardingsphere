@@ -34,6 +34,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchStatementTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementStateException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.TransliterationFailedException;
@@ -72,6 +73,7 @@ public final class FirebirdFrontendEngine implements DatabaseProtocolFrontendEng
             InvalidBatchHandleException.class,
             InvalidBatchStatementTypeException.class,
             InvalidBpbVersionException.class,
+            InvalidStatementStateException.class,
             ParameterConversionException.class,
             RepeatedBatchBlobIdException.class,
             TransliterationFailedException.class,

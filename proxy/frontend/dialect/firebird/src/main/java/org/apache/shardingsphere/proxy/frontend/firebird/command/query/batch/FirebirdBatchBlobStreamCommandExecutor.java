@@ -19,11 +19,13 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch;
 
 import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchBlobStreamCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdConnectionClosePacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -41,7 +43,12 @@ public final class FirebirdBatchBlobStreamCommandExecutor implements CommandExec
     @HighFrequencyInvocation
     @Override
     public Collection<DatabasePacket> execute() {
-        FirebirdBatchStatementManager.getInstance().appendBlobStream(connectionSession.getConnectionId(), packet);
+        if (!FirebirdStatementIdGenerator.getInstance().isAllocated(connectionSession.getConnectionId(), packet.getStatementHandle())) {
+            return Collections.singleton(new FirebirdConnectionClosePacket());
+        }
+        FirebirdBatchStatementManager batchStatementManager = FirebirdBatchStatementManager.getInstance();
+        batchStatementManager.checkStatement(connectionSession, packet.getStatementHandle());
+        batchStatementManager.appendBlobStream(connectionSession.getConnectionId(), packet);
         return Collections.singleton(new FirebirdGenericResponsePacket());
     }
 }

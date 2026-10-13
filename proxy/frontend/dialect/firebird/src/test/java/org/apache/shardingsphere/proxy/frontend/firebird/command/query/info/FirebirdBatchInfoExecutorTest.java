@@ -41,6 +41,7 @@ import java.util.Collections;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(AutoMockExtension.class)
@@ -74,6 +75,7 @@ class FirebirdBatchInfoExecutorTest {
         actual.getData().write(new FirebirdPacketPayload(actualData, StandardCharsets.UTF_8));
         assertThat(actual.getHandle(), is(7));
         assertThat(ByteBufUtil.hexDump(actualData), is("0a04000004000001"));
+        verify(batchStatementManager).checkStatement(connectionSession, 7);
     }
     
     @Test

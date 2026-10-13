@@ -44,7 +44,9 @@ public final class FirebirdBatchInfoExecutor implements CommandExecutor {
     
     @Override
     public Collection<DatabasePacket> execute() {
-        FirebirdBatchStatement batchStatement = FirebirdBatchStatementManager.getInstance().getBatchStatement(connectionSession.getConnectionId(), packet.getHandle());
+        FirebirdBatchStatementManager batchStatementManager = FirebirdBatchStatementManager.getInstance();
+        batchStatementManager.checkStatement(connectionSession, packet.getHandle());
+        FirebirdBatchStatement batchStatement = batchStatementManager.getBatchStatement(connectionSession.getConnectionId(), packet.getHandle());
         ShardingSpherePreconditions.checkNotNull(batchStatement, () -> new InvalidBatchHandleException(packet.getHandle()));
         FirebirdBatchInfoReturnPacket infoPacket = new FirebirdBatchInfoReturnPacket(packet.getInfoItems(), batchStatement, packet.getMaxLength());
         return Collections.singleton(new FirebirdGenericResponsePacket().setHandle(packet.getHandle()).setData(infoPacket));

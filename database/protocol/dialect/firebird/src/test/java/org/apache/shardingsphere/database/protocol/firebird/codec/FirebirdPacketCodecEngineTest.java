@@ -36,6 +36,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchRegistry;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStatement;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFreeStatementPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdConnectionClosePacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
@@ -246,6 +247,14 @@ class FirebirdPacketCodecEngineTest {
         ByteBuf byteBuf = mock(ByteBuf.class);
         codecEngine.encode(context, packet, byteBuf);
         verify(packet).write(any(FirebirdPacketPayload.class));
+    }
+    
+    @Test
+    void assertEncodeConnectionClosePacket() {
+        ByteBuf byteBuf = Unpooled.buffer();
+        codecEngine.encode(context, new FirebirdConnectionClosePacket(), byteBuf);
+        assertFalse(byteBuf.isReadable());
+        verify(context.channel()).close();
     }
     
     @Test

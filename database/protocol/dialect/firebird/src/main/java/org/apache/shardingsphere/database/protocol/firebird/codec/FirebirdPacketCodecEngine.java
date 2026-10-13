@@ -35,6 +35,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdParseBatchBlr;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFreeStatementPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdConnectionClosePacket;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
@@ -313,6 +314,10 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
     
     @Override
     public void encode(final ChannelHandlerContext context, final DatabasePacket message, final ByteBuf out) {
+        if (message instanceof FirebirdConnectionClosePacket) {
+            context.channel().close();
+            return;
+        }
         FirebirdPacketPayload payload = new FirebirdPacketPayload(out, context.channel().attr(CommonConstants.CHARSET_ATTRIBUTE_KEY).get());
         Integer connectionId = context.channel().attr(FirebirdConstant.CURRENT_CONNECTION).get();
         if (null != connectionId) {

@@ -33,6 +33,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterWriteNotSupportedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementStateException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.TransliterationFailedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlobFilterException;
@@ -45,9 +46,11 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStreamBlob;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
+import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdBlobParameterBufferUtils;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobIdGenerator;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
 
 import java.util.List;
 import java.util.Optional;
@@ -97,6 +100,20 @@ public final class FirebirdBatchStatementManager {
      */
     public FirebirdBatchStatement getBatchStatement(final int connectionId, final int statementId) {
         return FirebirdBatchRegistry.getInstance().getBatchStatement(connectionId, statementId);
+    }
+    
+    /**
+     * Check the statement of a batch operation as Firebird does before it checks the batch: the statement handle is allocated and the statement is prepared.
+     *
+     * @param connectionSession connection session
+     * @param statementHandle statement handle
+     * @throws InvalidStatementStateException if the statement handle is not allocated or the statement is not prepared
+     */
+    public void checkStatement(final ConnectionSession connectionSession, final int statementHandle) {
+        ShardingSpherePreconditions.checkState(FirebirdStatementIdGenerator.getInstance().isAllocated(connectionSession.getConnectionId(), statementHandle),
+                () -> new InvalidStatementStateException(statementHandle, false));
+        ShardingSpherePreconditions.checkNotNull(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(statementHandle),
+                () -> new InvalidStatementStateException(statementHandle, true));
     }
     
     /**

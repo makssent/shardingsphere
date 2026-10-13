@@ -19,10 +19,12 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch;
 
 import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdConnectionClosePacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -39,7 +41,12 @@ public final class FirebirdBatchSetBpbCommandExecutor implements CommandExecutor
     
     @Override
     public Collection<DatabasePacket> execute() {
-        FirebirdBatchStatementManager.getInstance().setDefaultBpb(connectionSession.getConnectionId(), packet);
+        if (!FirebirdStatementIdGenerator.getInstance().isAllocated(connectionSession.getConnectionId(), packet.getStatementHandle())) {
+            return Collections.singleton(new FirebirdConnectionClosePacket());
+        }
+        FirebirdBatchStatementManager batchStatementManager = FirebirdBatchStatementManager.getInstance();
+        batchStatementManager.checkStatement(connectionSession, packet.getStatementHandle());
+        batchStatementManager.setDefaultBpb(connectionSession.getConnectionId(), packet);
         return Collections.singleton(new FirebirdGenericResponsePacket());
     }
 }

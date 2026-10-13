@@ -34,6 +34,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchStatementTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementStateException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.StringTruncationException;
@@ -156,6 +157,7 @@ class FirebirdFrontendEngineTest {
                 Arguments.of("skip when invalid batch handle exception", true, new InvalidBatchHandleException(1)),
                 Arguments.of("skip when invalid batch statement type exception", true, new InvalidBatchStatementTypeException()),
                 Arguments.of("skip when invalid bpb version exception", true, new InvalidBpbVersionException(2, 1)),
+                Arguments.of("skip when invalid statement state exception", true, new InvalidStatementStateException(1, false)),
                 Arguments.of("skip when parameter conversion exception", true, new ParameterConversionException(new StringTruncationException(20, 32))),
                 Arguments.of("skip when repeated batch blob id exception", true, new RepeatedBatchBlobIdException(1L)),
                 Arguments.of("skip when transliteration failed exception", true, new TransliterationFailedException()),
