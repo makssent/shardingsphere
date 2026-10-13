@@ -32,6 +32,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchStatementTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
@@ -69,6 +70,7 @@ public final class FirebirdFrontendEngine implements DatabaseProtocolFrontendEng
             BlobFilterNotFoundException.class,
             InvalidBatchBlobPolicyException.class,
             InvalidBatchHandleException.class,
+            InvalidBatchStatementTypeException.class,
             InvalidBpbVersionException.class,
             ParameterConversionException.class,
             RepeatedBatchBlobIdException.class,

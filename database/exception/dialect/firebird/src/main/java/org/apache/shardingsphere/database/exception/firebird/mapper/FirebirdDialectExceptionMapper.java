@@ -50,6 +50,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchMessageFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchStatementTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrHandleException;
@@ -85,6 +86,8 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
     
     private static final StatusVectorEntry DYNAMIC_SQL_ERROR = new StatusVectorEntry(ISCConstants.isc_dsql_error, Collections.emptyList());
     
+    private static final StatusVectorEntry BATCH_STATEMENT_SQL_ERROR_CODE = new StatusVectorEntry(ISCConstants.isc_sqlerr, Collections.singletonList(-901));
+    
     private static final StatusVectorEntry BATCH_SQL_ERROR_CODE = new StatusVectorEntry(ISCConstants.isc_sqlerr, Collections.singletonList(-104));
     
     private static final StatusVectorEntry PARAMETER_CONVERSION_SQL_ERROR_CODE = new StatusVectorEntry(ISCConstants.isc_sqlerr, Collections.singletonList(-303));
@@ -118,6 +121,9 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
             InvalidBatchParameterVersionException ex = (InvalidBatchParameterVersionException) sqlDialectException;
             return toSQLException(FirebirdVendorError.INVALID_BATCH_PARAMETER_VERSION, ex.getVersion(), ex.getExpectedVersion());
         }
+        if (sqlDialectException instanceof InvalidBatchStatementTypeException) {
+            return toBatchStatementException(FirebirdVendorError.INVALID_BATCH_STATEMENT_TYPE);
+        }
         if (sqlDialectException instanceof BatchParametersRequiredException) {
             return toSQLException(FirebirdVendorError.BATCH_PARAMETERS_REQUIRED);
         }
@@ -143,6 +149,19 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
         if (sqlDialectException instanceof InvalidParameterValueException) {
             return toSQLException(FirebirdVendorError.CHARSET_NOT_FOUND, ((InvalidParameterValueException) sqlDialectException).getParameterValue());
         }
+        return convertBlobException(sqlDialectException);
+    }
+    
+    private SQLException toSQLException(final VendorError vendorError, final Object... messageArgs) {
+        return new SQLException(String.format(vendorError.getReason(), messageArgs), vendorError.getSqlState().getValue(), vendorError.getVendorCode());
+    }
+    
+    private SQLException toBatchStatementException(final VendorError vendorError) {
+        return new FirebirdException(vendorError.getReason(), vendorError.getSqlState().getValue(), vendorError.getVendorCode(),
+                Arrays.asList(DYNAMIC_SQL_ERROR, BATCH_STATEMENT_SQL_ERROR_CODE, new StatusVectorEntry(vendorError.getVendorCode(), Collections.emptyList())));
+    }
+    
+    private SQLException convertBlobException(final SQLDialectException sqlDialectException) {
         if (sqlDialectException instanceof InvalidSegstrHandleException) {
             return toSQLException(FirebirdVendorError.INVALID_SEGSTR_HANDLE);
         }
@@ -241,10 +260,6 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
             return toParameterConversionException(convert(((ParameterConversionException) sqlDialectException).getConversionError()));
         }
         return new UnknownSQLException(sqlDialectException).toSQLException();
-    }
-    
-    private SQLException toSQLException(final VendorError vendorError, final Object... messageArgs) {
-        return new SQLException(String.format(vendorError.getReason(), messageArgs), vendorError.getSqlState().getValue(), vendorError.getVendorCode());
     }
     
     private SQLException toFirebirdException(final VendorError vendorError, final Object... args) {

@@ -32,6 +32,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchStatementTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
@@ -153,6 +154,7 @@ class FirebirdFrontendEngineTest {
                 Arguments.of("skip when blob filter not found exception", true, new BlobFilterNotFoundException(0, 2)),
                 Arguments.of("skip when invalid batch blob policy exception", true, new InvalidBatchBlobPolicyException("addBlobStream")),
                 Arguments.of("skip when invalid batch handle exception", true, new InvalidBatchHandleException(1)),
+                Arguments.of("skip when invalid batch statement type exception", true, new InvalidBatchStatementTypeException()),
                 Arguments.of("skip when invalid bpb version exception", true, new InvalidBpbVersionException(2, 1)),
                 Arguments.of("skip when parameter conversion exception", true, new ParameterConversionException(new StringTruncationException(20, 32))),
                 Arguments.of("skip when repeated batch blob id exception", true, new RepeatedBatchBlobIdException(1L)),

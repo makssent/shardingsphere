@@ -52,6 +52,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchMessageFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchStatementTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrHandleException;
@@ -142,6 +143,14 @@ class FirebirdDialectExceptionMapperTest {
     @Test
     void assertConvertWithInvalidBatchParameterVersion() {
         assertSQLException(mapper.convert(new InvalidBatchParameterVersionException(2, 1)), FirebirdVendorError.INVALID_BATCH_PARAMETER_VERSION, 2, 1);
+    }
+    
+    @Test
+    void assertConvertWithInvalidBatchStatementType() {
+        SQLException actual = mapper.convert(new InvalidBatchStatementTypeException());
+        assertSQLException(actual, FirebirdVendorError.INVALID_BATCH_STATEMENT_TYPE);
+        assertStatusVector(actual,
+                Arrays.asList(Collections.singletonList(ISCConstants.isc_dsql_error), Arrays.asList(ISCConstants.isc_sqlerr, -901), Collections.singletonList(ISCConstants.isc_batch_type)));
     }
     
     @Test
