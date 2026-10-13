@@ -27,6 +27,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.internal.configuration.plugins.Plugins;
 
 import java.lang.ref.Reference;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -46,8 +48,9 @@ class FirebirdBlobWriteCacheTest {
     
     @AfterEach
     void tearDown() {
-        getHandleCache().clear();
-        getIdCache().clear();
+        Collection<Integer> connectionIds = new HashSet<>(getHandleCache().keySet());
+        connectionIds.addAll(getIdCache().keySet());
+        connectionIds.forEach(CACHE::unregisterConnection);
     }
     
     @Test

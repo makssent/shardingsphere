@@ -80,7 +80,7 @@ class FirebirdCommitTransactionCommandExecutorTest {
     }
     
     @Test
-    void assertExecuteClearsBlobWritesOfTransaction() throws SQLException {
+    void assertExecuteWithBlobWritesOfTransaction() throws SQLException {
         FirebirdBlobWriteCache.getInstance().registerConnection(CONNECTION_ID);
         try {
             FirebirdBlobWriteCache.getInstance().registerBlob(CONNECTION_ID, 11, 21L, 1, false);

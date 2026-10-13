@@ -247,16 +247,16 @@ class FirebirdBlobParameterConverterTest {
     }
     
     private static FirebirdReturnColumnPacket createParameter(final int dataType, final Integer length) {
-        ShardingSphereColumn column = new ShardingSphereColumn("C", dataType, false, false, true, true, false, true);
+        ShardingSphereColumn column = new ShardingSphereColumn("foo_col", dataType, false, false, true, true, false, true);
         return new FirebirdReturnColumnPacket(Collections.emptyList(), 1, createTable(), column, null, null, null, length, false, null);
     }
     
     private static FirebirdReturnColumnPacket createBlobParameter(final int subType) {
-        ShardingSphereColumn column = new ShardingSphereColumn("C", Types.BLOB, false, false, true, true, false, true);
+        ShardingSphereColumn column = new ShardingSphereColumn("foo_col", Types.BLOB, false, false, true, true, false, true);
         return new FirebirdReturnColumnPacket(Collections.emptyList(), 1, createTable(), column, null, null, null, null, true, subType);
     }
     
     private static ShardingSphereTable createTable() {
-        return new ShardingSphereTable("T", Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+        return new ShardingSphereTable("foo_tbl", Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
     }
 }
