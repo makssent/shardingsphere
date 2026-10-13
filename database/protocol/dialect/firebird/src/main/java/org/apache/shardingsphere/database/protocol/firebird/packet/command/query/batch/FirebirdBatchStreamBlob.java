@@ -36,6 +36,7 @@ public final class FirebirdBatchStreamBlob {
     
     private final byte[] bpb;
     
+    @Getter(AccessLevel.PACKAGE)
     private final boolean segmented;
     
     private final ByteArrayOutputStream data = new ByteArrayOutputStream();

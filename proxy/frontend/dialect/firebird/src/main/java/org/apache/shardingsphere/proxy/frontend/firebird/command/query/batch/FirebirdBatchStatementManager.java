@@ -145,7 +145,7 @@ public final class FirebirdBatchStatementManager {
      * @throws BatchTooBigException if the stream portion exceeds the batch buffer size
      */
     @HighFrequencyInvocation
-    public void appendBlobStream(final int connectionId, final FirebirdBatchBlobStreamCommandPacket packet) {
+    void appendBlobStream(final int connectionId, final FirebirdBatchBlobStreamCommandPacket packet) {
         FirebirdBatchStatement batchStatement = getBatchStatement(connectionId, packet.getStatementHandle());
         ShardingSpherePreconditions.checkNotNull(batchStatement, () -> new InvalidBatchHandleException(packet.getStatementHandle()));
         ShardingSpherePreconditions.checkState(batchStatement.isBlobStreamAllowed(), () -> new InvalidBatchBlobPolicyException("addBlobStream"));
@@ -160,7 +160,7 @@ public final class FirebirdBatchStatementManager {
      * @throws InvalidBatchHandleException if batch statement does not exist
      * @throws BatchDefaultBpbChangeException if batch already contains BLOB stream data
      */
-    public void setDefaultBpb(final int connectionId, final FirebirdBatchSetBpbCommandPacket packet) {
+    void setDefaultBpb(final int connectionId, final FirebirdBatchSetBpbCommandPacket packet) {
         FirebirdBatchStatement batchStatement = getBatchStatement(connectionId, packet.getStatementHandle());
         ShardingSpherePreconditions.checkNotNull(batchStatement, () -> new InvalidBatchHandleException(packet.getStatementHandle()));
         batchStatement.getBlobStream().setDefaultBpb(packet.getBpb());
@@ -185,7 +185,7 @@ public final class FirebirdBatchStatementManager {
      * @throws TransliterationFailedException if BLOB data cannot be transliterated as its BLOB parameter buffer requires
      */
     @HighFrequencyInvocation
-    public void registerStreamBlobs(final FirebirdBatchStatement batchStatement, final int connectionCharsetId) {
+    void registerStreamBlobs(final FirebirdBatchStatement batchStatement, final int connectionCharsetId) {
         for (FirebirdBatchStreamBlob each : batchStatement.readStreamBlobs()) {
             byte[] data = each.getData().toByteArray();
             byte[] content = FirebirdBlobParameterBufferUtils.createTransliterator(each.getBpb(), connectionCharsetId).map(transliterator -> transliterator.put(data)).orElse(data);
