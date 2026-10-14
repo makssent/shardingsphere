@@ -26,6 +26,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchStatementTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.WrongParameterCountException;
 import org.apache.shardingsphere.database.protocol.firebird.err.FirebirdErrorPacketFactory;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchCreateCommandPacket;
@@ -36,7 +37,9 @@ import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.ReturningSegment;
+import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.simple.ParameterMarkerExpressionSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.subquery.SubquerySegment;
+import org.apache.shardingsphere.sql.parser.statement.core.segment.generic.ParameterMarkerSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.ddl.ExecuteStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.DeleteStatement;
@@ -56,6 +59,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -120,6 +124,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(mock(InsertStatement.class));
         when(packet.getBatchBlr()).thenReturn(createBatchBlr());
         when(packet.getBatchMessageLength()).thenReturn(6L);
+        mockParameterMarkers(1);
         when(packet.getBatchParametersBuffer()).thenReturn(Unpooled.EMPTY_BUFFER);
         Collection<DatabasePacket> actual = new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute();
         assertThat(actual.size(), is(1));
@@ -147,6 +152,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(mock(InsertStatement.class));
         when(packet.getBatchBlr()).thenReturn(createBatchBlr());
         when(packet.getBatchMessageLength()).thenReturn(6L);
+        mockParameterMarkers(1);
         when(packet.getBatchParametersBuffer()).thenReturn(createBatchParametersBuffer(TAG_RECORD_COUNTS, 1));
         new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute();
         assertTrue(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID).isRecordCounts());
@@ -161,6 +167,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(mock(InsertStatement.class));
         when(packet.getBatchBlr()).thenReturn(createBatchBlr());
         when(packet.getBatchMessageLength()).thenReturn(6L);
+        mockParameterMarkers(1);
         when(packet.getBatchParametersBuffer()).thenReturn(createBatchParametersBuffer(TAG_MULTIERROR, 1));
         new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute();
         assertTrue(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID).isMultiError());
@@ -196,7 +203,40 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
         when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(mock(InsertStatement.class));
         when(packet.getBatchBlr()).thenReturn(createEmptyBatchBlr());
+        mockParameterMarkers(1);
+        WrongParameterCountException actual = assertThrows(WrongParameterCountException.class, () -> new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute());
+        assertThat(actual.getExpectedCount(), is(1));
+        assertThat(actual.getActualCount(), is(0));
+    }
+    
+    @Test
+    void assertExecuteWithoutStatementParameters() {
+        FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
+        when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(mock(InsertStatement.class));
+        when(packet.getBatchBlr()).thenReturn(createBatchBlr());
+        when(packet.getBatchMessageLength()).thenReturn(6L);
+        mockParameterMarkers(0);
         assertThrows(BatchParametersRequiredException.class, () -> new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute());
+        assertNull(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID));
+    }
+    
+    @Test
+    void assertExecuteWhenParameterCountMismatched() {
+        FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
+        when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
+        when(connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(STATEMENT_ID)).thenReturn(preparedStatement);
+        when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(mock(InsertStatement.class));
+        when(packet.getBatchBlr()).thenReturn(createBatchBlr());
+        when(packet.getBatchMessageLength()).thenReturn(6L);
+        mockParameterMarkers(2);
+        WrongParameterCountException actual = assertThrows(WrongParameterCountException.class, () -> new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute());
+        assertThat(actual.getExpectedCount(), is(2));
+        assertThat(actual.getActualCount(), is(1));
+        assertNull(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID));
     }
     
     @ParameterizedTest(name = "{0}")
@@ -209,6 +249,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(sqlStatement);
         when(packet.getBatchBlr()).thenReturn(createBatchBlr());
         when(packet.getBatchMessageLength()).thenReturn(6L);
+        mockParameterMarkers(1);
         new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute();
         assertNotNull(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID));
     }
@@ -398,6 +439,14 @@ class FirebirdBatchCreateCommandExecutorTest {
                 Arguments.of("delete with returning", deleteWithReturning),
                 Arguments.of("merge with returning", mergeWithReturning),
                 Arguments.of("other statement", mock(SQLStatement.class)));
+    }
+    
+    private void mockParameterMarkers(final int count) {
+        Collection<ParameterMarkerSegment> parameterMarkers = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            parameterMarkers.add(new ParameterMarkerExpressionSegment(0, 0, i));
+        }
+        when(preparedStatement.getSqlStatementContext().getSqlStatement().getParameterMarkers()).thenReturn(parameterMarkers);
     }
     
     private ByteBuf createBatchBlr() {

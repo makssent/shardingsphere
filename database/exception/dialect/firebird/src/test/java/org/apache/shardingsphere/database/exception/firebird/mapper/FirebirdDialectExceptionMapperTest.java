@@ -43,6 +43,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.WrongParameterCountException;
 import org.apache.shardingsphere.database.exception.firebird.vendor.FirebirdVendorError;
 import org.apache.shardingsphere.infra.exception.external.sql.vendor.VendorError;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
@@ -128,7 +129,18 @@ class FirebirdDialectExceptionMapperTest {
     
     @Test
     void assertConvertWithBatchParametersRequired() {
-        assertSQLException(mapper.convert(new BatchParametersRequiredException(42)), FirebirdVendorError.BATCH_PARAMETERS_REQUIRED);
+        SQLException actual = mapper.convert(new BatchParametersRequiredException(42));
+        assertSQLException(actual, FirebirdVendorError.BATCH_PARAMETERS_REQUIRED);
+        assertStatusVector(actual,
+                Arrays.asList(Collections.singletonList(ISCConstants.isc_dsql_error), Arrays.asList(ISCConstants.isc_sqlerr, -901), Collections.singletonList(ISCConstants.isc_batch_param)));
+    }
+    
+    @Test
+    void assertConvertWithWrongParameterCount() {
+        SQLException actual = mapper.convert(new WrongParameterCountException(2, 1));
+        assertSQLException(actual, FirebirdVendorError.WRONG_PARAMETER_COUNT, 2, 1);
+        assertStatusVector(actual, Arrays.asList(Collections.singletonList(ISCConstants.isc_dsql_error), Collections.singletonList(ISCConstants.isc_dsql_sqlda_err),
+                Arrays.asList(ISCConstants.isc_dsql_wrong_param_num, 2, 1)));
     }
     
     @Test

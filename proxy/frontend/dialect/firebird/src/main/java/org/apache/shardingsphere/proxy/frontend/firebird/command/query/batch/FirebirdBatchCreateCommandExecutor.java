@@ -27,6 +27,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchStatementTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.WrongParameterCountException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchCreateCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdParseBatchBlr;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
@@ -97,9 +98,10 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
         ByteBuf batchParametersBuffer = packet.getBatchParametersBuffer();
         BatchParameters batchParameters = BatchParameters.parse(batchParametersBuffer);
         ShardingSpherePreconditions.checkState(isBatchStatement(preparedStatement.getSqlStatementContext().getSqlStatement()), InvalidBatchStatementTypeException::new);
-        if (messageFormat.getFields().isEmpty()) {
-            throw new BatchParametersRequiredException(statementId);
-        }
+        int parameterCount = preparedStatement.getSqlStatementContext().getSqlStatement().getParameterMarkers().size();
+        ShardingSpherePreconditions.checkState(0 != parameterCount, () -> new BatchParametersRequiredException(statementId));
+        int fieldCount = messageFormat.getFields().size();
+        ShardingSpherePreconditions.checkState(parameterCount == fieldCount, () -> new WrongParameterCountException(parameterCount, fieldCount));
         FirebirdBatchStatementManager.getInstance().registerBatchStatement(
                 connectionId, statementId, messageFormat.getFields(), batchParameters.getBufferSize(), batchParameters.isRecordCounts(), batchParameters.isMultiError());
         return Collections.singleton(new FirebirdGenericResponsePacket().setHandle(statementId));
