@@ -20,6 +20,7 @@ package org.apache.shardingsphere.database.protocol.firebird.packet.command.quer
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlrVersionException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.firebirdsql.gds.BlrConstants;
 import org.junit.jupiter.api.Test;
@@ -80,6 +81,22 @@ class FirebirdParseBatchBlrTest {
     void assertParseInvalidHeader(final String name, final byte[] blrBytes, final int blrLength, final String expectedMessage) {
         IllegalArgumentException actual = assertThrows(IllegalArgumentException.class, () -> FirebirdParseBatchBlr.parse(Unpooled.wrappedBuffer(blrBytes), blrLength));
         assertThat(actual.getMessage(), is(expectedMessage));
+    }
+    
+    @Test
+    void assertParseWithUnsupportedVersion() {
+        UnsupportedBlrVersionException actual = assertThrows(UnsupportedBlrVersionException.class,
+                () -> FirebirdParseBatchBlr.parse(Unpooled.wrappedBuffer(header(99, BlrConstants.blr_begin, BlrConstants.blr_message)), 6));
+        assertThat(actual.getMinVersion(), is(BlrConstants.blr_version4));
+        assertThat(actual.getMaxVersion(), is(BlrConstants.blr_version5));
+        assertThat(actual.getVersion(), is(99));
+    }
+    
+    @Test
+    void assertParseForFramingWithUnsupportedVersion() {
+        IllegalArgumentException actual = assertThrows(IllegalArgumentException.class,
+                () -> FirebirdParseBatchBlr.parseForFraming(Unpooled.wrappedBuffer(header(99, BlrConstants.blr_begin, BlrConstants.blr_message)), 6));
+        assertThat(actual.getMessage(), is("Unsupported BLR version: 99"));
     }
     
     @ParameterizedTest(name = "{0}")
@@ -169,7 +186,6 @@ class FirebirdParseBatchBlrTest {
     private static Stream<Arguments> invalidHeaderArguments() {
         return Stream.of(
                 Arguments.of("too_short", new byte[]{(byte) BlrConstants.blr_version5, (byte) BlrConstants.blr_begin, (byte) BlrConstants.blr_message}, 3, "BLR is too short: 3"),
-                Arguments.of("unsupported_version", header(99, BlrConstants.blr_begin, BlrConstants.blr_message), 6, "Unsupported BLR version: 99"),
                 Arguments.of("missing_begin", header(BlrConstants.blr_version5, BlrConstants.blr_end, BlrConstants.blr_message), 6, "Expected blr_begin"),
                 Arguments.of("missing_message", header(BlrConstants.blr_version5, BlrConstants.blr_begin, BlrConstants.blr_end), 6, "Expected blr_message"));
     }

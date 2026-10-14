@@ -62,6 +62,8 @@ public enum FirebirdVendorError implements VendorError {
     
     BATCH_ALREADY_OPENED(FirebirdState.BATCH_ALREADY_OPENED, ISCConstants.isc_batch_open, ""),
     
+    UNSUPPORTED_BLR_VERSION(XOpenSQLState.GENERAL_ERROR, ISCConstants.isc_wroblrver2, "unsupported BLR version (expected between %d and %d, encountered %d)"),
+    
     INVALID_BATCH_PARAMETER_VERSION(XOpenSQLState.DATA_EXCEPTION, ISCConstants.isc_batch_param_version, "Wrong version of batch parameters block %d, should be %d"),
     
     BATCH_PARAMETERS_REQUIRED(FirebirdState.BATCH_PARAMETERS_REQUIRED, ISCConstants.isc_batch_param, "Statement used in batch must have parameters"),

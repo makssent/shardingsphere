@@ -43,6 +43,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlrVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.WrongParameterCountException;
 import org.apache.shardingsphere.database.exception.firebird.vendor.FirebirdVendorError;
 import org.apache.shardingsphere.infra.exception.external.sql.vendor.VendorError;
@@ -145,7 +146,17 @@ class FirebirdDialectExceptionMapperTest {
     
     @Test
     void assertConvertWithInvalidBatchMessageFormat() {
-        assertSQLException(mapper.convert(new InvalidBatchMessageFormatException("invalid message length")), FirebirdVendorError.SQLDA_ERROR);
+        SQLException actual = mapper.convert(new InvalidBatchMessageFormatException("invalid message length"));
+        assertSQLException(actual, FirebirdVendorError.SQLDA_ERROR);
+        assertStatusVector(actual, Arrays.asList(Arrays.asList(ISCConstants.isc_sqlerr, -804), Collections.singletonList(ISCConstants.isc_dsql_sqlda_err)));
+    }
+    
+    @Test
+    void assertConvertWithUnsupportedBlrVersion() {
+        SQLException actual = mapper.convert(new UnsupportedBlrVersionException(4, 5, 3));
+        assertSQLException(actual, FirebirdVendorError.UNSUPPORTED_BLR_VERSION, 4, 5, 3);
+        assertStatusVector(actual, Arrays.asList(Collections.singletonList(ISCConstants.isc_dsql_error), Arrays.asList(ISCConstants.isc_sqlerr, -804),
+                Arrays.asList(ISCConstants.isc_wroblrver2, 4, 5, 3)));
     }
     
     @Test
