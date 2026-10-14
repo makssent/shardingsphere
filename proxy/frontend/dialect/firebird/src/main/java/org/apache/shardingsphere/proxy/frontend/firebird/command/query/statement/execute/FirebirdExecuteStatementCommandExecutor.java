@@ -27,6 +27,7 @@ import org.apache.shardingsphere.database.protocol.binary.BinaryRow;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.FirebirdExecuteStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.protocol.FirebirdBlobBinaryProtocolValue;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdReturnColumnPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdSQLResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
@@ -51,7 +52,14 @@ import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementResourceCleaner;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.fetch.FirebirdFetchStatementCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
+import org.firebirdsql.encodings.EncodingDefinition;
+import org.firebirdsql.encodings.EncodingFactory;
+import org.firebirdsql.gds.ISCConstants;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CodingErrorAction;
 import java.sql.SQLException;
 import java.util.Collection;
 import java.util.LinkedList;
@@ -108,7 +116,7 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
     }
     
     private ResponseHeader executePreparedStatement(final FirebirdServerPreparedStatement preparedStatement, final List<Object> params) throws SQLException {
-        List<Long> blobIdsToRemove = bindBlobParameters(params);
+        List<Long> blobIdsToRemove = bindBlobParameters(preparedStatement.getParameterColumns(), params);
         try {
             SQLStatementContext sqlStatementContext = preparedStatement.getSqlStatementContext();
             if (sqlStatementContext instanceof ParameterAware) {
@@ -123,7 +131,7 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
         }
     }
     
-    private List<Long> bindBlobParameters(final List<Object> params) {
+    private List<Long> bindBlobParameters(final List<FirebirdReturnColumnPacket> parameterColumns, final List<Object> params) {
         List<FirebirdBinaryColumnType> parameterTypes = packet.getParameterTypes();
         List<Long> blobIds = new LinkedList<>();
         int paramCount = Math.min(parameterTypes.size(), params.size());
@@ -149,11 +157,35 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
             }
             ShardingSpherePreconditions.checkState(FirebirdBlobWriteCache.getInstance().isClosed(connectionSession.getConnectionId(), blobId), () -> new InvalidSegstrIdException(blobId));
             Optional<byte[]> blobData = FirebirdBlobWriteCache.getInstance().getBlobData(connectionSession.getConnectionId(), blobId);
-            byte[] bytes = blobData.get();
-            params.set(i, bytes);
+            params.set(i, toBlobParameterValue(parameterColumns, i, blobData.get()));
             blobIds.add(blobId);
         }
         return blobIds;
+    }
+    
+    private Object toBlobParameterValue(final List<FirebirdReturnColumnPacket> parameterColumns, final int index, final byte[] content) {
+        Optional<Charset> charset = findTextBlobCharset(parameterColumns, index);
+        if (!charset.isPresent()) {
+            return content;
+        }
+        try {
+            return charset.get().newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(content)).toString();
+        } catch (final CharacterCodingException ignored) {
+            return content;
+        }
+    }
+    
+    private Optional<Charset> findTextBlobCharset(final List<FirebirdReturnColumnPacket> parameterColumns, final int index) {
+        if (index >= parameterColumns.size()) {
+            return Optional.empty();
+        }
+        FirebirdReturnColumnPacket parameterColumn = parameterColumns.get(index);
+        if (FirebirdBinaryColumnType.BLOB != parameterColumn.getColumnType() || !Integer.valueOf(ISCConstants.BLOB_SUB_TYPE_TEXT).equals(parameterColumn.getBlobSubType())
+                || ISCConstants.CS_NONE == parameterColumn.getBlobCharsetId() || ISCConstants.CS_BINARY == parameterColumn.getBlobCharsetId()) {
+            return Optional.empty();
+        }
+        EncodingDefinition encodingDefinition = EncodingFactory.getPlatformDefault().getEncodingDefinitionByCharacterSetId(parameterColumn.getBlobCharsetId());
+        return null == encodingDefinition || encodingDefinition.isInformationOnly() ? Optional.empty() : Optional.ofNullable(encodingDefinition.getJavaCharset());
     }
     
     private void clearBlobUploads(final List<Long> blobIds) {

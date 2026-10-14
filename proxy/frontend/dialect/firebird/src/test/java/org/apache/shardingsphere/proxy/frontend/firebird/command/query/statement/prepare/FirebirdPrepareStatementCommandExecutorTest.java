@@ -76,6 +76,7 @@ import java.sql.Types;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.stream.Stream;
@@ -233,6 +234,25 @@ class FirebirdPrepareStatementCommandExecutorTest {
         verify(payload).writeInt4LE(FirebirdBinaryColumnType.BLOB.getSubtype());
     }
     
+    @Test
+    void assertDescribeBindStoresParameterColumns() throws Exception {
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id, content) VALUES (?, ?)");
+        when(packet.nextItem()).thenReturn(true, true, true, true, true, false);
+        when(packet.getCurrentItem()).thenReturn(
+                FirebirdSQLInfoPacketType.STMT_TYPE,
+                FirebirdSQLInfoPacketType.BIND,
+                FirebirdSQLInfoPacketType.TYPE,
+                FirebirdSQLInfoPacketType.TYPE,
+                FirebirdSQLInfoPacketType.DESCRIBE_END,
+                FirebirdSQLInfoPacketType.DESCRIBE_END);
+        Collection<DatabasePacket> actual = new FirebirdPrepareStatementCommandExecutor(packet, connectionSession).execute();
+        FirebirdPrepareStatementReturnPacket returnPacket = (FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) actual.iterator().next()).getData();
+        List<FirebirdReturnColumnPacket> actualParameterColumns = connectionSession.getServerPreparedStatementRegistry().<FirebirdServerPreparedStatement>getPreparedStatement(1).getParameterColumns();
+        assertThat(actualParameterColumns, is(returnPacket.getDescribeBind()));
+        assertThat(actualParameterColumns.get(0).getColumnType(), is(FirebirdBinaryColumnType.LONG));
+        assertThat(actualParameterColumns.get(1).getColumnType(), is(FirebirdBinaryColumnType.BLOB));
+    }
+    
     @ParameterizedTest(name = "{0}")
     @MethodSource("describeBindBlobCharsetArguments")
     void assertDescribeBindBlobParameterCharset(final String name, final int blobSubtype, final int columnCharsetId, final int connectionCharsetId, final int expectedCharsetId) throws Exception {
@@ -247,9 +267,9 @@ class FirebirdPrepareStatementCommandExecutorTest {
                 FirebirdSQLInfoPacketType.SCALE,
                 FirebirdSQLInfoPacketType.DESCRIBE_END,
                 FirebirdSQLInfoPacketType.DESCRIBE_END);
-        Collection<DatabasePacket> actual = new FirebirdPrepareStatementCommandExecutor(packet, connectionSession).execute();
+        new FirebirdPrepareStatementCommandExecutor(packet, connectionSession).execute();
         FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
-        ((FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) actual.iterator().next()).getData()).getDescribeBind().get(1).write(payload);
+        connectionSession.getServerPreparedStatementRegistry().<FirebirdServerPreparedStatement>getPreparedStatement(1).getParameterColumns().get(1).write(payload);
         verify(payload).writeInt4LE(expectedCharsetId);
     }
     
