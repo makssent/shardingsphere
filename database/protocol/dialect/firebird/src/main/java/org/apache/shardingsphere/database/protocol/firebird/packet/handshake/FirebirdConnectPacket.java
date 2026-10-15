@@ -24,7 +24,6 @@ import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdAut
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdUserDataType;
 import org.apache.shardingsphere.database.protocol.firebird.constant.protocol.FirebirdProtocol;
 import org.apache.shardingsphere.database.protocol.firebird.packet.FirebirdPacket;
-import org.apache.shardingsphere.database.protocol.firebird.packet.command.FirebirdCommandPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 
 import java.nio.charset.StandardCharsets;
@@ -41,8 +40,6 @@ import java.util.TreeMap;
 @Getter
 public final class FirebirdConnectPacket extends FirebirdPacket {
     
-    private final FirebirdCommandPacketType opCode;
-    
     private final int connectVersion;
     
     private final FirebirdArchType archType;
@@ -56,7 +53,7 @@ public final class FirebirdConnectPacket extends FirebirdPacket {
     private final List<FirebirdProtocol> userProtocols = new ArrayList<>();
     
     public FirebirdConnectPacket(final FirebirdPacketPayload payload) {
-        opCode = FirebirdCommandPacketType.valueOf(payload.readInt4());
+        payload.skipReserved(4);
         connectVersion = payload.readInt4();
         archType = FirebirdArchType.valueOf(payload.readInt4());
         database = payload.readString();
