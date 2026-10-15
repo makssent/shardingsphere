@@ -47,7 +47,7 @@ class FirebirdDatabaseInfoReturnPacketTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("databaseInfoTypes")
     void assertWriteWithDatabaseInfoType(final String name, final FirebirdDatabaseInfoPacketType infoType, final int expectedLength, final int expectedValue, final boolean int1Value) {
-        new FirebirdDatabaseInfoReturnPacket(Collections.singletonList(infoType)).write(payload);
+        new FirebirdDatabaseInfoReturnPacket(Collections.singletonList(infoType), 52).write(payload);
         InOrder order = inOrder(payload);
         order.verify(payload).writeInt1(infoType.getCode());
         order.verify(payload).writeInt2LE(expectedLength);
@@ -60,7 +60,7 @@ class FirebirdDatabaseInfoReturnPacketTest {
     
     @Test
     void assertWriteFirebirdVersion() {
-        new FirebirdDatabaseInfoReturnPacket(Collections.singletonList(FirebirdDatabaseInfoPacketType.FIREBIRD_VERSION)).write(payload);
+        new FirebirdDatabaseInfoReturnPacket(Collections.singletonList(FirebirdDatabaseInfoPacketType.FIREBIRD_VERSION), 0).write(payload);
         String fbVersion = String.format("%s-%s%d.%d.%d.%d Firebird %d.%d (ShardingSphere-Proxy)", FirebirdArchType.ARCHITECTURE.getIdentifier(), "V", 5, 0, 0, 0, 5, 0);
         InOrder order = inOrder(payload);
         order.verify(payload).writeInt1(FirebirdDatabaseInfoPacketType.FIREBIRD_VERSION.getCode());
@@ -72,12 +72,12 @@ class FirebirdDatabaseInfoReturnPacketTest {
     
     @Test
     void assertParseDatabaseInfoWithUnknownType() {
-        assertThrows(DatabaseProtocolException.class, () -> new FirebirdDatabaseInfoReturnPacket(Collections.singletonList(FirebirdDatabaseInfoPacketType.DB_ID)).write(payload));
+        assertThrows(DatabaseProtocolException.class, () -> new FirebirdDatabaseInfoReturnPacket(Collections.singletonList(FirebirdDatabaseInfoPacketType.DB_ID), 0).write(payload));
     }
     
     @Test
     void assertWriteCommonInfo() {
-        new FirebirdDatabaseInfoReturnPacket(Collections.singletonList(FirebirdCommonInfoPacketType.END)).write(payload);
+        new FirebirdDatabaseInfoReturnPacket(Collections.singletonList(FirebirdCommonInfoPacketType.END), 0).write(payload);
         verify(payload).writeInt1(FirebirdCommonInfoPacketType.END.getCode());
     }
     
@@ -85,6 +85,7 @@ class FirebirdDatabaseInfoReturnPacketTest {
         return Stream.of(
                 Arguments.of("db sql dialect", FirebirdDatabaseInfoPacketType.DB_SQL_DIALECT, 1, 3, true),
                 Arguments.of("ods version", FirebirdDatabaseInfoPacketType.ODS_VERSION, 4, 13, false),
-                Arguments.of("ods minor version", FirebirdDatabaseInfoPacketType.ODS_MINOR_VERSION, 4, 1, false));
+                Arguments.of("ods minor version", FirebirdDatabaseInfoPacketType.ODS_MINOR_VERSION, 4, 1, false),
+                Arguments.of("attachment charset", FirebirdDatabaseInfoPacketType.ATT_CHARSET, 4, 52, false));
     }
 }

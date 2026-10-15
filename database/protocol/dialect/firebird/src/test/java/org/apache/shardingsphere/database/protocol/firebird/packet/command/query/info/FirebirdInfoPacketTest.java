@@ -18,6 +18,7 @@
 package org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.common.FirebirdCommonInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Arrays;
 import java.util.List;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -62,6 +64,13 @@ class FirebirdInfoPacketTest {
         List<FirebirdInfoPacketType> infoItems = actual.getInfoItems();
         assertThat(infoItems.get(0), is(FirebirdSQLInfoPacketType.RECORDS));
         assertThat(infoItems.get(1), is(FirebirdCommonInfoPacketType.END));
+    }
+    
+    @Test
+    void assertNewInstanceWithItemsAfterEnd() {
+        when(payload.readBuffer()).thenReturn(Unpooled.wrappedBuffer(new byte[]{(byte) FirebirdSQLInfoPacketType.RECORDS.getCode(), 1, 1}));
+        FirebirdInfoPacket actual = new FirebirdInfoPacket(payload, FirebirdSQLInfoPacketType::valueOf);
+        assertThat(actual.getInfoItems(), is(Arrays.asList(FirebirdSQLInfoPacketType.RECORDS, FirebirdCommonInfoPacketType.END)));
     }
     
     @Test

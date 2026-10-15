@@ -65,6 +65,8 @@ public final class FirebirdDatabaseInfoReturnPacket extends FirebirdPacket {
     
     private final List<FirebirdInfoPacketType> infoItems;
     
+    private final int connectionCharsetId;
+    
     @Override
     protected void write(final FirebirdPacketPayload payload) {
         for (FirebirdInfoPacketType type : infoItems) {
@@ -93,6 +95,11 @@ public final class FirebirdDatabaseInfoReturnPacket extends FirebirdPacket {
                 data.writeInt1(FirebirdDatabaseInfoPacketType.ODS_MINOR_VERSION.getCode());
                 data.writeInt2LE(4);
                 data.writeInt4LE(ODS_MINOR_VERSION);
+                break;
+            case ATT_CHARSET:
+                data.writeInt1(FirebirdDatabaseInfoPacketType.ATT_CHARSET.getCode());
+                data.writeInt2LE(4);
+                data.writeInt4LE(connectionCharsetId);
                 break;
             case FIREBIRD_VERSION:
                 data.writeInt1(FirebirdDatabaseInfoPacketType.FIREBIRD_VERSION.getCode());

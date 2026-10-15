@@ -17,6 +17,7 @@
 
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.info;
 
+import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdConstant;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.FirebirdInfoPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.database.FirebirdDatabaseInfoReturnPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
@@ -32,6 +33,7 @@ import java.util.Collection;
 import java.util.Collections;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
 import static org.mockito.Mockito.when;
 
@@ -47,10 +49,12 @@ class FirebirdDatabaseInfoExecutorTest {
     @Test
     void assertExecute() {
         when(packet.getInfoItems()).thenReturn(Collections.emptyList());
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
         FirebirdDatabaseInfoExecutor executor = new FirebirdDatabaseInfoExecutor(packet, connectionSession);
         Collection<DatabasePacket> actual = executor.execute();
         assertThat(actual.iterator().next(), isA(FirebirdGenericResponsePacket.class));
         FirebirdGenericResponsePacket responsePacket = (FirebirdGenericResponsePacket) actual.iterator().next();
         assertThat(responsePacket.getData(), isA(FirebirdDatabaseInfoReturnPacket.class));
+        assertThat(((FirebirdDatabaseInfoReturnPacket) responsePacket.getData()).getConnectionCharsetId(), is(4));
     }
 }
