@@ -42,6 +42,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.transaction.FirebirdStartTransactionPacket;
 import org.apache.shardingsphere.database.protocol.packet.command.CommandPacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.admin.FirebirdCancelCommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.admin.FirebirdUnsupportedCommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch.FirebirdBatchCancelCommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch.FirebirdBatchCreateCommandExecutor;
@@ -234,6 +235,11 @@ class FirebirdCommandExecutorFactoryTest {
     void assertNewInstanceWithFreeStatement() {
         assertThat(FirebirdCommandExecutorFactory.newInstance(FirebirdCommandPacketType.FREE_STATEMENT, mock(FirebirdFreeStatementPacket.class), connectionSession),
                 isA(FirebirdFreeStatementCommandExecutor.class));
+    }
+    
+    @Test
+    void assertNewInstanceWithCancel() {
+        assertThat(FirebirdCommandExecutorFactory.newInstance(FirebirdCommandPacketType.CANCEL, mock(CommandPacket.class), connectionSession), isA(FirebirdCancelCommandExecutor.class));
     }
     
     @Test

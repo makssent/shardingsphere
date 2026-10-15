@@ -610,6 +610,7 @@ class FirebirdPacketCodecEngineTest {
         return Stream.of(
                 Arguments.of("decode allocate statement", FirebirdCommandPacketType.ALLOCATE_STATEMENT, 8, 1),
                 Arguments.of("decode free statement", FirebirdCommandPacketType.FREE_STATEMENT, 12, 1),
-                Arguments.of("decode consecutive free statements", FirebirdCommandPacketType.FREE_STATEMENT, 12, 2));
+                Arguments.of("decode consecutive free statements", FirebirdCommandPacketType.FREE_STATEMENT, 12, 2),
+                Arguments.of("decode consecutive cancel commands", FirebirdCommandPacketType.CANCEL, 8, 2));
     }
 }
