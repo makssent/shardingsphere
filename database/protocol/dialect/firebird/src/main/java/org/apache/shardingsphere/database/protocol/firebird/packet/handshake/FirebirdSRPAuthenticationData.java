@@ -141,7 +141,7 @@ public final class FirebirdSRPAuthenticationData {
     private static byte[] generateSalt() {
         byte[] saltBytes = new byte[SRP_SALT_SIZE];
         RANDOM.nextBytes(saltBytes);
-        return saltBytes;
+        return ByteArrayHelper.toHexString(saltBytes).getBytes(StandardCharsets.US_ASCII);
     }
     
     private BigInteger computePublicKey() {
