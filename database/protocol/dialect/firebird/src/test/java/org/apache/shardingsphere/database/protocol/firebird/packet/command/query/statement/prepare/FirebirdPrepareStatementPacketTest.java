@@ -71,6 +71,11 @@ class FirebirdPrepareStatementPacketTest {
     }
     
     @Test
+    void assertIsValidStatementHandleWhenSignExtendedInvalid() {
+        assertFalse(createPacket(-1, Collections.emptyList()).isValidStatementHandle());
+    }
+    
+    @Test
     void assertNextItem() {
         assertTrue(createPacket(2, Collections.singletonList(FirebirdSQLInfoPacketType.STMT_TYPE)).nextItem());
     }
