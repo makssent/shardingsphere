@@ -19,10 +19,18 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statemen
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.util.DefaultAttributeMap;
+import org.apache.shardingsphere.database.connector.core.spi.DatabaseTypedSPILoader;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
+import org.apache.shardingsphere.database.protocol.constant.CommonConstants;
+import org.apache.shardingsphere.database.protocol.firebird.constant.protocol.FirebirdConnectionProtocolVersion;
+import org.apache.shardingsphere.database.protocol.firebird.constant.protocol.FirebirdProtocolVersion;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.FirebirdCommandPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.FirebirdExecuteStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.protocol.FirebirdBlobBinaryProtocolValue;
@@ -38,6 +46,7 @@ import org.apache.shardingsphere.infra.hint.HintValueContext;
 import org.apache.shardingsphere.infra.metadata.ShardingSphereMetaData;
 import org.apache.shardingsphere.infra.metadata.database.resource.ResourceMetaData;
 import org.apache.shardingsphere.infra.metadata.database.rule.RuleMetaData;
+import org.apache.shardingsphere.infra.metadata.user.Grantee;
 import org.apache.shardingsphere.infra.session.connection.ConnectionContext;
 import org.apache.shardingsphere.infra.session.query.QueryContext;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
@@ -51,16 +60,21 @@ import org.apache.shardingsphere.proxy.backend.response.header.query.QueryRespon
 import org.apache.shardingsphere.proxy.backend.response.header.update.UpdateResponseHeader;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.backend.session.ServerPreparedStatementRegistry;
+import org.apache.shardingsphere.proxy.frontend.command.CommandExecutorTask;
 import org.apache.shardingsphere.proxy.frontend.command.executor.ResponseType;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementResourceCleaner;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.fetch.FirebirdFetchStatementCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
+import org.apache.shardingsphere.proxy.frontend.spi.DatabaseProtocolFrontendEngine;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.SelectStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.UpdateStatement;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExtension;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockSettings;
+import org.apache.shardingsphere.transaction.api.TransactionType;
+import org.apache.shardingsphere.transaction.rule.TransactionRule;
+import org.firebirdsql.gds.ISCConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,6 +86,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.ArrayList;
@@ -89,6 +104,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -123,6 +141,12 @@ class FirebirdExecuteStatementCommandExecutorTest {
     
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private SelectStatementContext selectContext;
+    
+    @Mock(answer = Answers.RETURNS_DEEP_STUBS)
+    private ChannelHandlerContext channelHandlerContext;
+    
+    @Mock
+    private Connection backendConnection;
     
     private FirebirdExecuteStatementCommandExecutor executor;
     
@@ -172,6 +196,46 @@ class FirebirdExecuteStatementCommandExecutorTest {
         executor = new FirebirdExecuteStatementCommandExecutor(packet, connectionSession);
         assertThrows(InvalidTransactionHandleException.class, executor::execute);
         verify(connectionSession).finishPreparedStatementCache();
+    }
+    
+    @Test
+    void assertExecuteWithBackendTransactionOfAnotherTransaction() {
+        when(packet.getStatementId()).thenReturn(2);
+        when(connectionSession.getTransactionStatus().isInTransaction()).thenReturn(true);
+        FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(connectionSession, FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID));
+        executor = new FirebirdExecuteStatementCommandExecutor(packet, connectionSession);
+        assertThrows(ExcessTransactionsException.class, executor::execute);
+    }
+    
+    @Test
+    void assertExecuteWithBackendTransactionOfAnotherTransactionKeepsOwnerWork() throws SQLException {
+        ConnectionSession transactionSession = createConnectionSessionInTransaction();
+        transactionSession.getServerPreparedStatementRegistry().addPreparedStatement(2, new FirebirdServerPreparedStatement("UPDATE tbl SET col=1", updateContext, new HintValueContext()));
+        FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(transactionSession, transactionId);
+        int anotherTransactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
+        FirebirdConnectionProtocolVersion.getInstance().setProtocolVersion(CONNECTION_ID, FirebirdProtocolVersion.PROTOCOL_VERSION13);
+        DatabaseProtocolFrontendEngine engine = DatabaseTypedSPILoader.getService(DatabaseProtocolFrontendEngine.class, DATABASE_TYPE);
+        new CommandExecutorTask(engine, transactionSession, channelHandlerContext,
+                Unpooled.buffer().writeInt(FirebirdCommandPacketType.EXECUTE.getValue()).writeInt(2).writeInt(anotherTransactionId).writeInt(0).writeInt(0).writeInt(0)).run();
+        new CommandExecutorTask(engine, transactionSession, channelHandlerContext, Unpooled.buffer().writeInt(FirebirdCommandPacketType.COMMIT.getValue()).writeInt(transactionId)).run();
+        FirebirdConnectionProtocolVersion.getInstance().unsetProtocolVersion(CONNECTION_ID);
+        ArgumentCaptor<FirebirdGenericResponsePacket> responseCaptor = ArgumentCaptor.forClass(FirebirdGenericResponsePacket.class);
+        verify(channelHandlerContext, times(2)).write(responseCaptor.capture());
+        assertThat(responseCaptor.getAllValues().get(0).getErrorCode(), is(ISCConstants.isc_excess_trans));
+        verify(backendConnection).commit();
+        verify(backendConnection, never()).rollback();
+    }
+    
+    @Test
+    void assertExecuteBindsBackendTransactionToTransaction() throws SQLException {
+        when(packet.getStatementId()).thenReturn(2);
+        when(packet.getParameterTypes()).thenReturn(Collections.emptyList());
+        when(packet.getParameterValues()).thenReturn(Collections.emptyList());
+        when(connectionSession.getTransactionStatus().isInTransaction()).thenReturn(true);
+        when(proxyBackendHandler.execute()).thenReturn(new UpdateResponseHeader(UpdateStatement.builder().databaseType(DATABASE_TYPE).build(), Collections.singleton(new UpdateResult(1, 0L))));
+        when(ProxyBackendHandlerFactory.newInstance(eq(DATABASE_TYPE), any(QueryContext.class), eq(connectionSession), eq(true))).thenReturn(proxyBackendHandler);
+        new FirebirdExecuteStatementCommandExecutor(packet, connectionSession).execute();
+        assertFalse(FirebirdTransactionIdGenerator.getInstance().isBackendTransactionAvailable(connectionSession, transactionId + 1));
     }
     
     @Test
@@ -348,5 +412,20 @@ class FirebirdExecuteStatementCommandExecutorTest {
         assertThat(iterator.next(), isA(FirebirdGenericResponsePacket.class));
         assertFalse(iterator.hasNext());
         assertThat(FirebirdFetchStatementCache.getInstance().getFetchBackendHandler(CONNECTION_ID, STATEMENT_ID), is(proxyBackendHandler));
+    }
+    
+    private ConnectionSession createConnectionSessionInTransaction() {
+        TransactionRule transactionRule = mock(TransactionRule.class);
+        when(transactionRule.getDefaultType()).thenReturn(TransactionType.LOCAL);
+        when(ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData()).thenReturn(
+                new ShardingSphereMetaData(Collections.emptyList(), mock(), new RuleMetaData(Collections.singleton(transactionRule)), new ConfigurationProperties(new Properties())));
+        when(channelHandlerContext.channel().attr(CommonConstants.CHARSET_ATTRIBUTE_KEY).get()).thenReturn(StandardCharsets.UTF_8);
+        ConnectionSession result = new ConnectionSession(DATABASE_TYPE, new DefaultAttributeMap());
+        result.setConnectionId(CONNECTION_ID);
+        result.setGrantee(new Grantee("foo_user", "%"));
+        result.setAutoCommit(false);
+        result.getDatabaseConnectionManager().handleAutoCommit();
+        result.getDatabaseConnectionManager().getCachedConnections().put("foo_db.foo_ds", backendConnection);
+        return result;
     }
 }

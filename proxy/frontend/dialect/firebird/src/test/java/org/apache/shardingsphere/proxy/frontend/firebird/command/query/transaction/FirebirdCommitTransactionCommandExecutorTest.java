@@ -37,6 +37,7 @@ import java.util.Collection;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.isA;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mockConstruction;
@@ -86,6 +87,18 @@ class FirebirdCommitTransactionCommandExecutorTest {
             assertThat(actual.iterator().next(), isA(FirebirdGenericResponsePacket.class));
             assertTrue(mocked.constructed().isEmpty());
         }
+    }
+    
+    @Test
+    void assertExecuteWithBackendTransactionOfAnotherTransaction() throws SQLException {
+        when(packet.getTransactionId()).thenReturn(1);
+        when(connectionSession.getTransactionStatus().isInTransaction()).thenReturn(true);
+        FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(connectionSession, FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID));
+        try (MockedConstruction<ProxyBackendTransactionManager> mocked = mockConstruction(ProxyBackendTransactionManager.class)) {
+            new FirebirdCommitTransactionCommandExecutor(packet, connectionSession).execute();
+            assertTrue(mocked.constructed().isEmpty());
+        }
+        assertFalse(FirebirdTransactionIdGenerator.getInstance().isTransactionActive(CONNECTION_ID, 1));
     }
     
     @Test

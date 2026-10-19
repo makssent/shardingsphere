@@ -44,7 +44,7 @@ public final class FirebirdRollbackTransactionCommandExecutor implements Command
     public Collection<DatabasePacket> execute() throws SQLException {
         int transactionHandle = packet.getTransactionId();
         validateTransactionHandle(transactionHandle);
-        if (!connectionSession.isAutoCommit()) {
+        if (!connectionSession.isAutoCommit() && FirebirdTransactionIdGenerator.getInstance().isBackendTransactionAvailable(connectionSession, transactionHandle)) {
             ProxyBackendTransactionManager transactionManager = new ProxyBackendTransactionManager(connectionSession.getDatabaseConnectionManager());
             transactionManager.rollback();
         }

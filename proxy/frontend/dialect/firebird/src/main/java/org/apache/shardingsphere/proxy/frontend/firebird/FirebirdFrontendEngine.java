@@ -19,6 +19,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird;
 
 import lombok.Getter;
 import org.apache.shardingsphere.database.exception.core.exception.transaction.InTransactionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
 import org.apache.shardingsphere.database.protocol.codec.DatabasePacketCodecEngine;
 import org.apache.shardingsphere.database.protocol.firebird.codec.FirebirdPacketCodecEngine;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
@@ -48,7 +49,7 @@ public final class FirebirdFrontendEngine implements DatabaseProtocolFrontendEng
     @Override
     public void handleException(final ConnectionSession connectionSession, final Exception exception) {
         if (connectionSession.getTransactionStatus().isInTransaction() && !connectionSession.getConnectionContext().getTransactionContext().isExceptionOccur()
-                && !(exception instanceof InTransactionException)) {
+                && !(exception instanceof InTransactionException) && !(exception instanceof ExcessTransactionsException)) {
             connectionSession.getConnectionContext().getTransactionContext().setExceptionOccur(true);
         }
     }

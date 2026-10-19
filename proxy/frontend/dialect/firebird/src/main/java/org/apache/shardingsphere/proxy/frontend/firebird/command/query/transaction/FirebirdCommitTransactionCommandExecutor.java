@@ -44,7 +44,7 @@ public final class FirebirdCommitTransactionCommandExecutor implements CommandEx
     public Collection<DatabasePacket> execute() throws SQLException {
         int transactionHandle = packet.getTransactionId();
         validateTransactionHandle(transactionHandle);
-        if (!connectionSession.isAutoCommit()) {
+        if (!connectionSession.isAutoCommit() && FirebirdTransactionIdGenerator.getInstance().isBackendTransactionAvailable(connectionSession, transactionHandle)) {
             ProxyBackendTransactionManager transactionManager = new ProxyBackendTransactionManager(connectionSession.getDatabaseConnectionManager());
             // TODO add rollback and return exception
             transactionManager.commit();

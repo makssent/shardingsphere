@@ -17,6 +17,8 @@
 
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction;
 
+import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.proxy.backend.session.transaction.TransactionStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +28,8 @@ import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class FirebirdTransactionIdGeneratorTest {
     
@@ -73,11 +77,52 @@ class FirebirdTransactionIdGeneratorTest {
     }
     
     @Test
-    void assertHasActiveTransaction() {
-        assertFalse(FirebirdTransactionIdGenerator.getInstance().hasActiveTransaction(CONNECTION_ID));
+    void assertIsBackendTransactionAvailableWithoutBackendTransaction() {
+        FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(mockConnectionSession(true), 1);
+        assertTrue(FirebirdTransactionIdGenerator.getInstance().isBackendTransactionAvailable(mockConnectionSession(false), 2));
+    }
+    
+    @Test
+    void assertIsBackendTransactionAvailableWithoutOwner() {
+        assertTrue(FirebirdTransactionIdGenerator.getInstance().isBackendTransactionAvailable(mockConnectionSession(true), 2));
+    }
+    
+    @Test
+    void assertIsBackendTransactionAvailableForOwner() {
+        ConnectionSession connectionSession = mockConnectionSession(true);
+        FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(connectionSession, 1);
+        assertTrue(FirebirdTransactionIdGenerator.getInstance().isBackendTransactionAvailable(connectionSession, 1));
+    }
+    
+    @Test
+    void assertIsBackendTransactionAvailableForAnotherTransaction() {
+        ConnectionSession connectionSession = mockConnectionSession(true);
+        FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(connectionSession, 1);
+        assertFalse(FirebirdTransactionIdGenerator.getInstance().isBackendTransactionAvailable(connectionSession, 2));
+    }
+    
+    @Test
+    void assertUpdateBackendTransactionOwnerAfterBackendTransactionEnded() {
+        FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(mockConnectionSession(true), 1);
+        FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(mockConnectionSession(false), 1);
+        assertTrue(FirebirdTransactionIdGenerator.getInstance().isBackendTransactionAvailable(mockConnectionSession(true), 2));
+    }
+    
+    @Test
+    void assertCloseTransactionReleasesBackendTransaction() {
+        ConnectionSession connectionSession = mockConnectionSession(true);
         int transactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
-        assertTrue(FirebirdTransactionIdGenerator.getInstance().hasActiveTransaction(CONNECTION_ID));
+        FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(connectionSession, transactionId);
         FirebirdTransactionIdGenerator.getInstance().closeTransaction(CONNECTION_ID, transactionId);
-        assertFalse(FirebirdTransactionIdGenerator.getInstance().hasActiveTransaction(CONNECTION_ID));
+        assertTrue(FirebirdTransactionIdGenerator.getInstance().isBackendTransactionAvailable(connectionSession, transactionId + 1));
+    }
+    
+    private ConnectionSession mockConnectionSession(final boolean inTransaction) {
+        ConnectionSession result = mock(ConnectionSession.class);
+        when(result.getConnectionId()).thenReturn(CONNECTION_ID);
+        TransactionStatus transactionStatus = new TransactionStatus();
+        transactionStatus.setInTransaction(inTransaction);
+        when(result.getTransactionStatus()).thenReturn(transactionStatus);
+        return result;
     }
 }

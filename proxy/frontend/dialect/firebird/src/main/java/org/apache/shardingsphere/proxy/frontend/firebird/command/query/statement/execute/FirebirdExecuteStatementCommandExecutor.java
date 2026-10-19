@@ -20,6 +20,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statemen
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
@@ -64,6 +65,8 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public final class FirebirdExecuteStatementCommandExecutor implements CommandExecutor {
     
+    private static final int MAX_BACKEND_TRANSACTIONS = 1;
+    
     private final FirebirdExecuteStatementPacket packet;
     
     private final ConnectionSession connectionSession;
@@ -83,6 +86,7 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
             }
             validateTransactionHandle();
             ResponseHeader responseHeader = executePreparedStatement(preparedStatement, packet.getParameterValues());
+            FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(connectionSession, packet.getTransactionId());
             if (responseHeader instanceof QueryResponseHeader) {
                 responseType = ResponseType.QUERY;
                 FirebirdFetchStatementCache.getInstance().registerStatement(connectionSession.getConnectionId(), packet.getStatementId(), proxyBackendHandler);
@@ -105,6 +109,8 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
     private void validateTransactionHandle() {
         ShardingSpherePreconditions.checkState(FirebirdTransactionIdGenerator.getInstance().isTransactionActive(connectionSession.getConnectionId(), packet.getTransactionId()),
                 () -> new InvalidTransactionHandleException(packet.getTransactionId()));
+        ShardingSpherePreconditions.checkState(FirebirdTransactionIdGenerator.getInstance().isBackendTransactionAvailable(connectionSession, packet.getTransactionId()),
+                () -> new ExcessTransactionsException(MAX_BACKEND_TRANSACTIONS));
     }
     
     private ResponseHeader executePreparedStatement(final FirebirdServerPreparedStatement preparedStatement, final List<Object> params) throws SQLException {

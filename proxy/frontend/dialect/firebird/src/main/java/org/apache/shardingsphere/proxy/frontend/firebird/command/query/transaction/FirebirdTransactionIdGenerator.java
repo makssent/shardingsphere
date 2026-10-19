@@ -19,6 +19,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.transact
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 
 import java.util.Map;
 import java.util.Set;
@@ -36,6 +37,8 @@ public final class FirebirdTransactionIdGenerator {
     private final Map<Integer, AtomicInteger> connectionRegistry = new ConcurrentHashMap<>();
     
     private final Map<Integer, Set<Integer>> activeTransactionRegistry = new ConcurrentHashMap<>();
+    
+    private final Map<Integer, Integer> backendTransactionOwnerRegistry = new ConcurrentHashMap<>();
     
     /**
      * Get prepared transaction registry instance.
@@ -80,13 +83,32 @@ public final class FirebirdTransactionIdGenerator {
     }
     
     /**
-     * Judge whether any transaction is active for connection.
+     * Judge whether transaction can use the backend transaction of connection.
      *
-     * @param connectionId connection ID
-     * @return has active transaction or not
+     * <p>All transactions of a connection run in the single backend transaction of its session. The backend transaction belongs to the transaction
+     * which executed the first statement in it, so another transaction of the connection can use it only after the owner commits or rolls back.</p>
+     *
+     * @param connectionSession connection session
+     * @param transactionId transaction ID
+     * @return can use the backend transaction or not
      */
-    public boolean hasActiveTransaction(final int connectionId) {
-        return !getActiveTransactions(connectionId).isEmpty();
+    public boolean isBackendTransactionAvailable(final ConnectionSession connectionSession, final int transactionId) {
+        Integer owner = backendTransactionOwnerRegistry.get(connectionSession.getConnectionId());
+        return !connectionSession.getTransactionStatus().isInTransaction() || null == owner || owner == transactionId;
+    }
+    
+    /**
+     * Update owner of the backend transaction of connection after transaction executed a statement.
+     *
+     * @param connectionSession connection session
+     * @param transactionId transaction ID
+     */
+    public void updateBackendTransactionOwner(final ConnectionSession connectionSession, final int transactionId) {
+        if (connectionSession.getTransactionStatus().isInTransaction()) {
+            backendTransactionOwnerRegistry.put(connectionSession.getConnectionId(), transactionId);
+        } else {
+            backendTransactionOwnerRegistry.remove(connectionSession.getConnectionId());
+        }
     }
     
     /**
@@ -97,6 +119,7 @@ public final class FirebirdTransactionIdGenerator {
      */
     public void closeTransaction(final int connectionId, final int transactionId) {
         getActiveTransactions(connectionId).remove(transactionId);
+        backendTransactionOwnerRegistry.remove(connectionId, transactionId);
     }
     
     /**
@@ -117,6 +140,7 @@ public final class FirebirdTransactionIdGenerator {
     public void unregisterConnection(final int connectionId) {
         connectionRegistry.remove(connectionId);
         activeTransactionRegistry.remove(connectionId);
+        backendTransactionOwnerRegistry.remove(connectionId);
     }
     
     private AtomicInteger getTransactionCounter(final int connectionId) {
