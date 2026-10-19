@@ -65,6 +65,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -77,6 +80,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -168,6 +172,18 @@ class FirebirdPrepareStatementCommandExecutorTest {
         FirebirdServerPreparedStatement preparedStatement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(1);
         assertThat(preparedStatement.getSql(), is("SELECT 1"));
         assertThat(preparedStatement.getSqlStatementContext(), isA(SelectStatementContext.class));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("assertExecuteWithStatementFlagsArguments")
+    void assertExecuteWithStatementFlags(final String sql, final int expectedFlags) throws Exception {
+        when(packet.getSQL()).thenReturn(sql);
+        when(connectionSession.getUsedDatabaseName()).thenReturn("foo_db");
+        when(packet.getCurrentItem()).thenReturn(FirebirdSQLInfoPacketType.STMT_FLAGS);
+        Collection<DatabasePacket> actual = new FirebirdPrepareStatementCommandExecutor(packet, connectionSession).execute();
+        FirebirdPrepareStatementReturnPacket returnPacket = (FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) actual.iterator().next()).getData();
+        assertThat(returnPacket.getItems(), is(Collections.singletonList(FirebirdSQLInfoPacketType.STMT_FLAGS)));
+        assertThat(returnPacket.getFlags(), is(expectedFlags));
     }
     
     @Test
@@ -338,5 +354,12 @@ class FirebirdPrepareStatementCommandExecutorTest {
         FirebirdPrepareStatementCommandExecutor executor = new FirebirdPrepareStatementCommandExecutor(packet, connectionSession);
         executor.execute();
         verify(connectionSession).invalidatePreparedStatementCache(FirebirdStatementResourceCleaner.createPreparedStatementCacheKey(1));
+    }
+    
+    private static Stream<Arguments> assertExecuteWithStatementFlagsArguments() {
+        return Stream.of(
+                Arguments.of("SELECT 1", 3),
+                Arguments.of("INSERT INTO foo_tbl (id) VALUES (1)", 2),
+                Arguments.of("DROP DATABASE", 0));
     }
 }

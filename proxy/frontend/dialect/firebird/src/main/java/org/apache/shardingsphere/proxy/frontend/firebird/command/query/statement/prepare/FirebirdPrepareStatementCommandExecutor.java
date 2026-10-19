@@ -109,6 +109,10 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
     
     private static final ShardingSphereTable LITERAL_TABLE = new ShardingSphereTable(null, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
     
+    private static final int STATEMENT_FLAG_HAS_CURSOR = 1;
+    
+    private static final int STATEMENT_FLAG_REPEAT_EXECUTE = 2;
+    
     private final FirebirdPrepareStatementPacket packet;
     
     private final ConnectionSession connectionSession;
@@ -149,9 +153,14 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         FirebirdSQLInfoReturnValue statementType = getFirebirdStatementType(sqlStatementContext.getSqlStatement());
         FirebirdPrepareStatementReturnPacket returnPacket = new FirebirdPrepareStatementReturnPacket();
         while (packet.nextItem()) {
-            switch (packet.getCurrentItem()) {
+            FirebirdSQLInfoPacketType item = packet.getCurrentItem();
+            returnPacket.getItems().add(item);
+            switch (item) {
                 case STMT_TYPE:
                     returnPacket.setType(statementType);
+                    break;
+                case STMT_FLAGS:
+                    returnPacket.setFlags(getStatementFlags(statementType));
                     break;
                 case SELECT:
                     if (statementType.isSelectDescribable()) {
@@ -215,6 +224,18 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
             return FirebirdSQLInfoReturnValue.SAVEPOINT;
         }
         return null;
+    }
+    
+    private int getStatementFlags(final FirebirdSQLInfoReturnValue statementType) {
+        switch (statementType) {
+            case SELECT:
+            case SELECT_FOR_UPD:
+                return STATEMENT_FLAG_HAS_CURSOR | STATEMENT_FLAG_REPEAT_EXECUTE;
+            case DDL:
+                return 0;
+            default:
+                return STATEMENT_FLAG_REPEAT_EXECUTE;
+        }
     }
     
     private void skipDescribe() {
