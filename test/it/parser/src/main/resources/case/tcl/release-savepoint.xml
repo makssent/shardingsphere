@@ -18,4 +18,5 @@
 
 <sql-parser-test-cases>
     <release-savepoint sql-case-id="release_savepoint" savepoint-name="savepoint1" />
+    <release-savepoint sql-case-id="release_savepoint_only_firebird" savepoint-name="savepoint1" />
 </sql-parser-test-cases>

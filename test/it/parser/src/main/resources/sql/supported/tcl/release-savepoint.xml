@@ -17,5 +17,6 @@
   -->
 
 <sql-cases>
-    <sql-case id="release_savepoint" value="RELEASE SAVEPOINT savepoint1" db-types="MySQL" />
+    <sql-case id="release_savepoint" value="RELEASE SAVEPOINT savepoint1" db-types="MySQL,Firebird" />
+    <sql-case id="release_savepoint_only_firebird" value="RELEASE SAVEPOINT savepoint1 ONLY" db-types="Firebird" />
 </sql-cases>

@@ -21,11 +21,14 @@ import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.sql.parser.api.ASTNode;
 import org.apache.shardingsphere.sql.parser.api.visitor.statement.type.TCLStatementVisitor;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.CommitContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.ReleaseSavepointContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.RollbackContext;
+import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.RollbackToSavepointContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.SavepointContext;
 import org.apache.shardingsphere.sql.parser.autogen.FirebirdStatementParser.SetTransactionContext;
 import org.apache.shardingsphere.sql.parser.engine.firebird.visitor.statement.FirebirdStatementVisitor;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.CommitStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.ReleaseSavepointStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.RollbackStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.SavepointStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.SetTransactionStatement;
@@ -56,6 +59,16 @@ public final class FirebirdTCLStatementVisitor extends FirebirdStatementVisitor 
     
     @Override
     public ASTNode visitSavepoint(final SavepointContext ctx) {
-        return new SavepointStatement(getDatabaseType(), null);
+        return new SavepointStatement(getDatabaseType(), ctx.savepointName().getText());
+    }
+    
+    @Override
+    public ASTNode visitRollbackToSavepoint(final RollbackToSavepointContext ctx) {
+        return new RollbackStatement(getDatabaseType(), ctx.savepointName().getText());
+    }
+    
+    @Override
+    public ASTNode visitReleaseSavepoint(final ReleaseSavepointContext ctx) {
+        return new ReleaseSavepointStatement(getDatabaseType(), ctx.savepointName().getText());
     }
 }

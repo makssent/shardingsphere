@@ -44,6 +44,8 @@ execute
     | alterDomain
     | createRole
     | savepoint
+    | rollbackToSavepoint
+    | releaseSavepoint
     | createTrigger
     | alterTrigger
     | createSequence

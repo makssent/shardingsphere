@@ -575,6 +575,10 @@ RELATIVE
     : R E L A T I V E
     ;
 
+RELEASE
+    : R E L E A S E
+    ;
+
 RESTRICT
     : R E S T R I C T
     ;
