@@ -105,7 +105,7 @@ public final class FirebirdTransactionIdGenerator {
      * @param transactionId transaction ID
      * @return can use the backend transaction or not
      */
-    public boolean isBackendTransactionAvailable(final ConnectionSession connectionSession, final int transactionId) {
+    boolean isBackendTransactionAvailable(final ConnectionSession connectionSession, final int transactionId) {
         Integer owner = backendTransactionOwnerRegistry.get(connectionSession.getConnectionId());
         return !connectionSession.getTransactionStatus().isInTransaction() || null == owner || owner == transactionId;
     }

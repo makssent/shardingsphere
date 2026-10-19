@@ -22,6 +22,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.util.DefaultAttributeMap;
 import org.apache.shardingsphere.database.connector.core.spi.DatabaseTypedSPILoader;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
 import org.apache.shardingsphere.database.protocol.constant.CommonConstants;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.FirebirdCommandPacketType;
@@ -162,7 +163,8 @@ class FirebirdExecuteImmediateCommandExecutorTest {
         Collection<DatabasePacket> actual = new FirebirdExecuteImmediateCommandExecutor(packet, connectionSession).execute();
         assertThat(((FirebirdGenericResponsePacket) actual.iterator().next()).getHandle(), is(transactionId));
         verify(proxyBackendHandler).execute();
-        assertFalse(FirebirdTransactionIdGenerator.getInstance().isBackendTransactionAvailable(connectionSession, transactionId + 1));
+        int anotherTransactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
+        assertThrows(ExcessTransactionsException.class, () -> FirebirdTransactionIdGenerator.getInstance().checkTransactionForStatement(connectionSession, anotherTransactionId));
     }
     
     @Test

@@ -180,10 +180,10 @@ class FirebirdPrepareStatementCommandExecutorTest {
         when(packet.getSQL()).thenReturn(sql);
         when(connectionSession.getUsedDatabaseName()).thenReturn("foo_db");
         when(packet.getCurrentItem()).thenReturn(FirebirdSQLInfoPacketType.STMT_FLAGS);
-        Collection<DatabasePacket> actual = new FirebirdPrepareStatementCommandExecutor(packet, connectionSession).execute();
-        FirebirdPrepareStatementReturnPacket returnPacket = (FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) actual.iterator().next()).getData();
-        assertThat(returnPacket.getItems(), is(Collections.singletonList(FirebirdSQLInfoPacketType.STMT_FLAGS)));
-        assertThat(returnPacket.getFlags(), is(expectedFlags));
+        FirebirdPrepareStatementReturnPacket actual = (FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) new FirebirdPrepareStatementCommandExecutor(packet, connectionSession)
+                .execute().iterator().next()).getData();
+        assertThat(actual.getItems(), is(Collections.singletonList(FirebirdSQLInfoPacketType.STMT_FLAGS)));
+        assertThat(actual.getFlags(), is(expectedFlags));
     }
     
     @Test
@@ -357,9 +357,6 @@ class FirebirdPrepareStatementCommandExecutorTest {
     }
     
     private static Stream<Arguments> assertExecuteWithStatementFlagsArguments() {
-        return Stream.of(
-                Arguments.of("SELECT 1", 3),
-                Arguments.of("INSERT INTO foo_tbl (id) VALUES (1)", 2),
-                Arguments.of("DROP DATABASE", 0));
+        return Stream.of(Arguments.of("SELECT 1", 3), Arguments.of("INSERT INTO foo_tbl (id) VALUES (1)", 2), Arguments.of("DROP DATABASE", 0));
     }
 }

@@ -62,7 +62,7 @@ public final class FirebirdObjectHandleGenerator {
         BitSet handles = connectionRegistry.computeIfAbsent(connectionId, unused -> new BitSet());
         synchronized (handles) {
             int result = handles.nextClearBit(1);
-            ShardingSpherePreconditions.checkState(MAX_OBJECT_HANDLE >= result, () -> new DatabaseProtocolException("No free object handles are available for connection %d.", connectionId));
+            ShardingSpherePreconditions.checkState(result <= MAX_OBJECT_HANDLE, () -> new DatabaseProtocolException("No free object handles are available for connection %d.", connectionId));
             handles.set(result);
             return result;
         }

@@ -234,7 +234,8 @@ class FirebirdExecuteStatementCommandExecutorTest {
         when(proxyBackendHandler.execute()).thenReturn(new UpdateResponseHeader(UpdateStatement.builder().databaseType(DATABASE_TYPE).build(), Collections.singleton(new UpdateResult(1, 0L))));
         when(ProxyBackendHandlerFactory.newInstance(eq(DATABASE_TYPE), any(QueryContext.class), eq(connectionSession), eq(true))).thenReturn(proxyBackendHandler);
         new FirebirdExecuteStatementCommandExecutor(packet, connectionSession).execute();
-        assertFalse(FirebirdTransactionIdGenerator.getInstance().isBackendTransactionAvailable(connectionSession, transactionId + 1));
+        int anotherTransactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
+        assertThrows(ExcessTransactionsException.class, () -> FirebirdTransactionIdGenerator.getInstance().checkTransactionForStatement(connectionSession, anotherTransactionId));
     }
     
     @Test

@@ -38,7 +38,9 @@ import java.util.Collections;
 @RequiredArgsConstructor
 public final class FirebirdFreeStatementCommandExecutor implements CommandExecutor {
     
-    // INVALID_OBJECT (0xFFFF) as Firebird writes it with xdr_short
+    /**
+     * Handle {@code INVALID_OBJECT} (0xFFFF) as Firebird writes it with {@code xdr_short}.
+     */
     private static final int INVALID_OBJECT_HANDLE = -1;
     
     private final FirebirdFreeStatementPacket packet;

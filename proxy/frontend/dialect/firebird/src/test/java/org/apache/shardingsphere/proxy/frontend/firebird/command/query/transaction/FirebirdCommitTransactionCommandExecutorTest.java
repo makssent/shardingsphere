@@ -42,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -95,10 +96,8 @@ class FirebirdCommitTransactionCommandExecutorTest {
         when(packet.getTransactionId()).thenReturn(1);
         when(connectionSession.getTransactionStatus().isInTransaction()).thenReturn(true);
         FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(connectionSession, FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID));
-        try (MockedConstruction<ProxyBackendTransactionManager> mocked = mockConstruction(ProxyBackendTransactionManager.class)) {
-            new FirebirdCommitTransactionCommandExecutor(packet, connectionSession).execute();
-            assertTrue(mocked.constructed().isEmpty());
-        }
+        new FirebirdCommitTransactionCommandExecutor(packet, connectionSession).execute();
+        verify(connectionSession, never()).getDatabaseConnectionManager();
         assertFalse(FirebirdTransactionIdGenerator.getInstance().isTransactionActive(CONNECTION_ID, 1));
     }
     
