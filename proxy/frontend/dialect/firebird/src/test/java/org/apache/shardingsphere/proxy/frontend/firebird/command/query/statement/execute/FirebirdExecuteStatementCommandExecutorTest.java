@@ -38,6 +38,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.generic.Fireb
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdSQLResponsePacket;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
+import org.apache.shardingsphere.infra.binder.context.statement.type.CommonSQLStatementContext;
 import org.apache.shardingsphere.infra.binder.context.statement.type.dml.SelectStatementContext;
 import org.apache.shardingsphere.infra.binder.context.statement.type.dml.UpdateStatementContext;
 import org.apache.shardingsphere.infra.config.props.ConfigurationProperties;
@@ -68,8 +69,11 @@ import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.fetch.FirebirdFetchStatementCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
 import org.apache.shardingsphere.proxy.frontend.spi.DatabaseProtocolFrontendEngine;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.SelectStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.UpdateStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.CommitStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.RollbackStatement;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExtension;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockSettings;
 import org.apache.shardingsphere.transaction.api.TransactionType;
@@ -102,6 +106,7 @@ import static org.hamcrest.Matchers.isA;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -271,12 +276,26 @@ class FirebirdExecuteStatementCommandExecutorTest {
         when(ProxyBackendHandlerFactory.newInstance(eq(DATABASE_TYPE), any(QueryContext.class), eq(connectionSession), eq(true))).thenReturn(proxyBackendHandler);
         Collection<DatabasePacket> actual = executor.execute();
         assertThat(executor.getResponseType(), is(ResponseType.UPDATE));
-        assertThat(actual.iterator().next(), isA(FirebirdGenericResponsePacket.class));
+        assertThat(((FirebirdGenericResponsePacket) actual.iterator().next()).getHandle(), is(transactionId));
         FirebirdServerPreparedStatement preparedStatement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(2);
         assertThat(preparedStatement.getAffectedRows(), is(7L));
         assertNull(FirebirdFetchStatementCache.getInstance().getFetchBackendHandler(CONNECTION_ID, STATEMENT_ID));
         verify(connectionSession).beginPreparedStatementCache(FirebirdStatementResourceCleaner.createPreparedStatementCacheKey(2));
         verify(connectionSession).finishPreparedStatementCache();
+    }
+    
+    @Test
+    void assertExecuteCommitStatement() throws SQLException {
+        Collection<DatabasePacket> actual = executeTransactionControlStatement(new CommitStatement(DATABASE_TYPE));
+        assertThat(((FirebirdGenericResponsePacket) actual.iterator().next()).getHandle(), is(0));
+        assertFalse(FirebirdTransactionIdGenerator.getInstance().isTransactionActive(CONNECTION_ID, transactionId));
+    }
+    
+    @Test
+    void assertExecuteRollbackToSavepointStatement() throws SQLException {
+        Collection<DatabasePacket> actual = executeTransactionControlStatement(new RollbackStatement(DATABASE_TYPE, "foo_savepoint"));
+        assertThat(((FirebirdGenericResponsePacket) actual.iterator().next()).getHandle(), is(transactionId));
+        assertTrue(FirebirdTransactionIdGenerator.getInstance().isTransactionActive(CONNECTION_ID, transactionId));
     }
     
     @Test
@@ -412,6 +431,16 @@ class FirebirdExecuteStatementCommandExecutorTest {
         assertThat(iterator.next(), isA(FirebirdGenericResponsePacket.class));
         assertFalse(iterator.hasNext());
         assertThat(FirebirdFetchStatementCache.getInstance().getFetchBackendHandler(CONNECTION_ID, STATEMENT_ID), is(proxyBackendHandler));
+    }
+    
+    private Collection<DatabasePacket> executeTransactionControlStatement(final SQLStatement sqlStatement) throws SQLException {
+        connectionSession.getServerPreparedStatementRegistry().addPreparedStatement(3, new FirebirdServerPreparedStatement("COMMIT", new CommonSQLStatementContext(sqlStatement), new HintValueContext()));
+        when(packet.getStatementId()).thenReturn(3);
+        when(packet.getParameterTypes()).thenReturn(Collections.emptyList());
+        when(packet.getParameterValues()).thenReturn(Collections.emptyList());
+        when(proxyBackendHandler.execute()).thenReturn(new UpdateResponseHeader(sqlStatement));
+        when(ProxyBackendHandlerFactory.newInstance(eq(DATABASE_TYPE), any(QueryContext.class), eq(connectionSession), eq(true))).thenReturn(proxyBackendHandler);
+        return new FirebirdExecuteStatementCommandExecutor(packet, connectionSession).execute();
     }
     
     private ConnectionSession createConnectionSessionInTransaction() {

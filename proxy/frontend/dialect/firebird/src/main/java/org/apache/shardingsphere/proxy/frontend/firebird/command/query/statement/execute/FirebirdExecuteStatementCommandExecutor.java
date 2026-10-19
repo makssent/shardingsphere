@@ -52,6 +52,9 @@ import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementResourceCleaner;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.fetch.FirebirdFetchStatementCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.CommitStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.RollbackStatement;
 
 import java.sql.SQLException;
 import java.util.Collection;
@@ -99,7 +102,7 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
             if (packet.isStoredProcedure() && proxyBackendHandler.next()) {
                 result.add(getSQLResponse());
             }
-            result.add(new FirebirdGenericResponsePacket());
+            result.add(new FirebirdGenericResponsePacket().setHandle(getTransactionHandleAfterExecution(preparedStatement.getSqlStatementContext().getSqlStatement())));
             return result;
         } finally {
             connectionSession.finishPreparedStatementCache();
@@ -172,5 +175,13 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
         QueryResponseRow queryResponseRow = proxyBackendHandler.getRowData();
         BinaryRow row = FirebirdBinaryRowBuilder.build(queryResponseRow);
         return new FirebirdSQLResponsePacket(row);
+    }
+    
+    private int getTransactionHandleAfterExecution(final SQLStatement sqlStatement) {
+        if (sqlStatement instanceof CommitStatement || sqlStatement instanceof RollbackStatement && !((RollbackStatement) sqlStatement).getSavepointName().isPresent()) {
+            FirebirdTransactionIdGenerator.getInstance().closeTransaction(connectionSession.getConnectionId(), packet.getTransactionId());
+            return 0;
+        }
+        return packet.getTransactionId();
     }
 }
