@@ -36,6 +36,7 @@ import java.sql.SQLException;
 import java.util.Collection;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -120,13 +121,11 @@ class FirebirdCommitTransactionCommandExecutorTest {
     }
     
     @Test
-    void assertExecuteWithCommittedTransactionHandleAfterNewTransaction() throws SQLException {
+    void assertExecuteWithCommittedTransactionHandleReusedByNewTransaction() throws SQLException {
         when(packet.getTransactionId()).thenReturn(1);
         try (MockedConstruction<ProxyBackendTransactionManager> mocked = mockConstruction(ProxyBackendTransactionManager.class)) {
             new FirebirdCommitTransactionCommandExecutor(packet, connectionSession).execute();
-            FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
-            assertThrows(InvalidTransactionHandleException.class, () -> new FirebirdCommitTransactionCommandExecutor(packet, connectionSession).execute());
-            when(packet.getTransactionId()).thenReturn(2);
+            assertThat(FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID), is(1));
             Collection<DatabasePacket> actual = new FirebirdCommitTransactionCommandExecutor(packet, connectionSession).execute();
             assertThat(actual.iterator().next(), isA(FirebirdGenericResponsePacket.class));
         }

@@ -19,8 +19,10 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statemen
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdObjectHandleGenerator;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -33,6 +35,8 @@ public final class FirebirdStatementIdGenerator {
     private static final FirebirdStatementIdGenerator INSTANCE = new FirebirdStatementIdGenerator();
     
     private final Map<Integer, AtomicInteger> connectionRegistry = new ConcurrentHashMap<>();
+    
+    private final Map<Integer, Set<Integer>> allocatedStatementRegistry = new ConcurrentHashMap<>();
     
     /**
      * Get prepared statement registry instance.
@@ -50,26 +54,46 @@ public final class FirebirdStatementIdGenerator {
      */
     public void registerConnection(final int connectionId) {
         connectionRegistry.put(connectionId, new AtomicInteger());
+        allocatedStatementRegistry.put(connectionId, ConcurrentHashMap.newKeySet());
     }
     
     /**
      * Generate next statement ID for connection.
      *
+     * <p>Statement IDs are issued from the object handles of the connection.</p>
+     *
      * @param connectionId connection ID
      * @return generated statement ID
      */
     public int nextStatementId(final int connectionId) {
-        return getStatementCounter(connectionId).incrementAndGet();
+        AtomicInteger lastStatementId = getLastStatementId(connectionId);
+        int result = FirebirdObjectHandleGenerator.getInstance().nextHandle(connectionId);
+        allocatedStatementRegistry.get(connectionId).add(result);
+        lastStatementId.set(result);
+        return result;
     }
     
     /**
-     * Get current statement ID for connection.
+     * Get the last generated statement ID for connection.
      *
      * @param connectionId connection ID
      * @return statement ID
      */
     public int getStatementId(final int connectionId) {
-        return getStatementCounter(connectionId).get();
+        return getLastStatementId(connectionId).get();
+    }
+    
+    /**
+     * Release statement ID for connection.
+     *
+     * @param connectionId connection ID
+     * @param statementId statement ID
+     */
+    public void releaseStatementId(final int connectionId, final int statementId) {
+        Set<Integer> allocatedStatements = allocatedStatementRegistry.get(connectionId);
+        if (null != allocatedStatements && allocatedStatements.remove(statementId)) {
+            FirebirdObjectHandleGenerator.getInstance().releaseHandle(connectionId, statementId);
+        }
     }
     
     /**
@@ -79,9 +103,11 @@ public final class FirebirdStatementIdGenerator {
      */
     public void unregisterConnection(final int connectionId) {
         connectionRegistry.remove(connectionId);
+        allocatedStatementRegistry.remove(connectionId);
+        FirebirdObjectHandleGenerator.getInstance().unregisterConnection(connectionId);
     }
     
-    private AtomicInteger getStatementCounter(final int connectionId) {
+    private AtomicInteger getLastStatementId(final int connectionId) {
         AtomicInteger result = connectionRegistry.get(connectionId);
         if (null == result) {
             throw new IllegalStateException("No statement ID generator found for connectionId: " + connectionId);

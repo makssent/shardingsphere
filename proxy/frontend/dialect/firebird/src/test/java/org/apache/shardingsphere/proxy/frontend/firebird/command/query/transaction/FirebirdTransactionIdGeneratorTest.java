@@ -23,6 +23,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.backend.session.transaction.TransactionStatus;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.UpdateStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.CommitStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.RollbackStatement;
@@ -59,6 +60,14 @@ class FirebirdTransactionIdGeneratorTest {
     void assertNextTransactionId() {
         assertThat(FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID), is(1));
         assertThat(FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID), is(2));
+    }
+    
+    @Test
+    void assertNextTransactionIdAfterStatementId() {
+        FirebirdStatementIdGenerator.getInstance().registerConnection(CONNECTION_ID);
+        int statementId = FirebirdStatementIdGenerator.getInstance().nextStatementId(CONNECTION_ID);
+        assertThat(FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID), is(statementId + 1));
+        FirebirdStatementIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
     }
     
     @Test

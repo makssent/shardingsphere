@@ -23,6 +23,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdObjectHandleGenerator;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.CommitStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.RollbackStatement;
@@ -70,12 +71,16 @@ public final class FirebirdTransactionIdGenerator {
     /**
      * Generate next transaction ID for connection.
      *
+     * <p>Transaction IDs are issued from the object handles of the connection.</p>
+     *
      * @param connectionId connection ID
      * @return generated transaction ID
      */
     public int nextTransactionId(final int connectionId) {
-        int result = getTransactionCounter(connectionId).incrementAndGet();
+        AtomicInteger lastTransactionId = getTransactionCounter(connectionId);
+        int result = FirebirdObjectHandleGenerator.getInstance().nextHandle(connectionId);
         getActiveTransactions(connectionId).add(result);
+        lastTransactionId.set(result);
         return result;
     }
     
@@ -157,12 +162,14 @@ public final class FirebirdTransactionIdGenerator {
      * @param transactionId transaction ID
      */
     public void closeTransaction(final int connectionId, final int transactionId) {
-        getActiveTransactions(connectionId).remove(transactionId);
+        if (getActiveTransactions(connectionId).remove(transactionId)) {
+            FirebirdObjectHandleGenerator.getInstance().releaseHandle(connectionId, transactionId);
+        }
         backendTransactionOwnerRegistry.remove(connectionId, transactionId);
     }
     
     /**
-     * Get current transaction ID for connection.
+     * Get the last generated transaction ID for connection.
      *
      * @param connectionId connection ID
      * @return transaction ID
@@ -180,6 +187,7 @@ public final class FirebirdTransactionIdGenerator {
         connectionRegistry.remove(connectionId);
         activeTransactionRegistry.remove(connectionId);
         backendTransactionOwnerRegistry.remove(connectionId);
+        FirebirdObjectHandleGenerator.getInstance().unregisterConnection(connectionId);
     }
     
     private AtomicInteger getTransactionCounter(final int connectionId) {

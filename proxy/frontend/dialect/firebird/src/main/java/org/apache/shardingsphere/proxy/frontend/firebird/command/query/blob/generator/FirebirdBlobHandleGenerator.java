@@ -21,6 +21,7 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdObjectHandleGenerator;
 
 import java.util.BitSet;
 import java.util.Map;
@@ -63,24 +64,21 @@ public final class FirebirdBlobHandleGenerator {
     /**
      * Generate next BLOB handle for connection.
      *
-     * <p>The search starts at the lowest free handle, so a handle released by close or cancel is reused at once.</p>
+     * <p>BLOB handles are issued from the object handles of the connection, so a handle released by close or cancel is reused at once.</p>
      *
      * @param connectionId connection ID
      * @return generated BLOB handle within the range 1 to {@code 0xFFFE}
-     * @throws DatabaseProtocolException when connection is not registered or no free BLOB handle is available
+     * @throws DatabaseProtocolException when connection is not registered or no free object handle is available
      */
     public int nextBlobHandle(final int connectionId) {
         ConnectionBlobHandles connectionBlobHandles = connectionRegistry.get(connectionId);
         ShardingSpherePreconditions.checkState(null != connectionBlobHandles,
                 () -> new DatabaseProtocolException("Connection %d is not registered.", connectionId));
         synchronized (connectionBlobHandles) {
-            int handleIndex = connectionBlobHandles.handles.nextClearBit(connectionBlobHandles.searchPosition);
-            ShardingSpherePreconditions.checkState(MAX_OBJECT_HANDLE > handleIndex,
-                    () -> new DatabaseProtocolException("No free BLOB handles are available for connection %d.", connectionId));
-            connectionBlobHandles.handles.set(handleIndex);
-            connectionBlobHandles.lastBlobHandle = handleIndex + 1;
-            connectionBlobHandles.searchPosition = connectionBlobHandles.lastBlobHandle;
-            return connectionBlobHandles.lastBlobHandle;
+            int result = FirebirdObjectHandleGenerator.getInstance().nextHandle(connectionId);
+            connectionBlobHandles.handles.set(result - 1);
+            connectionBlobHandles.lastBlobHandle = result;
+            return result;
         }
     }
     
@@ -138,9 +136,8 @@ public final class FirebirdBlobHandleGenerator {
         synchronized (connectionBlobHandles) {
             ShardingSpherePreconditions.checkState(connectionBlobHandles.handles.get(blobHandle - 1),
                     () -> new DatabaseProtocolException("Invalid BLOB handle %d.", blobHandle));
-            int position = blobHandle - 1;
-            connectionBlobHandles.handles.clear(position);
-            connectionBlobHandles.searchPosition = Math.min(connectionBlobHandles.searchPosition, position);
+            connectionBlobHandles.handles.clear(blobHandle - 1);
+            FirebirdObjectHandleGenerator.getInstance().releaseHandle(connectionId, blobHandle);
             if (blobHandle == connectionBlobHandles.lastBlobHandle) {
                 connectionBlobHandles.lastBlobHandle = 0;
             }
@@ -154,13 +151,12 @@ public final class FirebirdBlobHandleGenerator {
      */
     public void unregisterConnection(final int connectionId) {
         connectionRegistry.remove(connectionId);
+        FirebirdObjectHandleGenerator.getInstance().unregisterConnection(connectionId);
     }
     
     private static final class ConnectionBlobHandles {
         
         private final BitSet handles = new BitSet();
-        
-        private int searchPosition;
         
         private int lastBlobHandle;
     }

@@ -25,6 +25,7 @@ import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch.FirebirdBatchStatementManager;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementResourceCleaner;
 
 import java.sql.SQLException;
@@ -37,6 +38,9 @@ import java.util.Collections;
 @RequiredArgsConstructor
 public final class FirebirdFreeStatementCommandExecutor implements CommandExecutor {
     
+    // INVALID_OBJECT (0xFFFF) as Firebird writes it with xdr_short
+    private static final int INVALID_OBJECT_HANDLE = -1;
+    
     private final FirebirdFreeStatementPacket packet;
     
     private final ConnectionSession connectionSession;
@@ -45,6 +49,11 @@ public final class FirebirdFreeStatementCommandExecutor implements CommandExecut
     public Collection<DatabasePacket> execute() throws SQLException {
         switch (packet.getOption()) {
             case FirebirdFreeStatementPacket.DROP:
+                FirebirdStatementIdGenerator.getInstance().releaseStatementId(connectionSession.getConnectionId(), packet.getStatementId());
+                connectionSession.getServerPreparedStatementRegistry().removePreparedStatement(packet.getStatementId());
+                FirebirdBatchStatementManager.getInstance().unregisterBatchStatement(connectionSession.getConnectionId(), packet.getStatementId());
+                FirebirdStatementResourceCleaner.clean(connectionSession, packet.getStatementId(), true);
+                break;
             case FirebirdFreeStatementPacket.UNPREPARE:
                 connectionSession.getServerPreparedStatementRegistry().removePreparedStatement(packet.getStatementId());
                 FirebirdBatchStatementManager.getInstance().unregisterBatchStatement(connectionSession.getConnectionId(), packet.getStatementId());
@@ -57,6 +66,6 @@ public final class FirebirdFreeStatementCommandExecutor implements CommandExecut
             default:
                 throw new DatabaseProtocolException("Unknown DSQL option type %d", packet.getOption());
         }
-        return Collections.singleton(new FirebirdGenericResponsePacket());
+        return Collections.singleton(new FirebirdGenericResponsePacket().setHandle(FirebirdFreeStatementPacket.DROP == packet.getOption() ? INVALID_OBJECT_HANDLE : packet.getStatementId()));
     }
 }

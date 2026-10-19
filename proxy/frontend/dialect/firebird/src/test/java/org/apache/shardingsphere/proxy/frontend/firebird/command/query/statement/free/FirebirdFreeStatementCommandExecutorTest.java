@@ -26,6 +26,7 @@ import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.handler.ProxyBackendHandler;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.backend.session.ServerPreparedStatementRegistry;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementIdGenerator;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementResourceCleaner;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.fetch.FirebirdFetchStatementCache;
 import org.junit.jupiter.api.AfterEach;
@@ -45,6 +46,7 @@ import java.util.Collection;
 import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -105,9 +107,22 @@ class FirebirdFreeStatementCommandExecutorTest {
     }
     
     @Test
+    void assertExecuteWithDrop() throws Exception {
+        FirebirdStatementIdGenerator.getInstance().registerConnection(CONNECTION_ID);
+        int statementId = FirebirdStatementIdGenerator.getInstance().nextStatementId(CONNECTION_ID);
+        when(packet.getStatementId()).thenReturn(statementId);
+        when(packet.getOption()).thenReturn(FirebirdFreeStatementPacket.DROP);
+        Collection<DatabasePacket> actual = new FirebirdFreeStatementCommandExecutor(packet, connectionSession).execute();
+        assertThat(((FirebirdGenericResponsePacket) actual.iterator().next()).getHandle(), is(-1));
+        assertThat(FirebirdStatementIdGenerator.getInstance().nextStatementId(CONNECTION_ID), is(statementId));
+        FirebirdStatementIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
+    }
+    
+    @Test
     void assertExecuteWithClose() throws Exception {
         when(packet.getOption()).thenReturn(FirebirdFreeStatementPacket.CLOSE);
-        new FirebirdFreeStatementCommandExecutor(packet, connectionSession).execute();
+        Collection<DatabasePacket> actual = new FirebirdFreeStatementCommandExecutor(packet, connectionSession).execute();
+        assertThat(((FirebirdGenericResponsePacket) actual.iterator().next()).getHandle(), is(STATEMENT_ID));
         verify(connectionSession, never()).invalidatePreparedStatementCache(any());
         verify(registry, never()).removePreparedStatement(STATEMENT_ID);
         assertNull(FirebirdFetchStatementCache.getInstance().getFetchBackendHandler(CONNECTION_ID, STATEMENT_ID));

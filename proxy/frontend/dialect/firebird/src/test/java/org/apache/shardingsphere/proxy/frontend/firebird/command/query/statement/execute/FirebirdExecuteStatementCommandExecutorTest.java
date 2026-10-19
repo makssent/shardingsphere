@@ -192,7 +192,6 @@ class FirebirdExecuteStatementCommandExecutorTest {
     void assertExecuteWithClosedTransactionHandle() {
         when(packet.getStatementId()).thenReturn(2);
         FirebirdTransactionIdGenerator.getInstance().closeTransaction(CONNECTION_ID, transactionId);
-        FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
         executor = new FirebirdExecuteStatementCommandExecutor(packet, connectionSession);
         assertThrows(InvalidTransactionHandleException.class, executor::execute);
         verify(connectionSession).finishPreparedStatementCache();
