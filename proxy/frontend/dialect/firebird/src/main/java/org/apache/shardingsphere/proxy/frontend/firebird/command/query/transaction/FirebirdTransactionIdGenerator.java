@@ -19,7 +19,13 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.transact
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
+import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.CommitStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.RollbackStatement;
 
 import java.util.Map;
 import java.util.Set;
@@ -33,6 +39,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class FirebirdTransactionIdGenerator {
     
     private static final FirebirdTransactionIdGenerator INSTANCE = new FirebirdTransactionIdGenerator();
+    
+    private static final int MAX_BACKEND_TRANSACTIONS = 1;
     
     private final Map<Integer, AtomicInteger> connectionRegistry = new ConcurrentHashMap<>();
     
@@ -98,6 +106,19 @@ public final class FirebirdTransactionIdGenerator {
     }
     
     /**
+     * Check that transaction can execute statements.
+     *
+     * @param connectionSession connection session
+     * @param transactionId transaction ID
+     * @throws InvalidTransactionHandleException if transaction is not active
+     * @throws ExcessTransactionsException if the backend transaction belongs to another transaction
+     */
+    public void checkTransactionForStatement(final ConnectionSession connectionSession, final int transactionId) {
+        ShardingSpherePreconditions.checkState(isTransactionActive(connectionSession.getConnectionId(), transactionId), () -> new InvalidTransactionHandleException(transactionId));
+        ShardingSpherePreconditions.checkState(isBackendTransactionAvailable(connectionSession, transactionId), () -> new ExcessTransactionsException(MAX_BACKEND_TRANSACTIONS));
+    }
+    
+    /**
      * Update owner of the backend transaction of connection after transaction executed a statement.
      *
      * @param connectionSession connection session
@@ -109,6 +130,24 @@ public final class FirebirdTransactionIdGenerator {
         } else {
             backendTransactionOwnerRegistry.remove(connectionSession.getConnectionId());
         }
+    }
+    
+    /**
+     * Close transaction if the statement executed in it ended it.
+     *
+     * <p>A COMMIT or ROLLBACK statement ends the transaction it was executed in, so the transaction ID becomes invalid as in Firebird.</p>
+     *
+     * @param connectionId connection ID
+     * @param transactionId transaction ID
+     * @param sqlStatement executed SQL statement
+     * @return transaction ID after the statement, or {@code 0} if the statement ended the transaction
+     */
+    public int closeTransactionEndedBy(final int connectionId, final int transactionId, final SQLStatement sqlStatement) {
+        if (sqlStatement instanceof CommitStatement || sqlStatement instanceof RollbackStatement && !((RollbackStatement) sqlStatement).getSavepointName().isPresent()) {
+            closeTransaction(connectionId, transactionId);
+            return 0;
+        }
+        return transactionId;
     }
     
     /**

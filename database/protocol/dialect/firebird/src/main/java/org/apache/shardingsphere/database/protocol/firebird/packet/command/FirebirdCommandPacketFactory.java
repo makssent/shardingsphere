@@ -43,6 +43,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdAllocateStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFetchStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFreeStatementPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.FirebirdExecuteImmediatePacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.FirebirdExecuteStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdPrepareStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.transaction.FirebirdCommitTransactionPacket;
@@ -99,6 +100,8 @@ public final class FirebirdCommandPacketFactory {
             case EXECUTE:
             case EXECUTE2:
                 return new FirebirdExecuteStatementPacket(payload, protocolVersion);
+            case EXEC_IMMEDIATE:
+                return new FirebirdExecuteImmediatePacket(payload);
             case FETCH:
                 return new FirebirdFetchStatementPacket(payload);
             case INFO_SQL:
@@ -175,6 +178,8 @@ public final class FirebirdCommandPacketFactory {
             case EXECUTE:
             case EXECUTE2:
                 return FirebirdExecuteStatementPacket.getLength(payload, protocolVersion);
+            case EXEC_IMMEDIATE:
+                return FirebirdExecuteImmediatePacket.getLength(payload);
             case FETCH:
                 return FirebirdFetchStatementPacket.getLength(payload);
             case COMMIT:

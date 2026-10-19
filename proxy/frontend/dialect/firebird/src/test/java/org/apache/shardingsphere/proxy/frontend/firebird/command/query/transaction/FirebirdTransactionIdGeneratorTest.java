@@ -17,8 +17,15 @@
 
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction;
 
+import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
+import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.backend.session.transaction.TransactionStatus;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.UpdateStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.CommitStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.RollbackStatement;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,12 +33,15 @@ import org.junit.jupiter.api.Test;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class FirebirdTransactionIdGeneratorTest {
+    
+    private static final DatabaseType DATABASE_TYPE = TypedSPILoader.getService(DatabaseType.class, "Firebird");
     
     private static final int CONNECTION_ID = 1;
     
@@ -102,10 +112,58 @@ class FirebirdTransactionIdGeneratorTest {
     }
     
     @Test
+    void assertCheckTransactionForStatement() {
+        int transactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
+        assertDoesNotThrow(() -> FirebirdTransactionIdGenerator.getInstance().checkTransactionForStatement(mockConnectionSession(false), transactionId));
+    }
+    
+    @Test
+    void assertCheckTransactionForStatementWithInactiveTransaction() {
+        assertThrows(InvalidTransactionHandleException.class, () -> FirebirdTransactionIdGenerator.getInstance().checkTransactionForStatement(mockConnectionSession(false), 0));
+    }
+    
+    @Test
+    void assertCheckTransactionForStatementWithBackendTransactionOfAnotherTransaction() {
+        ConnectionSession connectionSession = mockConnectionSession(true);
+        FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(connectionSession, FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID));
+        int transactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
+        assertThrows(ExcessTransactionsException.class, () -> FirebirdTransactionIdGenerator.getInstance().checkTransactionForStatement(connectionSession, transactionId));
+    }
+    
+    @Test
     void assertUpdateBackendTransactionOwnerAfterBackendTransactionEnded() {
         FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(mockConnectionSession(true), 1);
         FirebirdTransactionIdGenerator.getInstance().updateBackendTransactionOwner(mockConnectionSession(false), 1);
         assertTrue(FirebirdTransactionIdGenerator.getInstance().isBackendTransactionAvailable(mockConnectionSession(true), 2));
+    }
+    
+    @Test
+    void assertCloseTransactionEndedByCommitStatement() {
+        int transactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
+        assertThat(FirebirdTransactionIdGenerator.getInstance().closeTransactionEndedBy(CONNECTION_ID, transactionId, new CommitStatement(DATABASE_TYPE)), is(0));
+        assertFalse(FirebirdTransactionIdGenerator.getInstance().isTransactionActive(CONNECTION_ID, transactionId));
+    }
+    
+    @Test
+    void assertCloseTransactionEndedByRollbackStatement() {
+        int transactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
+        assertThat(FirebirdTransactionIdGenerator.getInstance().closeTransactionEndedBy(CONNECTION_ID, transactionId, new RollbackStatement(DATABASE_TYPE)), is(0));
+        assertFalse(FirebirdTransactionIdGenerator.getInstance().isTransactionActive(CONNECTION_ID, transactionId));
+    }
+    
+    @Test
+    void assertCloseTransactionEndedByRollbackToSavepointStatement() {
+        int transactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
+        assertThat(FirebirdTransactionIdGenerator.getInstance().closeTransactionEndedBy(CONNECTION_ID, transactionId, new RollbackStatement(DATABASE_TYPE, "foo_savepoint")), is(transactionId));
+        assertTrue(FirebirdTransactionIdGenerator.getInstance().isTransactionActive(CONNECTION_ID, transactionId));
+    }
+    
+    @Test
+    void assertCloseTransactionEndedByUpdateStatement() {
+        int transactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
+        UpdateStatement updateStatement = UpdateStatement.builder().databaseType(DATABASE_TYPE).build();
+        assertThat(FirebirdTransactionIdGenerator.getInstance().closeTransactionEndedBy(CONNECTION_ID, transactionId, updateStatement), is(transactionId));
+        assertTrue(FirebirdTransactionIdGenerator.getInstance().isTransactionActive(CONNECTION_ID, transactionId));
     }
     
     @Test

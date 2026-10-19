@@ -21,6 +21,7 @@ import org.apache.shardingsphere.database.connector.core.spi.DatabaseTypedSPILoa
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.exception.core.exception.transaction.InTransactionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
 import org.apache.shardingsphere.database.protocol.firebird.codec.FirebirdPacketCodecEngine;
 import org.apache.shardingsphere.infra.session.connection.ConnectionContext;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
@@ -111,6 +112,7 @@ class FirebirdFrontendEngineTest {
         return Stream.of(
                 Arguments.of("mark when in transaction", true, false, new Exception("error"), true),
                 Arguments.of("skip when in transaction exception", true, false, new InTransactionException(), false),
+                Arguments.of("skip when invalid transaction handle exception", true, false, new InvalidTransactionHandleException(0), false),
                 Arguments.of("skip when excess transactions exception", true, false, new ExcessTransactionsException(1), false),
                 Arguments.of("skip when not in transaction", false, false, new Exception("error"), false),
                 Arguments.of("keep marked when already occurred", true, true, new Exception("error"), true));

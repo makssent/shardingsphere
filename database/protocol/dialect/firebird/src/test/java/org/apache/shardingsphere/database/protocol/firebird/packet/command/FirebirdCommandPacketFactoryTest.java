@@ -38,6 +38,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdAllocateStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFetchStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFreeStatementPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.FirebirdExecuteImmediatePacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.execute.FirebirdExecuteStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdPrepareStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.transaction.FirebirdCommitTransactionPacket;
@@ -100,6 +101,7 @@ class FirebirdCommandPacketFactoryTest {
                 Arguments.of("prepare_statement", FirebirdCommandPacketType.PREPARE_STATEMENT, FirebirdPrepareStatementPacket.class),
                 Arguments.of("execute", FirebirdCommandPacketType.EXECUTE, FirebirdExecuteStatementPacket.class),
                 Arguments.of("execute2", FirebirdCommandPacketType.EXECUTE2, FirebirdExecuteStatementPacket.class),
+                Arguments.of("exec_immediate", FirebirdCommandPacketType.EXEC_IMMEDIATE, FirebirdExecuteImmediatePacket.class),
                 Arguments.of("fetch", FirebirdCommandPacketType.FETCH, FirebirdFetchStatementPacket.class),
                 Arguments.of("info_sql", FirebirdCommandPacketType.INFO_SQL, FirebirdInfoPacket.class),
                 Arguments.of("commit", FirebirdCommandPacketType.COMMIT, FirebirdCommitTransactionPacket.class),
@@ -135,6 +137,7 @@ class FirebirdCommandPacketFactoryTest {
                 Arguments.of("prepare_statement", FirebirdCommandPacketType.PREPARE_STATEMENT, 20),
                 Arguments.of("execute", FirebirdCommandPacketType.EXECUTE, 0),
                 Arguments.of("execute2", FirebirdCommandPacketType.EXECUTE2, 0),
+                Arguments.of("exec_immediate", FirebirdCommandPacketType.EXEC_IMMEDIATE, 20),
                 Arguments.of("fetch", FirebirdCommandPacketType.FETCH, 16),
                 Arguments.of("commit", FirebirdCommandPacketType.COMMIT, 8),
                 Arguments.of("rollback", FirebirdCommandPacketType.ROLLBACK, 8),
