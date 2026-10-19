@@ -63,30 +63,27 @@ public final class FirebirdBlrRowMetadata {
         List<FirebirdBinaryColumnType> result = new ArrayList<>(length / 2);
         int blrType = buffer.readUnsignedByte();
         while (blrType != BlrConstants.blr_end) {
-            FirebirdBinaryColumnType type = FirebirdBinaryColumnType.valueOfBLRType(blrType);
-            result.add(type);
-            buffer.skipBytes(getSkipCount(type) + 2);
+            result.add(FirebirdBinaryColumnType.valueOfBLRType(blrType));
+            buffer.skipBytes(getSkipCount(blrType) + 2);
             blrType = buffer.readUnsignedByte();
         }
         return result;
     }
     
-    private static int getSkipCount(final FirebirdBinaryColumnType type) {
-        switch (type) {
-            case VARYING:
-            case TEXT:
+    private static int getSkipCount(final int blrType) {
+        switch (blrType) {
+            case BlrConstants.blr_varying2:
+            case BlrConstants.blr_text2:
+            case BlrConstants.blr_blob2:
                 return 4;
-            case NULL:
-            case LEGACY_TEXT:
-            case LEGACY_VARYING:
+            case BlrConstants.blr_text:
+            case BlrConstants.blr_varying:
                 return 2;
-            case BLOB:
-            case ARRAY:
-            case LONG:
-            case SHORT:
-            case INT64:
-            case QUAD:
-            case INT128:
+            case BlrConstants.blr_quad:
+            case BlrConstants.blr_long:
+            case BlrConstants.blr_short:
+            case BlrConstants.blr_int64:
+            case BlrConstants.blr_int128:
                 return 1;
             default:
                 return 0;
