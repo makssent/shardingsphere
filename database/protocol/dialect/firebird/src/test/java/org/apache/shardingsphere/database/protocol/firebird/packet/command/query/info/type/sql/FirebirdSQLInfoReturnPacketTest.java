@@ -31,6 +31,7 @@ import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class FirebirdSQLInfoReturnPacketTest {
@@ -67,6 +68,23 @@ class FirebirdSQLInfoReturnPacketTest {
         inOrder.verify(payload).writeInt2LE(4);
         inOrder.verify(payload).writeInt4LE(9);
         inOrder.verify(payload).writeInt1(FirebirdCommonInfoPacketType.END.getCode());
+    }
+    
+    @Test
+    void assertWriteRecordsWithoutRequestedEnd() {
+        FirebirdSQLInfoReturnPacket packet = new FirebirdSQLInfoReturnPacket(Collections.singletonList(FirebirdSQLInfoPacketType.RECORDS), new FirebirdSQLRecordsInfo(1L, 0L, 0L));
+        packet.write(payload);
+        InOrder inOrder = inOrder(payload);
+        inOrder.verify(payload).writeInt1(FirebirdSQLInfoPacketType.RECORDS.getCode());
+        inOrder.verify(payload).writeInt1(FirebirdCommonInfoPacketType.END.getCode());
+    }
+    
+    @Test
+    void assertWriteRecordsWithRequestedEndOnce() {
+        FirebirdSQLRecordsInfo recordsInfo = new FirebirdSQLRecordsInfo(1L, 0L, 0L);
+        FirebirdSQLInfoReturnPacket packet = new FirebirdSQLInfoReturnPacket(Arrays.asList(FirebirdSQLInfoPacketType.RECORDS, FirebirdCommonInfoPacketType.END), recordsInfo);
+        packet.write(payload);
+        verify(payload).writeInt1(FirebirdCommonInfoPacketType.END.getCode());
     }
     
     @Test

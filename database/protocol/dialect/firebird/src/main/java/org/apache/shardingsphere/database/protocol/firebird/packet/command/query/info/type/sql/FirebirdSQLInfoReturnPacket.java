@@ -53,12 +53,16 @@ public final class FirebirdSQLInfoReturnPacket extends FirebirdPacket {
     @Override
     protected void write(final FirebirdPacketPayload payload) {
         for (FirebirdInfoPacketType type : infoItems) {
+            if (FirebirdCommonInfoPacketType.END == type) {
+                break;
+            }
             if (type.isCommon()) {
                 FirebirdCommonInfoPacketType.parseCommonInfo(payload, (FirebirdCommonInfoPacketType) type);
             } else {
                 parseSQLInfo(payload, (FirebirdSQLInfoPacketType) type);
             }
         }
+        payload.writeInt1(FirebirdCommonInfoPacketType.END.getCode());
     }
     
     private void parseSQLInfo(final FirebirdPacketPayload payload, final FirebirdSQLInfoPacketType type) {
