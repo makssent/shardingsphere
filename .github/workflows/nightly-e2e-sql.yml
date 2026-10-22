@@ -117,6 +117,11 @@ jobs:
             mode: Cluster
             database: Firebird
             scenario: db
+          - adapter: proxy
+            mode: Cluster
+            database: Firebird
+            scenario: db
+            additional-options: '-Djaybird.version=6.0.7'
         exclude:
           - adapter: jdbc
             scenario: passthrough
