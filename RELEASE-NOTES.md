@@ -197,7 +197,6 @@
 1. Proxy: Simplify SQL dialect exception mapping in Firebird - [#40312](https://github.com/apache/shardingsphere/pull/40312)
 1. Proxy: Simplify protocol codec and packets in Firebird - [#40314](https://github.com/apache/shardingsphere/pull/40314)
 1. SQL Parser: Simplify SQL statement visitors in Firebird - [#40315](https://github.com/apache/shardingsphere/pull/40315)
-1. E2E: Add Firebird SQL E2E cases for Firebird SQL syntax and run Firebird SQL E2E tests with Jaybird 6
 
 ## Release 5.5.3
 
