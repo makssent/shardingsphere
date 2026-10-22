@@ -17,6 +17,8 @@
 
 package org.apache.shardingsphere.database.protocol.firebird.err;
 
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException.StatusVectorEntry;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.firebirdsql.gds.ISCConstants;
 import org.junit.jupiter.api.Test;
@@ -26,6 +28,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.Collections;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -37,6 +41,28 @@ class FirebirdStatusVectorTest {
     
     @Mock
     private FirebirdPacketPayload payload;
+    
+    @Test
+    void assertWriteWithNativeStatusVector() {
+        FirebirdStatusVector actual = new FirebirdStatusVector(new FirebirdException("Invalid type of statement used in batch", "07003", ISCConstants.isc_batch_type, Arrays.asList(
+                new StatusVectorEntry(ISCConstants.isc_dsql_error, Collections.emptyList()),
+                new StatusVectorEntry(ISCConstants.isc_sqlerr, Collections.singletonList(-901)),
+                new StatusVectorEntry(ISCConstants.isc_batch_type, Collections.emptyList()))));
+        assertThat(actual.getGdsCode(), is(ISCConstants.isc_dsql_error));
+        assertThat(actual.getSegments().get(1).getArguments(), is(Collections.singletonList(-901)));
+        actual.write(payload);
+        InOrder inOrder = inOrder(payload);
+        inOrder.verify(payload).writeInt4(ISCConstants.isc_arg_gds);
+        inOrder.verify(payload).writeInt4(ISCConstants.isc_dsql_error);
+        inOrder.verify(payload).writeInt4(ISCConstants.isc_arg_gds);
+        inOrder.verify(payload).writeInt4(ISCConstants.isc_sqlerr);
+        inOrder.verify(payload).writeInt4(ISCConstants.isc_arg_number);
+        inOrder.verify(payload).writeInt4(-901);
+        inOrder.verify(payload).writeInt4(ISCConstants.isc_arg_gds);
+        inOrder.verify(payload).writeInt4(ISCConstants.isc_batch_type);
+        inOrder.verify(payload).writeInt4(ISCConstants.isc_arg_end);
+        verifyNoMoreInteractions(payload);
+    }
     
     @Test
     void assertWriteKeepsNativeCodeAndStripsStateSuffix() {

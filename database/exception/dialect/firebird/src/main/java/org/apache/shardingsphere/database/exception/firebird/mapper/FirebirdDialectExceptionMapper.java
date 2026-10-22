@@ -26,6 +26,8 @@ import org.apache.shardingsphere.database.exception.core.exception.syntax.databa
 import org.apache.shardingsphere.database.exception.core.exception.syntax.sql.DialectSQLParsingException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.table.TableExistsException;
 import org.apache.shardingsphere.database.exception.core.mapper.SQLDialectExceptionMapper;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException.StatusVectorEntry;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
@@ -34,6 +36,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchMessageFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchStatementTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrTypeException;
@@ -42,8 +45,11 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.vendor.FirebirdVendorError;
 import org.apache.shardingsphere.infra.exception.external.sql.vendor.VendorError;
 import org.apache.shardingsphere.infra.exception.generic.UnknownSQLException;
+import org.firebirdsql.gds.ISCConstants;
 
 import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.Collections;
 
 /**
  * Firebird dialect exception mapper.
@@ -79,6 +85,9 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
         }
         if (sqlDialectException instanceof BatchParametersRequiredException) {
             return toSQLException(FirebirdVendorError.BATCH_PARAMETERS_REQUIRED);
+        }
+        if (sqlDialectException instanceof InvalidBatchStatementTypeException) {
+            return toBatchStatementException();
         }
         if (sqlDialectException instanceof InvalidBatchMessageFormatException) {
             return toSQLException(FirebirdVendorError.SQLDA_ERROR);
@@ -118,6 +127,14 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
     
     private SQLException toSQLException(final VendorError vendorError, final Object... messageArgs) {
         return new SQLException(String.format(vendorError.getReason(), messageArgs), vendorError.getSqlState().getValue(), vendorError.getVendorCode());
+    }
+    
+    private SQLException toBatchStatementException() {
+        VendorError vendorError = FirebirdVendorError.INVALID_BATCH_STATEMENT_TYPE;
+        return new FirebirdException(vendorError.getReason(), vendorError.getSqlState().getValue(), vendorError.getVendorCode(), Arrays.asList(
+                new StatusVectorEntry(ISCConstants.isc_dsql_error, Collections.emptyList()),
+                new StatusVectorEntry(ISCConstants.isc_sqlerr, Collections.singletonList(-901)),
+                new StatusVectorEntry(vendorError.getVendorCode(), Collections.emptyList())));
     }
     
     @Override

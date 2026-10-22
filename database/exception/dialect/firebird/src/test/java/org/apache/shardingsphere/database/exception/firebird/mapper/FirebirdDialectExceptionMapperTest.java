@@ -28,6 +28,8 @@ import org.apache.shardingsphere.database.exception.core.exception.syntax.databa
 import org.apache.shardingsphere.database.exception.core.exception.syntax.sql.DialectSQLParsingException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.table.TableExistsException;
 import org.apache.shardingsphere.database.exception.core.mapper.SQLDialectExceptionMapper;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException.StatusVectorEntry;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
@@ -36,6 +38,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchMessageFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchStatementTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrTypeException;
@@ -44,16 +47,20 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.vendor.FirebirdVendorError;
 import org.apache.shardingsphere.infra.exception.external.sql.vendor.VendorError;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
+import org.firebirdsql.gds.ISCConstants;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.sql.SQLException;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 class FirebirdDialectExceptionMapperTest {
@@ -74,6 +81,25 @@ class FirebirdDialectExceptionMapperTest {
     @Test
     void assertConvertWithUnknownException() {
         assertThat(mapper.convert(mock(SQLDialectException.class)).getSQLState(), is("HY000"));
+    }
+    
+    @Test
+    void assertConvertWithInvalidBatchStatementType() {
+        FirebirdException actual = (FirebirdException) mapper.convert(new InvalidBatchStatementTypeException());
+        assertThat(actual.getSQLState(), is("07003"));
+        assertThat(actual.getErrorCode(), is(ISCConstants.isc_batch_type));
+        assertThat(actual.getMessage(), is("Invalid type of statement used in batch"));
+        assertThat(actual.getStatusVector().size(), is(3));
+        Iterator<StatusVectorEntry> actualEntries = actual.getStatusVector().iterator();
+        StatusVectorEntry actualDynamicError = actualEntries.next();
+        assertThat(actualDynamicError.getGdsCode(), is(ISCConstants.isc_dsql_error));
+        assertTrue(actualDynamicError.getArguments().isEmpty());
+        StatusVectorEntry actualSqlError = actualEntries.next();
+        assertThat(actualSqlError.getGdsCode(), is(ISCConstants.isc_sqlerr));
+        assertThat(actualSqlError.getArguments(), is(Collections.singletonList(-901)));
+        StatusVectorEntry actualBatchError = actualEntries.next();
+        assertThat(actualBatchError.getGdsCode(), is(ISCConstants.isc_batch_type));
+        assertTrue(actualBatchError.getArguments().isEmpty());
     }
     
     private static Stream<Arguments> convertArguments() {

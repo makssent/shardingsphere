@@ -20,6 +20,8 @@ package org.apache.shardingsphere.proxy.frontend.firebird;
 import org.apache.shardingsphere.database.connector.core.spi.DatabaseTypedSPILoader;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.exception.core.exception.transaction.InTransactionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchStatementTypeException;
 import org.apache.shardingsphere.database.protocol.firebird.codec.FirebirdPacketCodecEngine;
 import org.apache.shardingsphere.infra.session.connection.ConnectionContext;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
@@ -110,6 +112,8 @@ class FirebirdFrontendEngineTest {
         return Stream.of(
                 Arguments.of("mark when in transaction", true, false, new Exception("error"), true),
                 Arguments.of("skip when in transaction exception", true, false, new InTransactionException(), false),
+                Arguments.of("skip when invalid batch statement type", true, false, new InvalidBatchStatementTypeException(), false),
+                Arguments.of("skip when invalid batch handle after rejected create", true, false, new InvalidBatchHandleException(42), false),
                 Arguments.of("skip when not in transaction", false, false, new Exception("error"), false),
                 Arguments.of("keep marked when already occurred", true, true, new Exception("error"), true));
     }

@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
@@ -52,7 +53,7 @@ class FirebirdErrorSegmentResolverTest {
         StringBuilder rendered = new StringBuilder();
         for (Segment each : segments) {
             GDSExceptionHelper.GDSMessage segmentMessage = GDSExceptionHelper.getMessage(each.getGdsCode());
-            segmentMessage.setParameters(each.getArguments());
+            segmentMessage.setParameters(each.getArguments().stream().map(Object::toString).collect(Collectors.toList()));
             if (rendered.length() > 0) {
                 rendered.append("; ");
             }

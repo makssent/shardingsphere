@@ -31,6 +31,7 @@ import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.InsertStatement;
 import org.firebirdsql.gds.BlrConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,6 +56,7 @@ import static org.hamcrest.Matchers.isA;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
@@ -83,7 +85,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     @Mock
     private FirebirdBatchStatement batchStatement;
     
-    @Mock
+    @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private FirebirdServerPreparedStatement preparedStatement;
     
     private int transactionId;
@@ -149,6 +151,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
     
     @Test
     void assertExecuteEmptyBatch() throws ReflectiveOperationException, SQLException {
+        when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(mock(InsertStatement.class));
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
