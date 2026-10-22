@@ -134,10 +134,7 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
                 } else if (TAG_BUFFER_BYTES_SIZE == tag) {
                     bufferSize = getBufferSize(readIntegerValue(reader, tag, valueLength));
                 } else if (TAG_BLOB_POLICY == tag) {
-                    // int requestedBlobPolicy = readIntegerValue(reader, tag, valueLength);
-                    // blobPolicy = BLOB_STREAM == requestedBlobPolicy ? requestedBlobPolicy : BLOB_STREAM;
-                    // TODO Support BLOB policy after implementing the Firebird batch BLOB subprotocol.
-                    throw new DatabaseProtocolException("BLOB policy is not supported in Firebird batch operations");
+                    readIntegerValue(reader, tag, valueLength);
                 } else {
                     reader.skipBytes(valueLength);
                 }

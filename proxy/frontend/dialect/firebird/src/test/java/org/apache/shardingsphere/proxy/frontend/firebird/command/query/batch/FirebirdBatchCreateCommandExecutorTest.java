@@ -79,7 +79,7 @@ class FirebirdBatchCreateCommandExecutorTest {
     
     private static final int TAG_BLOB_POLICY = 4;
     
-    private static final int BLOB_NONE = 0;
+    private static final int BLOB_ID_USER = 2;
     
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private ConnectionSession connectionSession;
@@ -262,9 +262,11 @@ class FirebirdBatchCreateCommandExecutorTest {
     
     @Test
     void assertParseBatchParametersWithBlobPolicy() {
-        DatabaseProtocolException actual = assertThrows(DatabaseProtocolException.class,
-                () -> FirebirdBatchCreateCommandExecutor.BatchParameters.parse(createBatchParametersBuffer(TAG_BLOB_POLICY, BLOB_NONE)));
-        assertThat(actual.getMessage(), is("BLOB policy is not supported in Firebird batch operations"));
+        FirebirdBatchCreateCommandExecutor.BatchParameters actual = FirebirdBatchCreateCommandExecutor.BatchParameters.parse(createBatchParametersBuffer(TAG_BLOB_POLICY, BLOB_ID_USER));
+        assertThat(actual.getVersion(), is(BATCH_VERSION_1));
+        assertThat(actual.getBufferSize(), is(DEFAULT_BUFFER_SIZE));
+        assertFalse(actual.isRecordCounts());
+        assertFalse(actual.isMultiError());
     }
     
     @Test
