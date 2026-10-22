@@ -17,9 +17,6 @@
 
 package org.apache.shardingsphere.proxy.frontend.firebird.command.admin;
 
-import lombok.RequiredArgsConstructor;
-import org.apache.shardingsphere.database.protocol.firebird.packet.command.admin.FirebirdCancelCommandPacket;
-import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor;
 
@@ -29,32 +26,11 @@ import java.util.Collections;
 /**
  * Cancel command executor for Firebird.
  */
-@RequiredArgsConstructor
 public final class FirebirdCancelCommandExecutor implements CommandExecutor {
-    
-    private static final int CANCEL_DISABLE = 1;
-    
-    private static final int CANCEL_ENABLE = 2;
-    
-    private static final int CANCEL_RAISE = 3;
-    
-    private static final int CANCEL_ABORT = 4;
-    
-    private final FirebirdCancelCommandPacket packet;
     
     @Override
     public Collection<DatabasePacket> execute() {
-        switch (packet.getKind()) {
-            case CANCEL_DISABLE:
-                return Collections.singleton(new FirebirdGenericResponsePacket());
-            case CANCEL_ENABLE:
-                return Collections.singleton(new FirebirdGenericResponsePacket());
-            case CANCEL_RAISE:
-                return Collections.singleton(new FirebirdGenericResponsePacket());
-            case CANCEL_ABORT:
-                return Collections.singleton(new FirebirdGenericResponsePacket());
-            default:
-                return Collections.singleton(new FirebirdGenericResponsePacket());
-        }
+        // TODO cancel the executing operation on fb_cancel_raise and track fb_cancel_disable and fb_cancel_enable as Firebird server does
+        return Collections.emptyList();
     }
 }

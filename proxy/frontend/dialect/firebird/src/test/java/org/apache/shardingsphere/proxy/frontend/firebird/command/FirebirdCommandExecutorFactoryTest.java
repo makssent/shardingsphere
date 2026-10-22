@@ -18,6 +18,7 @@
 package org.apache.shardingsphere.proxy.frontend.firebird.command;
 
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.FirebirdCommandPacketType;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.admin.FirebirdCancelCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchCancelCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchCreateCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchExecuteCommandPacket;
@@ -42,6 +43,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.transaction.FirebirdStartTransactionPacket;
 import org.apache.shardingsphere.database.protocol.packet.command.CommandPacket;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.admin.FirebirdCancelCommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.admin.FirebirdUnsupportedCommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch.FirebirdBatchCancelCommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch.FirebirdBatchCreateCommandExecutor;
@@ -228,6 +230,11 @@ class FirebirdCommandExecutorFactoryTest {
     void assertNewInstanceWithBatchCancel() {
         assertThat(FirebirdCommandExecutorFactory.newInstance(FirebirdCommandPacketType.BATCH_CANCEL, mock(FirebirdBatchCancelCommandPacket.class), connectionSession),
                 isA(FirebirdBatchCancelCommandExecutor.class));
+    }
+    
+    @Test
+    void assertNewInstanceWithCancel() {
+        assertThat(FirebirdCommandExecutorFactory.newInstance(FirebirdCommandPacketType.CANCEL, mock(FirebirdCancelCommandPacket.class), connectionSession), isA(FirebirdCancelCommandExecutor.class));
     }
     
     @Test

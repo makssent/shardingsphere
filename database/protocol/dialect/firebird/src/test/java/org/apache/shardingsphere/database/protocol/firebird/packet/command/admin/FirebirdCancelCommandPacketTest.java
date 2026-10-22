@@ -36,9 +36,4 @@ class FirebirdCancelCommandPacketTest {
         assertThat(actualPacket.getKind(), is(1));
         verify(payload).skipReserved(4);
     }
-    
-    @Test
-    void assertGetLength() {
-        assertThat(FirebirdCancelCommandPacket.getLength(), is(8));
-    }
 }
