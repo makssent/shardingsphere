@@ -20,6 +20,7 @@ package org.apache.shardingsphere.database.protocol.firebird.packet.command;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import org.apache.shardingsphere.database.protocol.firebird.constant.protocol.FirebirdProtocolVersion;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.admin.FirebirdCancelCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.admin.FirebirdUnsupportedCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchCancelCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchCreateCommandPacket;
@@ -120,6 +121,8 @@ public final class FirebirdCommandPacketFactory {
                 return new FirebirdBatchCancelCommandPacket(payload);
             case BATCH_SYNC:
                 return new FirebirdBatchSyncCommandPacket(payload);
+            case CANCEL:
+                return new FirebirdCancelCommandPacket(payload);
             default:
                 return new FirebirdUnsupportedCommandPacket(commandPacketType);
         }
@@ -192,6 +195,8 @@ public final class FirebirdCommandPacketFactory {
                 return FirebirdBatchCancelCommandPacket.getLength();
             case BATCH_SYNC:
                 return FirebirdBatchSyncCommandPacket.getLength(payload);
+            case CANCEL:
+                return FirebirdCancelCommandPacket.getLength();
             default:
                 return 0;
         }
