@@ -96,6 +96,7 @@ public final class FirebirdAuthenticationEngine implements AuthenticationEngine 
         FirebirdAttachPacket attachPacket = new FirebirdAttachPacket(payload);
         context.channel().attr(CommonConstants.CHARSET_ATTRIBUTE_KEY).set(parseAttachCharset(attachPacket.getEncoding()));
         login(currentAuthResult.getDatabase(), currentAuthResult.getUsername(), attachPacket, rule);
+        context.channel().attr(FirebirdConstant.ATTACHMENT_CHARSET).set(null == attachPacket.getEncoding() ? "NONE" : attachPacket.getEncoding());
         context.writeAndFlush(new FirebirdGenericResponsePacket());
         return AuthenticationResultBuilder.finished(currentAuthResult.getUsername(), "", currentAuthResult.getDatabase(), currentAuthResult.getConnectionAttributes());
     }

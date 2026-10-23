@@ -19,7 +19,6 @@ package org.apache.shardingsphere.database.protocol.firebird.packet.command.quer
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdArchType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.FirebirdPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.FirebirdInfoPacketType;
@@ -37,6 +36,8 @@ import java.util.List;
 public final class FirebirdDatabaseInfoReturnPacket extends FirebirdPacket {
     
     private static final int SQL_DIALECT = 3;
+    
+    private static final int UNKNOWN_INFO_ITEM = 335544341;
     
     private static final String BUILD_TYPE = "V";
     
@@ -65,15 +66,21 @@ public final class FirebirdDatabaseInfoReturnPacket extends FirebirdPacket {
     
     private final List<FirebirdInfoPacketType> infoItems;
     
+    private final int attachmentCharsetId;
+    
     @Override
     protected void write(final FirebirdPacketPayload payload) {
         for (FirebirdInfoPacketType type : infoItems) {
-            if (type.isCommon()) {
-                FirebirdCommonInfoPacketType.parseCommonInfo(payload, (FirebirdCommonInfoPacketType) type);
-            } else {
+            if (FirebirdCommonInfoPacketType.END == type) {
+                break;
+            }
+            if (type instanceof FirebirdDatabaseInfoPacketType) {
                 parseDatabaseInfo(payload, (FirebirdDatabaseInfoPacketType) type);
+            } else {
+                writeUnknownInfo(payload, type.getCode());
             }
         }
+        payload.writeInt1(FirebirdCommonInfoPacketType.END.getCode());
     }
     
     private void parseDatabaseInfo(final FirebirdPacketPayload data, final FirebirdDatabaseInfoPacketType type) {
@@ -101,8 +108,20 @@ public final class FirebirdDatabaseInfoReturnPacket extends FirebirdPacket {
                 data.writeInt1(FB_VERSION.length());
                 data.writeBytes(FB_VERSION.getBytes(StandardCharsets.UTF_8));
                 break;
+            case ATT_CHARSET:
+                data.writeInt1(FirebirdDatabaseInfoPacketType.ATT_CHARSET.getCode());
+                data.writeInt2LE(4);
+                data.writeInt4LE(attachmentCharsetId);
+                break;
             default:
-                throw new DatabaseProtocolException("Unknown database information request type %d", type.getCode());
+                writeUnknownInfo(data, type.getCode());
         }
+    }
+    
+    private void writeUnknownInfo(final FirebirdPacketPayload payload, final int code) {
+        payload.writeInt1(FirebirdCommonInfoPacketType.ERROR.getCode());
+        payload.writeInt2LE(5);
+        payload.writeInt1(code);
+        payload.writeInt4LE(UNKNOWN_INFO_ITEM);
     }
 }

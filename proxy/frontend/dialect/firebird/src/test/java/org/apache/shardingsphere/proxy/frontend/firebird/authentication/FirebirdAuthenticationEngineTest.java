@@ -57,6 +57,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
@@ -266,8 +267,9 @@ class FirebirdAuthenticationEngineTest {
     
     @SuppressWarnings("rawtypes")
     @SneakyThrows(ReflectiveOperationException.class)
-    @Test
-    void assertAuthenticateAttachWithoutEncoding() {
+    @ParameterizedTest(name = "attachment charset {1}")
+    @CsvSource(value = {"<default>,NONE", "UTF8,UTF8", "WIN1251,WIN1251", "UNICODE_FSS,UNICODE_FSS"}, nullValues = "<default>")
+    void assertAuthenticateAttachWithCharset(final String encoding, final String expectedCharset) {
         AuthorityRule rule = mock(AuthorityRule.class);
         ShardingSphereUser user = new ShardingSphereUser("root", "pwd", "");
         when(rule.findUser(any(Grantee.class))).thenReturn(Optional.of(user));
@@ -280,13 +282,14 @@ class FirebirdAuthenticationEngineTest {
         FirebirdAuthenticator authenticator = mock(FirebirdAuthenticator.class);
         when(authenticator.authenticate(any(), any())).thenReturn(true);
         try (
-                MockedConstruction<FirebirdAttachPacket> ignored = mockConstruction(FirebirdAttachPacket.class, (attachPacket, construction) -> when(attachPacket.getEncoding()).thenReturn(null));
+                MockedConstruction<FirebirdAttachPacket> ignored = mockConstruction(FirebirdAttachPacket.class, (attachPacket, construction) -> when(attachPacket.getEncoding()).thenReturn(encoding));
                 MockedConstruction<AuthenticatorFactory> ignoredFactory = mockConstruction(AuthenticatorFactory.class,
                         (factory, construction) -> when(factory.newInstance(user)).thenReturn(authenticator))) {
             AuthenticationResult actual = authenticationEngine.authenticate(context, payload);
             assertTrue(actual.isFinished());
         }
-        verify(charsetAttr).set(FirebirdCharacterSets.findCharacterSet("NONE"));
+        verify(charsetAttr).set(FirebirdCharacterSets.findCharacterSet(expectedCharset));
+        verify(context.channel().attr(FirebirdConstant.ATTACHMENT_CHARSET)).set(expectedCharset);
     }
     
     @Test

@@ -18,6 +18,8 @@
 package org.apache.shardingsphere.proxy.backend.firebird.handler.admin.executor.variable.charset;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.charset.UnsupportedCharsetException;
@@ -27,6 +29,17 @@ import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class FirebirdCharacterSetsTest {
+    
+    @ParameterizedTest(name = "{0} has Firebird charset id {1}")
+    @CsvSource({"NONE,0", "ASCII,2", "UNICODE_FSS,3", "UTF8,4", "WIN1251,52", "utf8,4", "UTF-8,4", "LATIN1,21", "WIN_1251,52"})
+    void assertFindCharacterSetId(final String charsetName, final int expected) {
+        assertThat(FirebirdCharacterSets.findCharacterSetId(charsetName), is(expected));
+    }
+    
+    @Test
+    void assertFindCharacterSetIdWithUnknownName() {
+        assertThrows(UnsupportedCharsetException.class, () -> FirebirdCharacterSets.findCharacterSetId("foo_charset"));
+    }
     
     @Test
     void assertFindSqlAscii() {
