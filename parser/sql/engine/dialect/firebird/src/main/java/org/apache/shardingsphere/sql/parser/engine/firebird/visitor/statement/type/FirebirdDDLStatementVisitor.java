@@ -322,7 +322,9 @@ public final class FirebirdDDLStatementVisitor extends FirebirdStatementVisitor 
     
     @Override
     public ASTNode visitExecuteStmt(final ExecuteStmtContext ctx) {
-        return new ExecuteStatement(getDatabaseType());
+        ExecuteStatement result = new ExecuteStatement(getDatabaseType());
+        result.setReturningRows(null != ctx.executeBlock() && null != ctx.executeBlock().outputArgumentList());
+        return result;
     }
     
     @Override

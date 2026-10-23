@@ -286,10 +286,11 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertThrows(InvalidBatchParameterVersionException.class, () -> new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute());
     }
     
-    @Test
-    void assertExecuteWithNonBatchStatementInTransaction() throws SQLException {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("nonBatchStatementCases")
+    void assertExecuteWithNonBatchStatementInTransaction(final String name, final SQLStatement sqlStatement) throws SQLException {
         ConnectionSession transactionSession = createConnectionSessionInTransaction();
-        when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(mock(SelectStatement.class));
+        when(preparedStatement.getSqlStatementContext().getSqlStatement()).thenReturn(sqlStatement);
         transactionSession.getServerPreparedStatementRegistry().addPreparedStatement(STATEMENT_ID, preparedStatement);
         FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
         int transactionHandle = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
@@ -298,9 +299,10 @@ class FirebirdBatchCreateCommandExecutorTest {
         new CommandExecutorTask(engine, transactionSession, channelHandlerContext, Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_MSG.getValue()).writeInt(STATEMENT_ID).writeInt(0)).run();
         new CommandExecutorTask(engine, transactionSession, channelHandlerContext,
                 Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_EXEC.getValue()).writeInt(STATEMENT_ID).writeInt(transactionHandle)).run();
+        new CommandExecutorTask(engine, transactionSession, channelHandlerContext, Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_RLS.getValue()).writeInt(STATEMENT_ID)).run();
         new CommandExecutorTask(engine, transactionSession, channelHandlerContext, Unpooled.buffer().writeInt(FirebirdCommandPacketType.COMMIT.getValue()).writeInt(transactionHandle)).run();
         ArgumentCaptor<FirebirdGenericResponsePacket> responseCaptor = ArgumentCaptor.forClass(FirebirdGenericResponsePacket.class);
-        verify(channelHandlerContext, times(4)).write(responseCaptor.capture());
+        verify(channelHandlerContext, times(5)).write(responseCaptor.capture());
         List<Segment> actualSegments = responseCaptor.getAllValues().get(0).getStatusVector().getSegments();
         assertThat(actualSegments.size(), is(3));
         assertThat(actualSegments.get(0).getGdsCode(), is(ISCConstants.isc_dsql_error));
@@ -309,7 +311,8 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertThat(actualSegments.get(2).getGdsCode(), is(ISCConstants.isc_batch_type));
         assertThat(responseCaptor.getAllValues().get(1).getErrorCode(), is(ISCConstants.isc_bad_batch_handle));
         assertThat(responseCaptor.getAllValues().get(2).getErrorCode(), is(ISCConstants.isc_bad_batch_handle));
-        assertNull(responseCaptor.getAllValues().get(3).getStatusVector());
+        assertThat(responseCaptor.getAllValues().get(3).getErrorCode(), is(ISCConstants.isc_bad_batch_handle));
+        assertNull(responseCaptor.getAllValues().get(4).getStatusVector());
         assertNull(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID));
         verify(backendConnection).commit();
         verify(backendConnection, never()).rollback();
@@ -481,12 +484,15 @@ class FirebirdBatchCreateCommandExecutorTest {
         when(deleteWithReturning.getReturning()).thenReturn(Optional.of(mock(ReturningSegment.class)));
         MergeStatement mergeWithReturning = mock(MergeStatement.class);
         when(mergeWithReturning.getReturning()).thenReturn(Optional.of(mock(ReturningSegment.class)));
+        ExecuteStatement executeBlockWithReturning = mock(ExecuteStatement.class);
+        when(executeBlockWithReturning.isReturningRows()).thenReturn(true);
         return Stream.of(
                 Arguments.of("select", mock(SelectStatement.class)),
                 Arguments.of("insert select with returning", insertSelectWithReturning),
                 Arguments.of("update with returning", updateWithReturning),
                 Arguments.of("delete with returning", deleteWithReturning),
                 Arguments.of("merge with returning", mergeWithReturning),
+                Arguments.of("execute block with returning", executeBlockWithReturning),
                 Arguments.of("other statement", mock(SQLStatement.class)));
     }
     

@@ -19,4 +19,7 @@
 <sql-cases>
     <sql-case id="execute_with_expected_db_table" value="EXECUTE ps1 USING @expected, @db, @table" db-types="MySQL" />
     <sql-case id="execute_without_parameter" value="EXECUTE q" db-types="PostgreSQL" />
+    <sql-case id="execute_block_firebird" value="EXECUTE BLOCK AS BEGIN END;" db-types="Firebird" />
+    <sql-case id="execute_block_returning_firebird" value="EXECUTE BLOCK RETURNS (foo_value INTEGER) AS BEGIN foo_value = 1; SUSPEND; END;" db-types="Firebird" />
+    <sql-case id="execute_procedure_firebird" value="EXECUTE PROCEDURE foo_procedure" db-types="Firebird" />
 </sql-cases>

@@ -17,10 +17,19 @@
 
 package org.apache.shardingsphere.test.it.sql.parser.internal.cases.parser.jaxb.statement.ddl.standard;
 
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.shardingsphere.test.it.sql.parser.internal.cases.parser.jaxb.SQLParserTestCase;
+
+import javax.xml.bind.annotation.XmlAttribute;
 
 /**
  * Execute statement test case.
  */
+@Getter
+@Setter
 public final class ExecuteStatementTestCase extends SQLParserTestCase {
+    
+    @XmlAttribute(name = "returning-rows")
+    private boolean returningRows;
 }

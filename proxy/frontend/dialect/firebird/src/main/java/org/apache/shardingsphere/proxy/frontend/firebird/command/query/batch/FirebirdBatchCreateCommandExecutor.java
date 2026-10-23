@@ -120,7 +120,7 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
         if (sqlStatement instanceof MergeStatement) {
             return !((MergeStatement) sqlStatement).getReturning().isPresent();
         }
-        return sqlStatement instanceof ExecuteStatement;
+        return sqlStatement instanceof ExecuteStatement && !((ExecuteStatement) sqlStatement).isReturningRows();
     }
     
     @RequiredArgsConstructor
