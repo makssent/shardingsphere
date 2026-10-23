@@ -20,6 +20,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.DefaultAttributeMap;
 import org.apache.shardingsphere.database.connector.core.spi.DatabaseTypedSPILoader;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
@@ -30,7 +31,11 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchStatementTypeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
+import org.apache.shardingsphere.database.protocol.codec.PacketCodec;
 import org.apache.shardingsphere.database.protocol.constant.CommonConstants;
+import org.apache.shardingsphere.database.protocol.firebird.codec.FirebirdPacketCodecEngine;
+import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdConstant;
+import org.apache.shardingsphere.database.protocol.firebird.constant.protocol.FirebirdProtocolVersion;
 import org.apache.shardingsphere.database.protocol.firebird.err.FirebirdErrorPacketFactory;
 import org.apache.shardingsphere.database.protocol.firebird.err.FirebirdStatusVector.Segment;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.FirebirdCommandPacketType;
@@ -295,12 +300,19 @@ class FirebirdBatchCreateCommandExecutorTest {
         FirebirdBatchRegistry.getInstance().registerConnection(CONNECTION_ID);
         int transactionHandle = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
         DatabaseProtocolFrontendEngine engine = DatabaseTypedSPILoader.getService(DatabaseProtocolFrontendEngine.class, TypedSPILoader.getService(DatabaseType.class, "Firebird"));
-        new CommandExecutorTask(engine, transactionSession, channelHandlerContext, createBatchCreatePacket()).run();
-        new CommandExecutorTask(engine, transactionSession, channelHandlerContext, Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_MSG.getValue()).writeInt(STATEMENT_ID).writeInt(0)).run();
-        new CommandExecutorTask(engine, transactionSession, channelHandlerContext,
-                Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_EXEC.getValue()).writeInt(STATEMENT_ID).writeInt(transactionHandle)).run();
-        new CommandExecutorTask(engine, transactionSession, channelHandlerContext, Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_RLS.getValue()).writeInt(STATEMENT_ID)).run();
-        new CommandExecutorTask(engine, transactionSession, channelHandlerContext, Unpooled.buffer().writeInt(FirebirdCommandPacketType.COMMIT.getValue()).writeInt(transactionHandle)).run();
+        EmbeddedChannel channel = new EmbeddedChannel(new PacketCodec(new FirebirdPacketCodecEngine()));
+        channel.attr(CommonConstants.CHARSET_ATTRIBUTE_KEY).set(StandardCharsets.UTF_8);
+        channel.attr(FirebirdConstant.CONNECTION_PROTOCOL_VERSION).set(FirebirdProtocolVersion.PROTOCOL_VERSION16);
+        channel.attr(FirebirdConstant.CURRENT_CONNECTION).set(CONNECTION_ID);
+        try {
+            executeCommandPacket(channel, engine, transactionSession, createBatchCreatePacket());
+            executeCommandPacket(channel, engine, transactionSession, Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_MSG.getValue()).writeInt(STATEMENT_ID).writeInt(0));
+            executeCommandPacket(channel, engine, transactionSession, Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_EXEC.getValue()).writeInt(STATEMENT_ID).writeInt(transactionHandle));
+            executeCommandPacket(channel, engine, transactionSession, Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_RLS.getValue()).writeInt(STATEMENT_ID));
+            executeCommandPacket(channel, engine, transactionSession, Unpooled.buffer().writeInt(FirebirdCommandPacketType.COMMIT.getValue()).writeInt(transactionHandle));
+        } finally {
+            channel.finishAndReleaseAll();
+        }
         ArgumentCaptor<FirebirdGenericResponsePacket> responseCaptor = ArgumentCaptor.forClass(FirebirdGenericResponsePacket.class);
         verify(channelHandlerContext, times(5)).write(responseCaptor.capture());
         List<Segment> actualSegments = responseCaptor.getAllValues().get(0).getStatusVector().getSegments();
@@ -316,6 +328,13 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertNull(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID));
         verify(backendConnection).commit();
         verify(backendConnection, never()).rollback();
+    }
+    
+    private void executeCommandPacket(final EmbeddedChannel channel, final DatabaseProtocolFrontendEngine engine, final ConnectionSession transactionSession, final ByteBuf packet) {
+        assertTrue(channel.writeInbound(packet));
+        new CommandExecutorTask(engine, transactionSession, channelHandlerContext, channel.readInbound()).run();
+        assertTrue(channel.isOpen());
+        assertNull(channel.readOutbound());
     }
     
     private ConnectionSession createConnectionSessionInTransaction() {
