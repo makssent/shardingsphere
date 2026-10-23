@@ -203,7 +203,7 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
             }
             return;
         }
-        if (packet.getBatchMessageLength() == messageFormat.getMessageLength()) {
+        if (buffer.readableBytes() > packetLength || packet.getBatchMessageLength() == messageFormat.getMessageLength()) {
             deferredBatchFormats.put(packet.getStatementHandle(), messageFormat.getFields());
         }
     }

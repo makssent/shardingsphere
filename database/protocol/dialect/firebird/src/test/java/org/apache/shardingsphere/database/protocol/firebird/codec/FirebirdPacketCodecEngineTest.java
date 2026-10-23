@@ -450,6 +450,28 @@ class FirebirdPacketCodecEngineTest {
     }
     
     @Test
+    void assertDecodeCoalescedBatchCreateWithInt128() {
+        EmbeddedChannel channel = createBatchChannel();
+        ByteBuf blr = Unpooled.wrappedBuffer(new byte[]{5, 2, 4, 0, 4, 0, 7, 0, 7, 0, 26, 0, 7, 0, -1, 76});
+        ByteBuf message = Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_MSG.getValue()).writeInt(BATCH_STATEMENT_HANDLE).writeInt(1).writeByte(2).writeZero(3).writeInt(904);
+        try {
+            assertTrue(channel.writeInbound(Unpooled.wrappedUnmodifiableBuffer(buildBatchCreate(blr, 26), message)));
+            ByteBuf actualCreate = channel.readInbound();
+            assertThat(actualCreate.getInt(0), is(FirebirdCommandPacketType.BATCH_CREATE.getValue()));
+            actualCreate.release();
+            ByteBuf actualMessage = channel.readInbound();
+            assertThat(actualMessage.readableBytes(), is(20));
+            actualMessage.release();
+            assertTrue(channel.writeInbound(Unpooled.buffer().writeInt(FirebirdCommandPacketType.COMMIT.getValue()).writeInt(1)));
+            ((ByteBuf) channel.readInbound()).release();
+            assertTrue(channel.isOpen());
+            assertNull(channel.readOutbound());
+        } finally {
+            channel.finishAndReleaseAll();
+        }
+    }
+    
+    @Test
     void assertDecodeSeparateBatchMessageAfterInvalidFormat() {
         EmbeddedChannel channel = createBatchChannel();
         try {
