@@ -23,14 +23,16 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.database.FirebirdDatabaseInfoReturnPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
+import org.apache.shardingsphere.proxy.backend.firebird.handler.admin.executor.variable.charset.FirebirdCharacterSets;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
+import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExtension;
+import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockSettings;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -40,7 +42,8 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
 import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith(AutoMockExtension.class)
+@StaticMockSettings(FirebirdCharacterSets.class)
 class FirebirdDatabaseInfoExecutorTest {
     
     @Mock
@@ -64,6 +67,7 @@ class FirebirdDatabaseInfoExecutorTest {
     void assertExecuteWithAttachmentCharset(final String charsetName, final int expected) {
         when(packet.getInfoItems()).thenReturn(Collections.singletonList(FirebirdDatabaseInfoPacketType.ATT_CHARSET));
         when(connectionSession.getAttributeMap().attr(FirebirdConstant.ATTACHMENT_CHARSET).get()).thenReturn(charsetName);
+        when(FirebirdCharacterSets.findCharacterSetId(charsetName)).thenReturn(expected);
         Collection<DatabasePacket> actual = new FirebirdDatabaseInfoExecutor(packet, connectionSession).execute();
         FirebirdDatabaseInfoReturnPacket actualData = (FirebirdDatabaseInfoReturnPacket) ((FirebirdGenericResponsePacket) actual.iterator().next()).getData();
         assertThat(actualData.getAttachmentCharsetId(), is(expected));
