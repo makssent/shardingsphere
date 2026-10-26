@@ -21,6 +21,7 @@ import org.apache.shardingsphere.database.exception.core.exception.protocol.Data
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.FirebirdInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.common.FirebirdCommonInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
+import org.apache.shardingsphere.database.protocol.payload.PacketPayload;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -80,7 +81,7 @@ class FirebirdSQLInfoReturnPacketTest {
     @MethodSource("statementFlags")
     void assertWriteStatementFlags(final String name, final int flags, final List<FirebirdInfoPacketType> infoItems) {
         FirebirdSQLInfoReturnPacket packet = new FirebirdSQLInfoReturnPacket(infoItems, new FirebirdSQLRecordsInfo(0L, 0L, 0L), flags);
-        packet.write(payload);
+        packet.write((PacketPayload) payload);
         InOrder order = inOrder(payload);
         order.verify(payload).writeInt1(27);
         order.verify(payload).writeInt2LE(4);

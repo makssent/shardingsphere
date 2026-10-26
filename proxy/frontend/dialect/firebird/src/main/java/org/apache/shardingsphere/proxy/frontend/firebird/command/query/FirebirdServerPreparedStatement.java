@@ -25,6 +25,7 @@ import org.apache.shardingsphere.infra.binder.context.statement.SQLStatementCont
 import org.apache.shardingsphere.infra.hint.HintValueContext;
 import org.apache.shardingsphere.proxy.backend.session.ServerPreparedStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dcl.DCLStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.ddl.DDLStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.ddl.ExecuteStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.DeleteStatement;
@@ -60,7 +61,7 @@ public final class FirebirdServerPreparedStatement implements ServerPreparedStat
     @HighFrequencyInvocation
     public int getStatementFlags() {
         SQLStatement statement = sqlStatementContext.getSqlStatement();
-        if (statement instanceof DDLStatement && !(statement instanceof ExecuteStatement)) {
+        if (statement instanceof DCLStatement || statement instanceof DDLStatement && !(statement instanceof ExecuteStatement)) {
             return 0;
         }
         return statement instanceof SelectStatement || hasReturningCursor(statement) ? FLAG_REPEAT_EXECUTE | FLAG_HAS_CURSOR : FLAG_REPEAT_EXECUTE;

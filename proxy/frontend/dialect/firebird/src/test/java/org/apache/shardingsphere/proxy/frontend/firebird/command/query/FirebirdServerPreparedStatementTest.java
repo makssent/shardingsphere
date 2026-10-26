@@ -22,6 +22,10 @@ import org.apache.shardingsphere.infra.hint.HintValueContext;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.ReturningSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.dml.expr.subquery.SubquerySegment;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dcl.GrantStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dcl.RevokeStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dcl.role.CreateRoleStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dcl.user.CreateUserStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.ddl.DDLStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.ddl.ExecuteStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.DeleteStatement;
@@ -65,6 +69,10 @@ class FirebirdServerPreparedStatementTest {
         return Stream.of(
                 Arguments.of("select", mock(SelectStatement.class), 3),
                 Arguments.of("ddl", mock(DDLStatement.class), 0),
+                Arguments.of("grant", mock(GrantStatement.class), 0),
+                Arguments.of("revoke", mock(RevokeStatement.class), 0),
+                Arguments.of("create_role", mock(CreateRoleStatement.class), 0),
+                Arguments.of("create_user", mock(CreateUserStatement.class), 0),
                 Arguments.of("execute_procedure", mock(ExecuteStatement.class), 2),
                 Arguments.of("insert", mock(InsertStatement.class), 2),
                 Arguments.of("insert_select", insertSelect, 2),
