@@ -19,6 +19,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.info;
 
 import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.FirebirdInfoPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoReturnPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLRecordsInfo;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
@@ -46,7 +47,10 @@ public final class FirebirdSQLInfoExecutor implements CommandExecutor {
     
     @Override
     public Collection<DatabasePacket> execute() {
-        return Collections.singleton(new FirebirdGenericResponsePacket().setData(new FirebirdSQLInfoReturnPacket(packet.getInfoItems(), getRecordsInfo())));
+        int statementFlags = packet.getInfoItems().contains(FirebirdSQLInfoPacketType.STMT_FLAGS)
+                ? connectionSession.getServerPreparedStatementRegistry().<FirebirdServerPreparedStatement>getPreparedStatement(packet.getHandle()).getStatementFlags()
+                : 0;
+        return Collections.singleton(new FirebirdGenericResponsePacket().setData(new FirebirdSQLInfoReturnPacket(packet.getInfoItems(), getRecordsInfo(), statementFlags)));
     }
     
     private FirebirdSQLRecordsInfo getRecordsInfo() {

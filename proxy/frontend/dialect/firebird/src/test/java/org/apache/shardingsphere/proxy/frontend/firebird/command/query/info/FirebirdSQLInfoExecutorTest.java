@@ -18,6 +18,7 @@
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.info;
 
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.FirebirdInfoPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoReturnPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
@@ -67,6 +68,21 @@ class FirebirdSQLInfoExecutorTest {
         assertThat(actual.iterator().next(), isA(FirebirdGenericResponsePacket.class));
         FirebirdGenericResponsePacket responsePacket = (FirebirdGenericResponsePacket) actual.iterator().next();
         assertThat(responsePacket.getData(), isA(FirebirdSQLInfoReturnPacket.class));
+    }
+    
+    @Test
+    void assertExecuteWithStatementFlags() {
+        when(packet.getInfoItems()).thenReturn(Collections.singletonList(FirebirdSQLInfoPacketType.STMT_FLAGS));
+        when(packet.getHandle()).thenReturn(1);
+        FirebirdServerPreparedStatement preparedStatement = mock(FirebirdServerPreparedStatement.class);
+        when(preparedStatement.getSqlStatementContext()).thenReturn(mock(SQLStatementContext.class));
+        when(preparedStatement.getStatementFlags()).thenReturn(3);
+        ServerPreparedStatementRegistry registry = new ServerPreparedStatementRegistry();
+        registry.addPreparedStatement(1, preparedStatement);
+        when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(registry);
+        Collection<DatabasePacket> actual = new FirebirdSQLInfoExecutor(packet, connectionSession).execute();
+        FirebirdSQLInfoReturnPacket actualPacket = (FirebirdSQLInfoReturnPacket) ((FirebirdGenericResponsePacket) actual.iterator().next()).getData();
+        assertThat(actualPacket.getStatementFlags(), is(3));
     }
     
     @ParameterizedTest(name = "{0}")

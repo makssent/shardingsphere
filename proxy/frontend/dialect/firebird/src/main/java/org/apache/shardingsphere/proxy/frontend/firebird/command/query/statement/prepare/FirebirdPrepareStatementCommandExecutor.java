@@ -132,7 +132,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         }
         FirebirdServerPreparedStatement serverPreparedStatement = new FirebirdServerPreparedStatement(packet.getSQL(), sqlStatementContext, packet.getHintValueContext());
         connectionSession.getServerPreparedStatementRegistry().addPreparedStatement(statementId, serverPreparedStatement);
-        return createResponse(sqlStatementContext);
+        return createResponse(sqlStatementContext, serverPreparedStatement.getStatementFlags());
     }
     
     private SQLStatement resolveCurrentDatabase(final SQLStatement sqlStatement) {
@@ -148,11 +148,16 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         return packet.isValidStatementHandle() ? packet.getStatementId() : FirebirdStatementIdGenerator.getInstance().getStatementId(connectionSession.getConnectionId());
     }
     
-    private Collection<DatabasePacket> createResponse(final SQLStatementContext sqlStatementContext) {
+    private Collection<DatabasePacket> createResponse(final SQLStatementContext sqlStatementContext, final int statementFlags) {
         FirebirdSQLInfoReturnValue statementType = getFirebirdStatementType(sqlStatementContext.getSqlStatement());
-        FirebirdPrepareStatementReturnPacket returnPacket = new FirebirdPrepareStatementReturnPacket();
+        FirebirdPrepareStatementReturnPacket returnPacket = new FirebirdPrepareStatementReturnPacket(new LinkedList<>());
         while (packet.nextItem()) {
-            switch (packet.getCurrentItem()) {
+            FirebirdSQLInfoPacketType currentItem = packet.getCurrentItem();
+            returnPacket.getRequestedItems().add(currentItem);
+            switch (currentItem) {
+                case STMT_FLAGS:
+                    returnPacket.setStatementFlags(statementFlags);
+                    break;
                 case STMT_TYPE:
                     returnPacket.setType(statementType);
                     break;

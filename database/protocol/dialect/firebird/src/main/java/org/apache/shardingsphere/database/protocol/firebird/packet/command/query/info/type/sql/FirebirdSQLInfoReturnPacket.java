@@ -50,20 +50,31 @@ public final class FirebirdSQLInfoReturnPacket extends FirebirdPacket {
     
     private final FirebirdSQLRecordsInfo recordsInfo;
     
+    private final int statementFlags;
+    
     @Override
     protected void write(final FirebirdPacketPayload payload) {
         for (FirebirdInfoPacketType type : infoItems) {
+            if (FirebirdCommonInfoPacketType.END == type) {
+                break;
+            }
             if (type.isCommon()) {
                 FirebirdCommonInfoPacketType.parseCommonInfo(payload, (FirebirdCommonInfoPacketType) type);
             } else {
                 parseSQLInfo(payload, (FirebirdSQLInfoPacketType) type);
             }
         }
+        payload.writeInt1(FirebirdCommonInfoPacketType.END.getCode());
     }
     
     private void parseSQLInfo(final FirebirdPacketPayload payload, final FirebirdSQLInfoPacketType type) {
         // TODO implement other request types handle
         switch (type) {
+            case STMT_FLAGS:
+                payload.writeInt1(type.getCode());
+                payload.writeInt2LE(4);
+                payload.writeInt4LE(statementFlags);
+                return;
             case RECORDS:
                 processRecords(payload);
                 return;

@@ -181,6 +181,15 @@ class FirebirdPrepareStatementCommandExecutorTest {
     }
     
     @Test
+    void assertExecuteWithStatementFlags() throws Exception {
+        when(packet.getCurrentItem()).thenReturn(FirebirdSQLInfoPacketType.STMT_FLAGS);
+        Collection<DatabasePacket> actual = new FirebirdPrepareStatementCommandExecutor(packet, connectionSession).execute();
+        FirebirdPrepareStatementReturnPacket actualPacket = (FirebirdPrepareStatementReturnPacket) ((FirebirdGenericResponsePacket) actual.iterator().next()).getData();
+        assertThat(actualPacket.getStatementFlags(), is(3));
+        assertThat(actualPacket.getRequestedItems(), is(Collections.singletonList(FirebirdSQLInfoPacketType.STMT_FLAGS)));
+    }
+    
+    @Test
     void assertExecuteDropDatabaseWithoutNameResolvesCurrentDatabase() throws Exception {
         when(packet.getSQL()).thenReturn("DROP DATABASE");
         when(connectionSession.getUsedDatabaseName()).thenReturn("foo_db");
