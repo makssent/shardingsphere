@@ -175,7 +175,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         if (statement instanceof InsertStatement) {
             if (((InsertStatement) statement).getReturning().isPresent()) {
                 returningSegment = ((InsertStatement) statement).getReturning().orElse(null);
-                return FirebirdSQLInfoReturnValue.EXEC_PROCEDURE;
+                return ((InsertStatement) statement).isUpdateOrInsert() ? FirebirdSQLInfoReturnValue.SELECT : FirebirdSQLInfoReturnValue.EXEC_PROCEDURE;
             }
             return FirebirdSQLInfoReturnValue.INSERT;
         }

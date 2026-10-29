@@ -144,6 +144,7 @@ public final class FirebirdDMLStatementVisitor extends FirebirdStatementVisitor 
                 .multiTableConditionalInto(insertValuesStatement.getMultiTableConditionalInto().orElse(null)).where(insertValuesStatement.getWhere().orElse(null))
                 .exec(insertValuesStatement.getExec().orElse(null)).withTableHint(insertValuesStatement.getWithTableHint().orElse(null))
                 .rowSetFunction(insertValuesStatement.getRowSetFunction().orElse(null)).ignore(insertValuesStatement.isIgnore()).replace(insertValuesStatement.isReplace())
+                .updateOrInsert(null != ctx.UPDATE())
                 .values(new LinkedList<>(insertValuesStatement.getValues())).derivedInsertColumns(new LinkedList<>(insertValuesStatement.getDerivedInsertColumns())).build();
         result.addParameterMarkers(insertValuesStatement.getParameterMarkers());
         result.getVariableNames().addAll(insertValuesStatement.getVariableNames());
