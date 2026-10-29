@@ -20,6 +20,7 @@ package org.apache.shardingsphere.database.protocol.firebird.codec;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.util.ReferenceCountUtil;
 import org.apache.shardingsphere.database.protocol.codec.DatabasePacketCodecEngine;
 import org.apache.shardingsphere.database.protocol.constant.CommonConstants;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdConstant;
@@ -59,11 +60,7 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
             // CHECKSTYLE:OFF
         } catch (final RuntimeException ex) {
             // CHECKSTYLE:ON
-            for (Object each : out) {
-                if (each instanceof ByteBuf) {
-                    ((ByteBuf) each).release();
-                }
-            }
+            out.forEach(ReferenceCountUtil::release);
             out.clear();
             deferredBatchFormats.clear();
             in.skipBytes(in.readableBytes());
@@ -99,9 +96,8 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
     }
     
     private int findPacketLength(final ChannelHandlerContext context, final ByteBuf buffer, final FirebirdCommandPacketType commandType, final Charset charset) {
-        int readerIndex = buffer.readerIndex();
         int readableBytes = buffer.readableBytes();
-        ByteBuf slice = buffer.retainedSlice(readerIndex, readableBytes);
+        ByteBuf slice = buffer.retainedSlice();
         try {
             FirebirdPacketPayload payload = new FirebirdPacketPayload(slice, charset);
             List<FirebirdBatchColumnDescriptor> columnDescriptors = getDeferredBatchFormat(buffer, commandType);
@@ -130,8 +126,7 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
     }
     
     private void rememberBatchFormat(final ByteBuf buffer, final int packetLength, final Charset charset) {
-        FirebirdBatchCreateCommandPacket packet = new FirebirdBatchCreateCommandPacket(
-                new FirebirdPacketPayload(buffer.slice(buffer.readerIndex(), packetLength), charset));
+        FirebirdBatchCreateCommandPacket packet = new FirebirdBatchCreateCommandPacket(new FirebirdPacketPayload(buffer.slice(buffer.readerIndex(), packetLength), charset));
         ByteBuf batchBlr = packet.getBatchBlr();
         deferredBatchFormats.put(packet.getStatementHandle(), FirebirdParseBatchBlr.parseForFraming(batchBlr, batchBlr.readableBytes()).getFields());
     }
@@ -148,7 +143,7 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
             // CHECKSTYLE:OFF
         } catch (final RuntimeException ex) {
             // CHECKSTYLE:ON
-            payload.getByteBuf().resetWriterIndex();
+            out.resetWriterIndex();
             FirebirdErrorPacketFactory.newInstance(ex).write(payload);
         }
     }

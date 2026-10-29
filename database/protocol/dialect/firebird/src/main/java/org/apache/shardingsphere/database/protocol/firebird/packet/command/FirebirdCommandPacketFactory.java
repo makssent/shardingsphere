@@ -137,11 +137,6 @@ public final class FirebirdCommandPacketFactory {
      * @return expected length of packet, or 0 if length is variable
      */
     public static int getExpectedLength(final FirebirdCommandPacketType commandPacketType, final FirebirdPacketPayload payload, final FirebirdProtocolVersion protocolVersion, final int connectionId) {
-        return getLength(commandPacketType, payload, protocolVersion, connectionId);
-    }
-    
-    private static int getLength(final FirebirdCommandPacketType commandPacketType, final FirebirdPacketPayload payload,
-                                 final FirebirdProtocolVersion protocolVersion, final int connectionId) throws IndexOutOfBoundsException {
         switch (commandPacketType) {
             case INFO_DATABASE:
             case INFO_SQL:
@@ -193,7 +188,7 @@ public final class FirebirdCommandPacketFactory {
             case BATCH_CANCEL:
                 return FirebirdBatchCancelCommandPacket.getLength();
             case BATCH_SYNC:
-                return FirebirdBatchSyncCommandPacket.getLength(payload);
+                return FirebirdBatchSyncCommandPacket.getLength();
             case CONNECT:
                 return FirebirdConnectPacket.getLength(payload);
             case ATTACH:
