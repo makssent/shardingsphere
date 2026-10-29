@@ -107,6 +107,14 @@ class FirebirdSQLInfoReturnPacketTest {
     }
     
     @Test
+    void assertWriteRecordsWithoutEndItem() {
+        FirebirdPacketPayload actual = new FirebirdPacketPayload(Unpooled.buffer(), StandardCharsets.UTF_8);
+        FirebirdSQLInfoReturnPacket packet = new FirebirdSQLInfoReturnPacket(Collections.singletonList(FirebirdSQLInfoPacketType.RECORDS), new FirebirdSQLRecordsInfo(0L, 0L, 0L), "", 1024);
+        packet.write(actual);
+        assertThat((int) actual.getByteBuf().getUnsignedByte(actual.getByteBuf().writerIndex() - 1), is(FirebirdCommonInfoPacketType.END.getCode()));
+    }
+    
+    @Test
     void assertWriteExecutionPlanAfterEndItem() {
         FirebirdPacketPayload actual = new FirebirdPacketPayload(Unpooled.buffer(), StandardCharsets.UTF_8);
         FirebirdSQLInfoReturnPacket packet = new FirebirdSQLInfoReturnPacket(Arrays.asList(FirebirdCommonInfoPacketType.END, FirebirdSQLInfoPacketType.GET_PLAN),

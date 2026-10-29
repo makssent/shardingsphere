@@ -66,16 +66,14 @@ public final class FirebirdSQLInfoReturnPacket extends FirebirdPacket {
         for (FirebirdInfoPacketType type : infoItems) {
             if (type.isCommon()) {
                 FirebirdCommonInfoPacketType.parseCommonInfo(payload, (FirebirdCommonInfoPacketType) type);
-                if (planRequest && FirebirdCommonInfoPacketType.END == type) {
+                if (FirebirdCommonInfoPacketType.END == type) {
                     return;
                 }
             } else if (!parseSQLInfo(payload, (FirebirdSQLInfoPacketType) type, startIndex)) {
                 return;
             }
         }
-        if (planRequest) {
-            payload.writeInt1(FirebirdCommonInfoPacketType.END.getCode());
-        }
+        payload.writeInt1(FirebirdCommonInfoPacketType.END.getCode());
     }
     
     private boolean parseSQLInfo(final FirebirdPacketPayload payload, final FirebirdSQLInfoPacketType type, final int startIndex) {
