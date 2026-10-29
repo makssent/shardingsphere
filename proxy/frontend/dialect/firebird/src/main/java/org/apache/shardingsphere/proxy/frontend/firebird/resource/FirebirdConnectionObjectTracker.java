@@ -87,6 +87,22 @@ public final class FirebirdConnectionObjectTracker {
         connections.computeIfPresent(connectionId, (key, state) -> {
             state.statements.add(statementId);
             state.statementId = statementId;
+            state.transactionId = 0;
+            return state;
+        });
+    }
+    
+    /**
+     * Record an allocated transaction.
+     *
+     * @param connectionId connection ID
+     * @param transactionId transaction ID
+     */
+    @HighFrequencyInvocation
+    public void recordTransaction(final int connectionId, final int transactionId) {
+        connections.computeIfPresent(connectionId, (key, state) -> {
+            state.statementId = 0;
+            state.transactionId = transactionId;
             return state;
         });
     }
@@ -100,6 +116,7 @@ public final class FirebirdConnectionObjectTracker {
     public void recordOtherObject(final int connectionId) {
         connections.computeIfPresent(connectionId, (key, state) -> {
             state.statementId = 0;
+            state.transactionId = 0;
             return state;
         });
     }
@@ -138,6 +155,22 @@ public final class FirebirdConnectionObjectTracker {
     }
     
     /**
+     * Resolve a deferred transaction handle.
+     *
+     * @param connectionId connection ID
+     * @param handle incoming handle
+     * @return resolved handle
+     */
+    @HighFrequencyInvocation
+    public int resolveTransactionHandle(final int connectionId, final int handle) {
+        if (0xFFFF != (handle & 0xFFFF)) {
+            return handle;
+        }
+        ConnectionState state = connections.get(connectionId);
+        return null != state && state.lazy && 0 != state.transactionId ? state.transactionId : handle;
+    }
+    
+    /**
      * Judge whether a statement handle has been allocated.
      *
      * @param connectionId connection ID
@@ -157,5 +190,7 @@ public final class FirebirdConnectionObjectTracker {
         private volatile boolean lazy;
         
         private volatile int statementId;
+        
+        private volatile int transactionId;
     }
 }

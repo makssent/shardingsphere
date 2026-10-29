@@ -49,7 +49,7 @@ public final class FirebirdStartTransactionCommandExecutor implements CommandExe
         connectionSession.setReadOnly(packet.isReadOnly());
         connectionSession.setIsolationLevel(packet.getIsolationLevel());
         int transactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(connectionSession.getConnectionId());
-        FirebirdConnectionObjectTracker.getInstance().recordOtherObject(connectionSession.getConnectionId());
+        FirebirdConnectionObjectTracker.getInstance().recordTransaction(connectionSession.getConnectionId(), transactionId);
         return Collections.singleton(new FirebirdGenericResponsePacket().setHandle(transactionId));
     }
     

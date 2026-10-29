@@ -34,6 +34,8 @@ import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cach
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobHandleGenerator;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobIdGenerator;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
+import org.firebirdsql.gds.ISCConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,7 +73,10 @@ class FirebirdOpenBlobCommandExecutorTest {
         FirebirdBlobReadCache.getInstance().registerConnection(CONNECTION_ID);
         FirebirdBlobWriteCache.getInstance().registerConnection(CONNECTION_ID);
         FirebirdBlobIdGenerator.getInstance().registerConnection(CONNECTION_ID);
+        FirebirdTransactionIdGenerator.getInstance().registerConnection(CONNECTION_ID);
+        FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(packet.getTransactionId()).thenReturn(1);
     }
     
     @AfterEach
@@ -81,6 +86,7 @@ class FirebirdOpenBlobCommandExecutorTest {
         FirebirdBlobWriteCache.getInstance().unregisterConnection(CONNECTION_ID);
         FirebirdBlobIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
         FirebirdBlobBinaryProtocolValue.unregisterConnection(CONNECTION_ID);
+        FirebirdTransactionIdGenerator.getInstance().unregisterConnection(CONNECTION_ID);
     }
     
     @Test
@@ -168,8 +174,18 @@ class FirebirdOpenBlobCommandExecutorTest {
         assertThrows(InvalidSegstrIdException.class, executor::execute);
     }
     
+    @Test
+    void assertExecuteWithInvalidTransaction() {
+        when(packet.getTransactionId()).thenReturn(999);
+        FirebirdGenericResponsePacket actual = (FirebirdGenericResponsePacket) new FirebirdOpenBlobCommandExecutor(packet, connectionSession).execute().iterator().next();
+        assertThat(actual.getStatusVector().getSegments().size(), is(1));
+        assertThat(actual.getStatusVector().getSegments().get(0).getGdsCode(), is(ISCConstants.isc_bad_trans_handle));
+        assertTrue(actual.getStatusVector().getSegments().get(0).getArguments().isEmpty());
+    }
+    
     private FirebirdGenericResponsePacket createBlobWithSegment(final byte[] segment, final boolean streamBlob) {
         FirebirdCreateBlobCommandPacket createPacket = mock(FirebirdCreateBlobCommandPacket.class);
+        when(createPacket.getTransactionId()).thenReturn(1);
         when(createPacket.isStreamBlob()).thenReturn(streamBlob);
         FirebirdGenericResponsePacket result = (FirebirdGenericResponsePacket) new FirebirdCreateBlobCommandExecutor(createPacket, connectionSession).execute().iterator().next();
         FirebirdPutBlobSegmentCommandPacket putPacket = mock(FirebirdPutBlobSegmentCommandPacket.class);

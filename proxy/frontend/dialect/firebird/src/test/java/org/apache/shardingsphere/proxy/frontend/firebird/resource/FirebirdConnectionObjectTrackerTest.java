@@ -42,7 +42,12 @@ class FirebirdConnectionObjectTrackerTest {
             assertThat(tracker.resolveStatementHandle(481, -1), is(7));
             assertThat(tracker.resolveStatementHandle(481, 3), is(3));
             assertThat(tracker.resolveStatementHandle(482, 0xFFFF), is(0xFFFF));
+            tracker.recordTransaction(481, 5);
+            assertThat(tracker.resolveTransactionHandle(481, 0xFFFF), is(5));
+            assertThat(tracker.resolveTransactionHandle(481, -1), is(5));
+            assertThat(tracker.resolveStatementHandle(481, 0xFFFF), is(0xFFFF));
             tracker.recordOtherObject(481);
+            assertThat(tracker.resolveTransactionHandle(481, 0xFFFF), is(0xFFFF));
             assertThat(tracker.resolveStatementHandle(481, 0xFFFF), is(0xFFFF));
             tracker.recordStatement(481, 9);
             tracker.dropStatement(481, 7);
