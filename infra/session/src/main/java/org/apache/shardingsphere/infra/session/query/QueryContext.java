@@ -61,6 +61,8 @@ public final class QueryContext {
     
     private final boolean useCache;
     
+    private final boolean executionPlan;
+    
     public QueryContext(final SQLStatementContext sqlStatementContext, final String sql, final List<Object> params, final HintValueContext hintValueContext, final ConnectionContext connectionContext,
                         final ShardingSphereMetaData metaData) {
         this(sqlStatementContext, sql, params, hintValueContext, connectionContext, metaData, false);
@@ -68,6 +70,11 @@ public final class QueryContext {
     
     public QueryContext(final SQLStatementContext sqlStatementContext, final String sql, final List<Object> params, final HintValueContext hintValueContext, final ConnectionContext connectionContext,
                         final ShardingSphereMetaData metaData, final boolean useCache) {
+        this(sqlStatementContext, sql, params, hintValueContext, connectionContext, metaData, useCache, false);
+    }
+    
+    private QueryContext(final SQLStatementContext sqlStatementContext, final String sql, final List<Object> params, final HintValueContext hintValueContext,
+                         final ConnectionContext connectionContext, final ShardingSphereMetaData metaData, final boolean useCache, final boolean executionPlan) {
         this.sqlStatementContext = sqlStatementContext;
         this.sql = sql;
         parameters = params;
@@ -76,6 +83,22 @@ public final class QueryContext {
         this.metaData = metaData;
         usedDatabaseNames = getUsedDatabaseNames(sqlStatementContext, connectionContext, metaData);
         this.useCache = useCache;
+        this.executionPlan = executionPlan;
+    }
+    
+    /**
+     * Create a query context for obtaining an execution plan without executing the query.
+     *
+     * @param sqlStatementContext SQL statement context
+     * @param sql SQL text
+     * @param hintValueContext hint value context
+     * @param connectionContext connection context
+     * @param metaData meta data
+     * @return query context
+     */
+    public static QueryContext forExecutionPlan(final SQLStatementContext sqlStatementContext, final String sql, final HintValueContext hintValueContext,
+                                                final ConnectionContext connectionContext, final ShardingSphereMetaData metaData) {
+        return new QueryContext(sqlStatementContext, sql, Collections.emptyList(), hintValueContext, connectionContext, metaData, false, true);
     }
     
     private Collection<String> getUsedDatabaseNames(final SQLStatementContext sqlStatementContext, final ConnectionContext connectionContext, final ShardingSphereMetaData metaData) {

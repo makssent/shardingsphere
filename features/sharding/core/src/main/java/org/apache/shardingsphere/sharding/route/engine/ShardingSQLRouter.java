@@ -34,6 +34,7 @@ import org.apache.shardingsphere.sharding.rule.ShardingRule;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.attribute.type.CursorSQLStatementAttribute;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.DMLStatement;
+import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.InsertStatement;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -53,12 +54,17 @@ public final class ShardingSQLRouter implements EntranceSQLRouter<ShardingRule> 
             return new RouteContext();
         }
         SQLStatement sqlStatement = queryContext.getSqlStatementContext().getSqlStatement();
-        ShardingConditions shardingConditions = createShardingConditions(queryContext, globalRuleMetaData, database, rule);
+        boolean insertExecutionPlan = sqlStatement instanceof InsertStatement && queryContext.isExecutionPlan();
+        ShardingConditions shardingConditions = insertExecutionPlan
+                ? new ShardingConditions(Collections.emptyList(), queryContext.getSqlStatementContext(), rule)
+                : createShardingConditions(queryContext, globalRuleMetaData, database, rule);
         if (sqlStatement instanceof DMLStatement && shardingConditions.isNeedMerge()) {
             shardingConditions.merge();
         }
         RouteContext result = ShardingRouteEngineFactory.newInstance(rule, database, queryContext, shardingConditions, logicTableNames, props).route(rule);
-        checkRouteContext(queryContext, database, rule, props, sqlStatement, shardingConditions, result);
+        if (!insertExecutionPlan) {
+            checkRouteContext(queryContext, database, rule, props, sqlStatement, shardingConditions, result);
+        }
         return result;
     }
     

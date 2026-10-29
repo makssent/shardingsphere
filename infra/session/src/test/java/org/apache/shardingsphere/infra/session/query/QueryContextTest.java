@@ -33,12 +33,28 @@ import java.util.Optional;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class QueryContextTest {
+    
+    @Test
+    void assertExecutionPlanContext() {
+        SQLStatementContext sqlStatementContext = mock(SQLStatementContext.class, RETURNS_DEEP_STUBS);
+        ConnectionContext connectionContext = mock(ConnectionContext.class);
+        HintValueContext hintValueContext = mock(HintValueContext.class);
+        ShardingSphereMetaData metaData = mock(ShardingSphereMetaData.class);
+        when(connectionContext.getCurrentDatabaseName()).thenReturn(Optional.of("foo_db"));
+        QueryContext actualPlan = QueryContext.forExecutionPlan(sqlStatementContext, "INSERT INTO t VALUES (?)", hintValueContext, connectionContext, metaData);
+        QueryContext actualExecution = new QueryContext(sqlStatementContext, "INSERT INTO t VALUES (?)", Collections.emptyList(), hintValueContext, connectionContext, metaData);
+        assertTrue(actualPlan.isExecutionPlan());
+        assertTrue(actualPlan.getParameters().isEmpty());
+        assertFalse(actualExecution.isExecutionPlan());
+    }
     
     @Test
     void assertGetUsedDatabase() {
