@@ -19,6 +19,7 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statemen
 
 import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
+import org.apache.shardingsphere.database.protocol.firebird.err.FirebirdErrorPacketFactory;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFreeStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
@@ -27,6 +28,7 @@ import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch.FirebirdBatchStatementManager;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementResourceCleaner;
 import org.apache.shardingsphere.proxy.frontend.firebird.resource.FirebirdConnectionObjectTracker;
+import org.firebirdsql.gds.ISCConstants;
 
 import java.sql.SQLException;
 import java.util.Collection;
@@ -44,7 +46,12 @@ public final class FirebirdFreeStatementCommandExecutor implements CommandExecut
     
     @Override
     public Collection<DatabasePacket> execute() throws SQLException {
-        int statementId = FirebirdConnectionObjectTracker.getInstance().resolveStatementHandle(connectionSession.getConnectionId(), packet.getStatementId());
+        int connectionId = connectionSession.getConnectionId();
+        FirebirdConnectionObjectTracker tracker = FirebirdConnectionObjectTracker.getInstance();
+        int statementId = tracker.resolveStatementHandle(connectionId, packet.getStatementId());
+        if (!tracker.isStatementAllocated(connectionId, statementId) && null == connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(statementId)) {
+            return Collections.singleton(FirebirdErrorPacketFactory.newInstance(new SQLException("", null, ISCConstants.isc_bad_req_handle)));
+        }
         switch (packet.getOption()) {
             case FirebirdFreeStatementPacket.DROP:
             case FirebirdFreeStatementPacket.UNPREPARE:

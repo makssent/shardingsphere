@@ -26,10 +26,12 @@ import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.handler.ProxyBackendHandler;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.backend.session.ServerPreparedStatementRegistry;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementResourceCleaner;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.fetch.FirebirdFetchStatementCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.resource.FirebirdConnectionObjectTracker;
 import org.apache.shardingsphere.proxy.frontend.firebird.resource.FirebirdConnectionResourceManager;
+import org.firebirdsql.gds.ISCConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,6 +54,7 @@ import static org.hamcrest.Matchers.isA;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -85,6 +88,7 @@ class FirebirdFreeStatementCommandExecutorTest {
         when(packet.getStatementId()).thenReturn(STATEMENT_ID);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(registry);
+        when(registry.getPreparedStatement(STATEMENT_ID)).thenReturn(mock(FirebirdServerPreparedStatement.class));
     }
     
     @AfterEach
@@ -131,6 +135,15 @@ class FirebirdFreeStatementCommandExecutorTest {
         } finally {
             FirebirdConnectionResourceManager.getInstance().unregisterConnection(CONNECTION_ID);
         }
+    }
+    
+    @Test
+    void assertDropUnknownStatement() throws Exception {
+        when(packet.getStatementId()).thenReturn(999);
+        when(packet.getOption()).thenReturn(FirebirdFreeStatementPacket.DROP);
+        FirebirdGenericResponsePacket actual = (FirebirdGenericResponsePacket) new FirebirdFreeStatementCommandExecutor(packet, connectionSession).execute().iterator().next();
+        assertThat(actual.getStatusVector().getSegments().get(0).getGdsCode(), is(ISCConstants.isc_bad_req_handle));
+        verify(registry, never()).removePreparedStatement(any());
     }
     
     @ParameterizedTest(name = "{0}")

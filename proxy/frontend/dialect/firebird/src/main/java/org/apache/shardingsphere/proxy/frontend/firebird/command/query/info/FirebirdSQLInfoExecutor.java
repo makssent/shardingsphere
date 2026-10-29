@@ -69,16 +69,15 @@ public final class FirebirdSQLInfoExecutor implements CommandExecutor {
     @Override
     public Collection<DatabasePacket> execute() {
         String plan = "";
-        int handle = packet.getHandle();
+        int connectionId = connectionSession.getConnectionId();
+        FirebirdConnectionObjectTracker tracker = FirebirdConnectionObjectTracker.getInstance();
+        int handle = tracker.resolveStatementHandle(connectionId, packet.getHandle());
+        FirebirdServerPreparedStatement statement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(handle);
+        if (null == statement) {
+            int errorCode = tracker.isStatementAllocated(connectionId, handle) ? ISCConstants.isc_unprepared_stmt : ISCConstants.isc_bad_req_handle;
+            return Collections.singleton(FirebirdErrorPacketFactory.newInstance(new SQLException("", null, errorCode)));
+        }
         if (isPlanRequested()) {
-            int connectionId = connectionSession.getConnectionId();
-            FirebirdConnectionObjectTracker tracker = FirebirdConnectionObjectTracker.getInstance();
-            handle = tracker.resolveStatementHandle(connectionId, handle);
-            FirebirdServerPreparedStatement statement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(handle);
-            if (null == statement) {
-                int errorCode = tracker.isStatementAllocated(connectionId, handle) ? ISCConstants.isc_unprepared_stmt : ISCConstants.isc_bad_req_handle;
-                return Collections.singleton(FirebirdErrorPacketFactory.newInstance(new SQLException("", null, errorCode)));
-            }
             try {
                 plan = getExecutionPlan(statement);
             } catch (final SQLException | SQLDialectException | ShardingSphereSQLException ex) {

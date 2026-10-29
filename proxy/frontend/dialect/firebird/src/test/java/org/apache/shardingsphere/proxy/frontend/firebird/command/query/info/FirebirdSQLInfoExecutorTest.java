@@ -119,7 +119,6 @@ class FirebirdSQLInfoExecutorTest {
             when(connectionSession.getConnectionId()).thenReturn(481);
             when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(new ServerPreparedStatementRegistry());
             when(packet.getHandle()).thenReturn(0xFFFF);
-            when(packet.getInfoItems()).thenReturn(Collections.singletonList(FirebirdSQLInfoPacketType.GET_PLAN));
             FirebirdGenericResponsePacket actual = (FirebirdGenericResponsePacket) new FirebirdSQLInfoExecutor(packet, connectionSession).execute().iterator().next();
             assertThat(actual.getStatusVector().getSegments().get(0).getGdsCode(), is(ISCConstants.isc_unprepared_stmt));
             when(packet.getHandle()).thenReturn(7);
@@ -136,7 +135,11 @@ class FirebirdSQLInfoExecutorTest {
     
     @Test
     void assertExecute() {
-        when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(new ServerPreparedStatementRegistry());
+        ServerPreparedStatementRegistry registry = new ServerPreparedStatementRegistry();
+        SQLStatementContext sqlStatementContext = mock(SQLStatementContext.class);
+        when(sqlStatementContext.getSqlStatement()).thenReturn(mock(SQLStatement.class));
+        registry.addPreparedStatement(0, new FirebirdServerPreparedStatement("SELECT 1", sqlStatementContext, new HintValueContext()));
+        when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(registry);
         FirebirdSQLInfoExecutor executor = new FirebirdSQLInfoExecutor(packet, connectionSession);
         Collection<DatabasePacket> actual = executor.execute();
         assertThat(actual.iterator().next(), isA(FirebirdGenericResponsePacket.class));
@@ -213,7 +216,6 @@ class FirebirdSQLInfoExecutorTest {
     @Test
     void assertExecuteWithInvalidStatementHandleForPlan() {
         when(packet.getHandle()).thenReturn(1);
-        when(packet.getInfoItems()).thenReturn(Collections.singletonList(FirebirdSQLInfoPacketType.GET_PLAN));
         when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(new ServerPreparedStatementRegistry());
         FirebirdGenericResponsePacket actual = (FirebirdGenericResponsePacket) new FirebirdSQLInfoExecutor(packet, connectionSession).execute().iterator().next();
         assertThat(actual.getStatusVector().getSegments().size(), is(1));
@@ -225,7 +227,11 @@ class FirebirdSQLInfoExecutorTest {
     @Test
     void assertExecuteWithPlanAfterEndItem() {
         when(packet.getInfoItems()).thenReturn(Arrays.asList(FirebirdCommonInfoPacketType.END, FirebirdSQLInfoPacketType.GET_PLAN));
-        when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(new ServerPreparedStatementRegistry());
+        ServerPreparedStatementRegistry registry = new ServerPreparedStatementRegistry();
+        SQLStatementContext sqlStatementContext = mock(SQLStatementContext.class);
+        when(sqlStatementContext.getSqlStatement()).thenReturn(mock(SQLStatement.class));
+        registry.addPreparedStatement(0, new FirebirdServerPreparedStatement("SELECT 1", sqlStatementContext, new HintValueContext()));
+        when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(registry);
         FirebirdGenericResponsePacket actual = (FirebirdGenericResponsePacket) new FirebirdSQLInfoExecutor(packet, connectionSession).execute().iterator().next();
         assertThat(((FirebirdSQLInfoReturnPacket) actual.getData()).getExecutionPlan(), is(""));
     }
