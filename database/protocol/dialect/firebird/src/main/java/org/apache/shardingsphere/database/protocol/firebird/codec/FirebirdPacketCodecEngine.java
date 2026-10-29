@@ -18,7 +18,6 @@
 package org.apache.shardingsphere.database.protocol.firebird.codec;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.CompositeByteBuf;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import org.apache.shardingsphere.database.protocol.codec.DatabasePacketCodecEngine;
@@ -36,7 +35,6 @@ import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 
 import java.nio.charset.Charset;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
@@ -47,36 +45,17 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
     
     private static final int MESSAGE_TYPE_LENGTH = 4;
     
-    private static final int ALLOCATE_STATEMENT_REQUEST_PAYLOAD_LENGTH = MESSAGE_TYPE_LENGTH + 4;
-    
-    private static final int FREE_STATEMENT_REQUEST_PAYLOAD_LENGTH = MESSAGE_TYPE_LENGTH + 8;
-    
-    private final List<ByteBuf> pendingMessages = new LinkedList<>();
-    
     private final Map<Integer, List<FirebirdBatchColumnDescriptor>> deferredBatchFormats = new HashMap<>(1, 1F);
-    
-    private FirebirdCommandPacketType pendingPacketType;
     
     @Override
     public boolean isValidHeader(final int readableBytes) {
-        return !pendingMessages.isEmpty() || readableBytes >= MESSAGE_TYPE_LENGTH;
+        return readableBytes >= MESSAGE_TYPE_LENGTH;
     }
     
     @Override
     public void decode(final ChannelHandlerContext context, final ByteBuf in, final List<Object> out) {
         try {
-            if (pendingMessages.isEmpty()) {
-                int type = in.getInt(in.readerIndex());
-                pendingPacketType = FirebirdCommandPacketType.valueOf(type);
-                if (pendingPacketType == FirebirdCommandPacketType.ALLOCATE_STATEMENT) {
-                    handleMultiPacket(context, in, out, ALLOCATE_STATEMENT_REQUEST_PAYLOAD_LENGTH);
-                    return;
-                } else if (pendingPacketType == FirebirdCommandPacketType.FREE_STATEMENT) {
-                    handleMultiPacket(context, in, out, FREE_STATEMENT_REQUEST_PAYLOAD_LENGTH);
-                    return;
-                }
-            }
-            addToBuffer(context, in, out);
+            processPackets(context, in, out);
             // CHECKSTYLE:OFF
         } catch (final RuntimeException ex) {
             // CHECKSTYLE:ON
@@ -86,67 +65,26 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
                 }
             }
             out.clear();
-            resetState();
+            deferredBatchFormats.clear();
             in.skipBytes(in.readableBytes());
             context.channel().writeAndFlush(FirebirdErrorPacketFactory.newInstance(ex)).addListener(ChannelFutureListener.CLOSE);
         }
-    }
-    
-    private void resetState() {
-        for (ByteBuf each : pendingMessages) {
-            each.release();
-        }
-        pendingMessages.clear();
-        pendingPacketType = null;
-    }
-    
-    private void handleMultiPacket(final ChannelHandlerContext context, final ByteBuf in, final List<Object> out, final int firstPacketLength) {
-        out.add(in.readRetainedSlice(firstPacketLength));
-        if (in.readableBytes() > MESSAGE_TYPE_LENGTH) {
-            decode(context, in, out);
-        }
-    }
-    
-    private void addToBuffer(final ChannelHandlerContext context, final ByteBuf in, final List<Object> out) {
-        ByteBuf buffer = mergePendingMessages(context, in);
-        boolean shouldRelease = buffer != in;
-        try {
-            processPackets(context, buffer, out);
-        } finally {
-            if (shouldRelease) {
-                buffer.release();
-            }
-        }
-    }
-    
-    private ByteBuf mergePendingMessages(final ChannelHandlerContext context, final ByteBuf in) {
-        if (pendingMessages.isEmpty()) {
-            return in;
-        }
-        CompositeByteBuf result = context.alloc().compositeBuffer(pendingMessages.size() + 1);
-        result.addComponents(true, pendingMessages);
-        pendingMessages.clear();
-        result.addComponent(true, in.readRetainedSlice(in.readableBytes()));
-        return result;
     }
     
     private void processPackets(final ChannelHandlerContext context, final ByteBuf buffer, final List<Object> out) {
         Charset charset = context.channel().attr(CommonConstants.CHARSET_ATTRIBUTE_KEY).get();
         while (buffer.isReadable()) {
             if (buffer.readableBytes() < MESSAGE_TYPE_LENGTH) {
-                pendingMessages.add(buffer.readRetainedSlice(buffer.readableBytes()));
                 return;
             }
             int readerIndex = buffer.readerIndex();
-            FirebirdCommandPacketType commandType = (null == pendingPacketType) ? FirebirdCommandPacketType.valueOf(buffer.getInt(readerIndex)) : pendingPacketType;
+            FirebirdCommandPacketType commandType = FirebirdCommandPacketType.valueOf(buffer.getInt(readerIndex));
             if (FirebirdCommandPacketType.VOID == commandType) {
                 buffer.skipBytes(MESSAGE_TYPE_LENGTH);
                 continue;
             }
             int packetLength = findPacketLength(context, buffer, commandType, charset);
             if (packetLength < 0) {
-                pendingPacketType = commandType;
-                pendingMessages.add(buffer.readRetainedSlice(buffer.readableBytes()));
                 if (FirebirdCommandPacketType.BATCH_MSG != commandType) {
                     deferredBatchFormats.clear();
                 }
@@ -155,7 +93,6 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
             if (FirebirdCommandPacketType.BATCH_CREATE == commandType && buffer.readableBytes() > packetLength) {
                 rememberBatchFormat(buffer, packetLength, charset);
             }
-            pendingPacketType = null;
             out.add(buffer.readRetainedSlice(packetLength));
         }
         deferredBatchFormats.clear();

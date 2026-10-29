@@ -18,12 +18,12 @@
 package org.apache.shardingsphere.database.protocol.firebird.codec;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.embedded.EmbeddedChannel;
-import lombok.SneakyThrows;
 import org.apache.shardingsphere.database.protocol.codec.PacketCodec;
 import org.apache.shardingsphere.database.protocol.constant.CommonConstants;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdArchType;
@@ -50,7 +50,6 @@ import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
-import org.mockito.internal.configuration.plugins.Plugins;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -95,19 +94,12 @@ class FirebirdPacketCodecEngineTest {
         when(context.channel().attr(CommonConstants.CHARSET_ATTRIBUTE_KEY).get()).thenReturn(StandardCharsets.UTF_8);
         when(context.channel().attr(FirebirdConstant.CONNECTION_PROTOCOL_VERSION).get()).thenReturn(FirebirdProtocolVersion.PROTOCOL_VERSION10);
         when(context.channel().attr(FirebirdConstant.CURRENT_CONNECTION).get()).thenReturn(1);
-        when(context.alloc().compositeBuffer(anyInt())).thenAnswer(invocation -> Unpooled.compositeBuffer(invocation.getArgument(0)));
     }
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("validHeaderCases")
     void assertIsValidHeader(final String name, final int readableBytes, final boolean expectedValid) {
         assertThat(codecEngine.isValidHeader(readableBytes), is(expectedValid));
-    }
-    
-    @Test
-    void assertIsValidHeaderWithPendingMessage() {
-        getPendingMessages().add(Unpooled.wrappedBuffer(new byte[]{1, 2}));
-        assertTrue(codecEngine.isValidHeader(2));
     }
     
     @ParameterizedTest(name = "{0}")
@@ -122,15 +114,11 @@ class FirebirdPacketCodecEngineTest {
     
     @Test
     void assertDecodeWithIncompleteHeader() {
-        ByteBuf pendingMessage = Unpooled.wrappedBuffer(new byte[]{1, 2});
-        getPendingMessages().add(pendingMessage);
-        ByteBuf in = Unpooled.wrappedBuffer(new byte[]{3});
+        ByteBuf in = Unpooled.wrappedBuffer(new byte[]{1, 2, 3});
         List<Object> out = new LinkedList<>();
-        assertThat(in.capacity(), is(1));
         codecEngine.decode(context, in, out);
         assertTrue(out.isEmpty());
-        assertThat(getPendingMessages().size(), is(1));
-        assertThat(getPendingMessages().get(0).readableBytes(), is(3));
+        assertThat(in.readerIndex(), is(0));
     }
     
     @Test
@@ -140,7 +128,6 @@ class FirebirdPacketCodecEngineTest {
         assertThat(in.readerIndex(), is(0));
         codecEngine.decode(context, in, out);
         assertTrue(out.isEmpty());
-        assertTrue(getPendingMessages().isEmpty());
     }
     
     @Test
@@ -155,8 +142,6 @@ class FirebirdPacketCodecEngineTest {
         assertThat(((ByteBuf) out.get(0)).getInt(0), is(FirebirdCommandPacketType.SEEK_BLOB.getValue()));
         assertThat(((ByteBuf) out.get(1)).readableBytes(), is(8));
         assertThat(((ByteBuf) out.get(1)).getInt(0), is(FirebirdCommandPacketType.COMMIT.getValue()));
-        assertNull(getPendingPacketType());
-        assertTrue(getPendingMessages().isEmpty());
     }
     
     @Test
@@ -169,7 +154,6 @@ class FirebirdPacketCodecEngineTest {
         }
         assertThat(out.size(), is(1));
         assertThat(((ByteBuf) out.get(0)).readableBytes(), is(8));
-        assertNull(getPendingPacketType());
     }
     
     @Test
@@ -193,9 +177,7 @@ class FirebirdPacketCodecEngineTest {
             codecEngine.decode(context, in, out);
         }
         assertTrue(out.isEmpty());
-        assertThat(getPendingPacketType(), is(FirebirdCommandPacketType.PREPARE_STATEMENT));
-        assertThat(getPendingMessages().size(), is(1));
-        assertThat(getPendingMessages().get(0).readableBytes(), is(8));
+        assertThat(in.readerIndex(), is(0));
     }
     
     @Test
@@ -207,8 +189,7 @@ class FirebirdPacketCodecEngineTest {
             codecEngine.decode(context, in, out);
         }
         assertTrue(out.isEmpty());
-        assertThat(getPendingPacketType(), is(FirebirdCommandPacketType.PREPARE_STATEMENT));
-        assertThat(getPendingMessages().size(), is(1));
+        assertThat(in.readerIndex(), is(0));
     }
     
     @Test
@@ -226,16 +207,14 @@ class FirebirdPacketCodecEngineTest {
     }
     
     @Test
-    void assertDecodeWithProcessPacketsExceptionAndPendingMessages() {
-        when(context.channel().attr(CommonConstants.CHARSET_ATTRIBUTE_KEY).get()).thenThrow(IllegalStateException.class);
-        ByteBuf pendingMessage = Unpooled.wrappedBuffer(new byte[]{1, 2, 3, 4});
-        getPendingMessages().add(pendingMessage);
-        ByteBuf in = createCommandPacket(FirebirdCommandPacketType.INFO_REQUEST, 8);
+    void assertDecodeWithProcessPacketsExceptionAfterOutput() {
+        ChannelFuture errorResponseFuture = mock(ChannelFuture.class);
+        when(context.channel().writeAndFlush(any())).thenReturn(errorResponseFuture);
+        ByteBuf in = Unpooled.buffer().writeInt(FirebirdCommandPacketType.COMMIT.getValue()).writeInt(1).writeInt(UNKNOWN_COMMAND_TYPE);
         List<Object> out = new LinkedList<>();
         codecEngine.decode(context, in, out);
         assertTrue(out.isEmpty());
-        assertTrue(getPendingMessages().isEmpty());
-        assertThat(pendingMessage.refCnt(), is(0));
+        assertThat(in.readableBytes(), is(0));
         assertThat(captureErrorResponse().getErrorCode(), is(335544382));
     }
     
@@ -329,6 +308,48 @@ class FirebirdPacketCodecEngineTest {
     }
     
     @Test
+    void assertDecodeIncompleteConnectReleasedOnClose() {
+        EmbeddedChannel channel = new EmbeddedChannel(new PacketCodec(new FirebirdPacketCodecEngine()));
+        channel.attr(CommonConstants.CHARSET_ATTRIBUTE_KEY).set(StandardCharsets.UTF_8);
+        channel.attr(FirebirdConstant.CURRENT_CONNECTION).set(BATCH_CONNECTION_ID);
+        ByteBuf in = PooledByteBufAllocator.DEFAULT.buffer().writeInt(FirebirdCommandPacketType.CONNECT.getValue()).writeInt(FirebirdCommandPacketType.ATTACH.getValue()).writeInt(3).writeInt(1);
+        channel.writeInbound(in);
+        assertTrue(channel.isOpen());
+        channel.finishAndReleaseAll();
+        assertThat(in.refCnt(), is(0));
+    }
+    
+    @Test
+    void assertDecodeIncompleteAttachReleasedOnClose() {
+        EmbeddedChannel channel = new EmbeddedChannel(new PacketCodec(new FirebirdPacketCodecEngine()));
+        channel.attr(CommonConstants.CHARSET_ATTRIBUTE_KEY).set(StandardCharsets.UTF_8);
+        channel.attr(FirebirdConstant.CURRENT_CONNECTION).set(BATCH_CONNECTION_ID);
+        ByteBuf in = PooledByteBufAllocator.DEFAULT.buffer().writeInt(FirebirdCommandPacketType.ATTACH.getValue()).writeInt(0);
+        channel.writeInbound(in);
+        assertTrue(channel.isOpen());
+        channel.finishAndReleaseAll();
+        assertThat(in.refCnt(), is(0));
+    }
+    
+    @Test
+    void assertDecodeHighlyFragmentedConnect() {
+        EmbeddedChannel channel = new EmbeddedChannel(new PacketCodec(new FirebirdPacketCodecEngine()));
+        channel.attr(CommonConstants.CHARSET_ATTRIBUTE_KEY).set(StandardCharsets.UTF_8);
+        channel.attr(FirebirdConstant.CURRENT_CONNECTION).set(BATCH_CONNECTION_ID);
+        ByteBuf packet = Unpooled.buffer().writeInt(FirebirdCommandPacketType.CONNECT.getValue()).writeInt(FirebirdCommandPacketType.ATTACH.getValue()).writeInt(3)
+                .writeInt(1).writeInt(4000).writeZero(4000).writeInt(1).writeInt(3).writeBytes(new byte[]{9, 1, 'x'}).writeZero(1)
+                .writeInt(FirebirdProtocolVersion.PROTOCOL_VERSION13.getCode()).writeInt(1).writeInt(0).writeInt(5).writeInt(2);
+        for (int i = 0; i < packet.readableBytes(); i++) {
+            channel.writeInbound(Unpooled.buffer(1).writeByte(packet.getByte(i)));
+        }
+        ByteBuf actual = channel.readInbound();
+        assertThat(actual, is(packet));
+        assertTrue(actual.release());
+        packet.release();
+        channel.finishAndReleaseAll();
+    }
+    
+    @Test
     void assertCreatePacketPayload() {
         ByteBuf byteBuf = mock(ByteBuf.class);
         assertThat(codecEngine.createPacketPayload(byteBuf, StandardCharsets.UTF_8).getByteBuf(), is(byteBuf));
@@ -345,8 +366,6 @@ class FirebirdPacketCodecEngineTest {
             FirebirdBatchMessageCommandPacket actualPacket = createBatchSendMessagePacket((ByteBuf) out.iterator().next());
             assertThat(actualPacket.getStatementHandle(), is(BATCH_STATEMENT_HANDLE));
             assertThat(actualPacket.getMessageCount(), is(2L));
-            assertNull(getPendingPacketType());
-            assertTrue(getPendingMessages().isEmpty());
         } finally {
             tearDownBatchContext();
         }
@@ -362,16 +381,14 @@ class FirebirdPacketCodecEngineTest {
             List<Object> firstOut = new LinkedList<>();
             codecEngine.decode(context, firstFrame, firstOut);
             assertTrue(firstOut.isEmpty());
-            assertThat(getPendingPacketType(), is(FirebirdCommandPacketType.BATCH_MSG));
+            assertThat(firstFrame.readerIndex(), is(0));
             FirebirdBatchStatement batchStatement = FirebirdBatchRegistry.getInstance().getBatchStatement(BATCH_CONNECTION_ID, BATCH_STATEMENT_HANDLE);
             assertTrue(batchStatement.getParameterValues().isEmpty());
             List<Object> secondOut = new LinkedList<>();
-            codecEngine.decode(context, secondFrame, secondOut);
+            codecEngine.decode(context, Unpooled.wrappedBuffer(firstFrame, secondFrame), secondOut);
             assertThat(secondOut.size(), is(1));
             assertThat(createBatchSendMessagePacket((ByteBuf) secondOut.iterator().next()).getMessageCount(), is(2L));
             assertTrue(batchStatement.getParameterValues().isEmpty());
-            assertNull(getPendingPacketType());
-            assertTrue(getPendingMessages().isEmpty());
         } finally {
             tearDownBatchContext();
         }
@@ -420,8 +437,7 @@ class FirebirdPacketCodecEngineTest {
             List<Object> out = new LinkedList<>();
             codecEngine.decode(context, in, out);
             assertTrue(out.isEmpty());
-            assertThat(getPendingPacketType(), is(FirebirdCommandPacketType.BATCH_MSG));
-            assertThat(getPendingMessages().size(), is(1));
+            assertThat(in.readerIndex(), is(0));
         } finally {
             tearDownBatchContext();
         }
@@ -452,8 +468,6 @@ class FirebirdPacketCodecEngineTest {
         ByteBuf batchMessage = (ByteBuf) out.get(1);
         assertThat(batchMessage.readableBytes(), is(32));
         assertThat(createBatchSendMessagePacket(batchMessage).getMessageCount(), is(1L));
-        assertNull(getPendingPacketType());
-        assertTrue(getPendingMessages().isEmpty());
     }
     
     @Test
@@ -463,13 +477,11 @@ class FirebirdPacketCodecEngineTest {
         List<Object> firstOut = new LinkedList<>();
         codecEngine.decode(context, firstFrame, firstOut);
         assertThat(firstOut.size(), is(1));
-        assertThat(getPendingPacketType(), is(FirebirdCommandPacketType.BATCH_MSG));
+        assertThat(firstFrame.readableBytes(), is(18));
         List<Object> secondOut = new LinkedList<>();
-        codecEngine.decode(context, batchMessage.readRetainedSlice(batchMessage.readableBytes()), secondOut);
+        codecEngine.decode(context, Unpooled.wrappedBuffer(firstFrame, batchMessage.readRetainedSlice(batchMessage.readableBytes())), secondOut);
         assertThat(secondOut.size(), is(1));
         assertThat(createBatchSendMessagePacket((ByteBuf) secondOut.get(0)).getMessageCount(), is(1L));
-        assertNull(getPendingPacketType());
-        assertTrue(getPendingMessages().isEmpty());
     }
     
     @Test
@@ -480,8 +492,6 @@ class FirebirdPacketCodecEngineTest {
         verify(context, never()).close();
         assertThat(out.size(), is(1));
         assertThat(((ByteBuf) out.get(0)).getInt(0), is(FirebirdCommandPacketType.BATCH_CREATE.getValue()));
-        assertNull(getPendingPacketType());
-        assertTrue(getPendingMessages().isEmpty());
     }
     
     @Test
@@ -493,8 +503,6 @@ class FirebirdPacketCodecEngineTest {
         assertThat(out.size(), is(2));
         assertThat(((ByteBuf) out.get(0)).getInt(0), is(FirebirdCommandPacketType.BATCH_CREATE.getValue()));
         assertThat(((ByteBuf) out.get(1)).getInt(0), is(FirebirdCommandPacketType.BATCH_MSG.getValue()));
-        assertNull(getPendingPacketType());
-        assertTrue(getPendingMessages().isEmpty());
     }
     
     private ByteBuf buildBlobBatchCreate() {
@@ -518,8 +526,6 @@ class FirebirdPacketCodecEngineTest {
         verify(context, never()).close();
         assertThat(out.size(), is(1));
         assertThat(((ByteBuf) out.get(0)).getInt(0), is(FirebirdCommandPacketType.BATCH_CREATE.getValue()));
-        assertNull(getPendingPacketType());
-        assertTrue(getPendingMessages().isEmpty());
     }
     
     @Test
@@ -631,17 +637,6 @@ class FirebirdPacketCodecEngineTest {
         return result;
     }
     
-    @SuppressWarnings("unchecked")
-    @SneakyThrows(ReflectiveOperationException.class)
-    private List<ByteBuf> getPendingMessages() {
-        return (List<ByteBuf>) Plugins.getMemberAccessor().get(FirebirdPacketCodecEngine.class.getDeclaredField("pendingMessages"), codecEngine);
-    }
-    
-    @SneakyThrows(ReflectiveOperationException.class)
-    private FirebirdCommandPacketType getPendingPacketType() {
-        return (FirebirdCommandPacketType) Plugins.getMemberAccessor().get(FirebirdPacketCodecEngine.class.getDeclaredField("pendingPacketType"), codecEngine);
-    }
-    
     private static Stream<Arguments> validHeaderCases() {
         return Stream.of(
                 Arguments.of("readable bytes greater than header", 5, true),
@@ -653,6 +648,7 @@ class FirebirdPacketCodecEngineTest {
         ByteBuf commit = Unpooled.buffer(8).writeInt(FirebirdCommandPacketType.COMMIT.getValue()).writeInt(1);
         return Stream.of(
                 Arguments.of("body completed by short read", new ByteBuf[]{commit.copy(0, 6), commit.copy(6, 2)}, 1),
+                Arguments.of("body completed by one byte", new ByteBuf[]{commit.copy(0, 7), commit.copy(7, 1)}, 1),
                 Arguments.of("header completed by short reads", new ByteBuf[]{Unpooled.wrappedBuffer(commit.copy(), commit.copy(0, 2)), commit.copy(2, 3), commit.copy(5, 3)}, 2));
     }
     
