@@ -53,6 +53,7 @@ public final class FirebirdConnectionResourceManager {
      * @param connectionId connection ID
      */
     public void registerConnection(final int connectionId) {
+        FirebirdConnectionObjectTracker.getInstance().registerConnection(connectionId);
         FirebirdTransactionIdGenerator.getInstance().registerConnection(connectionId);
         FirebirdStatementIdGenerator.getInstance().registerConnection(connectionId);
         FirebirdBlobIdGenerator.getInstance().registerConnection(connectionId);
@@ -69,6 +70,7 @@ public final class FirebirdConnectionResourceManager {
      * @param connectionId connection ID
      */
     public void unregisterConnection(final int connectionId) {
+        FirebirdConnectionObjectTracker.getInstance().unregisterConnection(connectionId);
         FirebirdStatementIdGenerator.getInstance().unregisterConnection(connectionId);
         FirebirdTransactionIdGenerator.getInstance().unregisterConnection(connectionId);
         FirebirdBlobIdGenerator.getInstance().unregisterConnection(connectionId);

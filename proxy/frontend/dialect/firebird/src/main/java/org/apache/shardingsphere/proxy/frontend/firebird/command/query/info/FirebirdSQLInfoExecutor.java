@@ -41,6 +41,7 @@ import org.apache.shardingsphere.proxy.backend.context.ProxyContext;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
+import org.apache.shardingsphere.proxy.frontend.firebird.resource.FirebirdConnectionObjectTracker;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.DeleteStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.InsertStatement;
@@ -68,10 +69,15 @@ public final class FirebirdSQLInfoExecutor implements CommandExecutor {
     @Override
     public Collection<DatabasePacket> execute() {
         String plan = "";
+        int handle = packet.getHandle();
         if (isPlanRequested()) {
-            FirebirdServerPreparedStatement statement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(packet.getHandle());
+            int connectionId = connectionSession.getConnectionId();
+            FirebirdConnectionObjectTracker tracker = FirebirdConnectionObjectTracker.getInstance();
+            handle = tracker.resolveStatementHandle(connectionId, handle);
+            FirebirdServerPreparedStatement statement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(handle);
             if (null == statement) {
-                return Collections.singleton(FirebirdErrorPacketFactory.newInstance(new SQLException("", null, ISCConstants.isc_bad_req_handle)));
+                int errorCode = tracker.isStatementAllocated(connectionId, handle) ? ISCConstants.isc_unprepared_stmt : ISCConstants.isc_bad_req_handle;
+                return Collections.singleton(FirebirdErrorPacketFactory.newInstance(new SQLException("", null, errorCode)));
             }
             try {
                 plan = getExecutionPlan(statement);
@@ -79,7 +85,7 @@ public final class FirebirdSQLInfoExecutor implements CommandExecutor {
                 return Collections.singleton(FirebirdErrorPacketFactory.newInstance(ex));
             }
         }
-        return Collections.singleton(new FirebirdGenericResponsePacket().setData(new FirebirdSQLInfoReturnPacket(packet.getInfoItems(), getRecordsInfo(), plan, packet.getMaxLength())));
+        return Collections.singleton(new FirebirdGenericResponsePacket().setData(new FirebirdSQLInfoReturnPacket(packet.getInfoItems(), getRecordsInfo(handle), plan, packet.getMaxLength())));
     }
     
     @HighFrequencyInvocation
@@ -116,8 +122,8 @@ public final class FirebirdSQLInfoExecutor implements CommandExecutor {
         return String.join("\n", plans);
     }
     
-    private FirebirdSQLRecordsInfo getRecordsInfo() {
-        FirebirdServerPreparedStatement preparedStatement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(packet.getHandle());
+    private FirebirdSQLRecordsInfo getRecordsInfo(final int handle) {
+        FirebirdServerPreparedStatement preparedStatement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(handle);
         if (null == preparedStatement) {
             return new FirebirdSQLRecordsInfo(0L, 0L, 0L);
         }

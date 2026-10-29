@@ -48,6 +48,7 @@ import org.apache.shardingsphere.proxy.backend.firebird.handler.admin.executor.v
 import org.apache.shardingsphere.proxy.frontend.authentication.AuthenticationEngine;
 import org.apache.shardingsphere.proxy.frontend.connection.ConnectionIdGenerator;
 import org.apache.shardingsphere.proxy.frontend.firebird.authentication.authenticator.FirebirdAuthenticatorType;
+import org.apache.shardingsphere.proxy.frontend.firebird.resource.FirebirdConnectionObjectTracker;
 import org.apache.shardingsphere.proxy.frontend.firebird.resource.FirebirdConnectionResourceManager;
 
 import java.nio.charset.Charset;
@@ -58,6 +59,8 @@ import java.util.Collections;
  * Authentication engine for Firebird.
  */
 public final class FirebirdAuthenticationEngine implements AuthenticationEngine {
+    
+    private static final int LAZY_SEND = 5;
     
     private FirebirdSRPAuthenticationData authData;
     
@@ -94,6 +97,7 @@ public final class FirebirdAuthenticationEngine implements AuthenticationEngine 
     private AuthenticationResult processConnect(final ChannelHandlerContext context, final FirebirdPacketPayload payload, final AuthorityRule rule) {
         FirebirdConnectPacket connectPacket = new FirebirdConnectPacket(payload);
         FirebirdAcceptPacket acceptPacket = new FirebirdAcceptPacket(connectPacket.getUserProtocols());
+        FirebirdConnectionObjectTracker.getInstance().setLazy(connectionId, (acceptPacket.getProtocol().getMaxType() & 0xFF) >= LAZY_SEND);
         context.channel().attr(CommonConstants.CHARSET_ATTRIBUTE_KEY).set(FirebirdCharacterSets.findCharacterSet("NONE"));
         FirebirdConnectionProtocolVersion.getInstance().setProtocolVersion(connectionId, acceptPacket.getProtocol().getVersion());
         context.channel().attr(FirebirdConstant.CONNECTION_PROTOCOL_VERSION).set(acceptPacket.getProtocol().getVersion());

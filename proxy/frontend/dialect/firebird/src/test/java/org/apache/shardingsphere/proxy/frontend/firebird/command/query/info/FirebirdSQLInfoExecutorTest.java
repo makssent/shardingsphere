@@ -52,6 +52,8 @@ import org.apache.shardingsphere.proxy.backend.session.ServerPreparedStatementRe
 import org.apache.shardingsphere.proxy.frontend.command.CommandExecutorTask;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
+import org.apache.shardingsphere.proxy.frontend.firebird.resource.FirebirdConnectionObjectTracker;
+import org.apache.shardingsphere.proxy.frontend.firebird.resource.FirebirdConnectionResourceManager;
 import org.apache.shardingsphere.proxy.frontend.spi.DatabaseProtocolFrontendEngine;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.DeleteStatement;
@@ -108,6 +110,31 @@ class FirebirdSQLInfoExecutorTest {
     private ConnectionSession connectionSession;
     
     @Test
+    void assertUnpreparedLazyStatement() {
+        FirebirdConnectionObjectTracker tracker = FirebirdConnectionObjectTracker.getInstance();
+        tracker.registerConnection(481);
+        tracker.setLazy(481, true);
+        tracker.recordStatement(481, 7);
+        try {
+            when(connectionSession.getConnectionId()).thenReturn(481);
+            when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(new ServerPreparedStatementRegistry());
+            when(packet.getHandle()).thenReturn(0xFFFF);
+            when(packet.getInfoItems()).thenReturn(Collections.singletonList(FirebirdSQLInfoPacketType.GET_PLAN));
+            FirebirdGenericResponsePacket actual = (FirebirdGenericResponsePacket) new FirebirdSQLInfoExecutor(packet, connectionSession).execute().iterator().next();
+            assertThat(actual.getStatusVector().getSegments().get(0).getGdsCode(), is(ISCConstants.isc_unprepared_stmt));
+            when(packet.getHandle()).thenReturn(7);
+            FirebirdGenericResponsePacket actualExplicit = (FirebirdGenericResponsePacket) new FirebirdSQLInfoExecutor(packet, connectionSession).execute().iterator().next();
+            assertThat(actualExplicit.getStatusVector().getSegments().get(0).getGdsCode(), is(ISCConstants.isc_unprepared_stmt));
+            tracker.recordOtherObject(481);
+            when(packet.getHandle()).thenReturn(0xFFFF);
+            FirebirdGenericResponsePacket actualAfterOtherObject = (FirebirdGenericResponsePacket) new FirebirdSQLInfoExecutor(packet, connectionSession).execute().iterator().next();
+            assertThat(actualAfterOtherObject.getStatusVector().getSegments().get(0).getGdsCode(), is(ISCConstants.isc_bad_req_handle));
+        } finally {
+            FirebirdConnectionResourceManager.getInstance().unregisterConnection(481);
+        }
+    }
+    
+    @Test
     void assertExecute() {
         when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(new ServerPreparedStatementRegistry());
         FirebirdSQLInfoExecutor executor = new FirebirdSQLInfoExecutor(packet, connectionSession);
@@ -123,11 +150,13 @@ class FirebirdSQLInfoExecutorTest {
         when(packet.getInfoItems()).thenReturn(Collections.singletonList(FirebirdSQLInfoPacketType.GET_PLAN));
         when(packet.getMaxLength()).thenReturn(1024);
         SQLStatementContext sqlContext = mock(SQLStatementContext.class, Answers.RETURNS_DEEP_STUBS);
-        SQLStatement sqlStatement = mock(SQLStatement.class);
+        SQLStatement sqlStatement = mock(InsertStatement.class);
         when(sqlContext.getSqlStatement()).thenReturn(sqlStatement);
         when(sqlContext.getTablesContext().getDatabaseNames()).thenReturn(Collections.emptyList());
         ServerPreparedStatementRegistry registry = new ServerPreparedStatementRegistry();
-        registry.addPreparedStatement(1, new FirebirdServerPreparedStatement("SELECT * FROM t WHERE id = ?", sqlContext, new HintValueContext()));
+        FirebirdServerPreparedStatement preparedStatement = new FirebirdServerPreparedStatement("SELECT * FROM t WHERE id = ?", sqlContext, new HintValueContext());
+        preparedStatement.setAffectedRows(3L);
+        registry.addPreparedStatement(1, preparedStatement);
         when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(registry);
         when(connectionSession.getCurrentDatabaseName()).thenReturn("foo_db");
         when(connectionSession.getConnectionContext().getCurrentDatabaseName()).thenReturn(Optional.of("foo_db"));
@@ -161,10 +190,24 @@ class FirebirdSQLInfoExecutorTest {
                                 .thenReturn(new ExecutionContext(mock(QueryContext.class), Arrays.asList(firstUnit, secondUnit, thirdUnit), mock(RouteContext.class))))) {
             FirebirdGenericResponsePacket actual = (FirebirdGenericResponsePacket) new FirebirdSQLInfoExecutor(packet, connectionSession).execute().iterator().next();
             assertThat(((FirebirdSQLInfoReturnPacket) actual.getData()).getExecutionPlan(), is("PLAN (T_0 NATURAL)\nPLAN (T_1 NATURAL)"));
+            FirebirdConnectionObjectTracker tracker = FirebirdConnectionObjectTracker.getInstance();
+            tracker.registerConnection(481);
+            tracker.setLazy(481, true);
+            tracker.recordStatement(481, 1);
+            try {
+                when(connectionSession.getConnectionId()).thenReturn(481);
+                when(packet.getHandle()).thenReturn(0xFFFF);
+                when(packet.getInfoItems()).thenReturn(Arrays.asList(FirebirdSQLInfoPacketType.GET_PLAN, FirebirdSQLInfoPacketType.RECORDS));
+                FirebirdGenericResponsePacket actualLazy = (FirebirdGenericResponsePacket) new FirebirdSQLInfoExecutor(packet, connectionSession).execute().iterator().next();
+                assertThat(((FirebirdSQLInfoReturnPacket) actualLazy.getData()).getExecutionPlan(), is("PLAN (T_0 NATURAL)\nPLAN (T_1 NATURAL)"));
+                assertThat(((FirebirdSQLInfoReturnPacket) actualLazy.getData()).getRecordsInfo().getInsertCount(), is(3L));
+            } finally {
+                FirebirdConnectionResourceManager.getInstance().unregisterConnection(481);
+            }
         }
-        verify(first).close();
-        verify(second).close();
-        verify(third).close();
+        verify(first, times(2)).close();
+        verify(second, times(2)).close();
+        verify(third, times(2)).close();
     }
     
     @Test

@@ -28,6 +28,8 @@ import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.backend.session.ServerPreparedStatementRegistry;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementResourceCleaner;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.fetch.FirebirdFetchStatementCache;
+import org.apache.shardingsphere.proxy.frontend.firebird.resource.FirebirdConnectionObjectTracker;
+import org.apache.shardingsphere.proxy.frontend.firebird.resource.FirebirdConnectionResourceManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,6 +47,7 @@ import java.util.Collection;
 import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -111,6 +114,23 @@ class FirebirdFreeStatementCommandExecutorTest {
         verify(registry, never()).removePreparedStatement(STATEMENT_ID);
         assertNull(FirebirdFetchStatementCache.getInstance().getFetchBackendHandler(CONNECTION_ID, STATEMENT_ID));
         assertNull(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID));
+    }
+    
+    @Test
+    void assertDropLazyStatement() throws Exception {
+        FirebirdConnectionObjectTracker tracker = FirebirdConnectionObjectTracker.getInstance();
+        tracker.registerConnection(CONNECTION_ID);
+        tracker.setLazy(CONNECTION_ID, true);
+        tracker.recordStatement(CONNECTION_ID, STATEMENT_ID);
+        try {
+            when(packet.getStatementId()).thenReturn(0xFFFF);
+            when(packet.getOption()).thenReturn(FirebirdFreeStatementPacket.DROP);
+            new FirebirdFreeStatementCommandExecutor(packet, connectionSession).execute();
+            verify(registry).removePreparedStatement(STATEMENT_ID);
+            assertThat(tracker.resolveStatementHandle(CONNECTION_ID, 0xFFFF), is(0xFFFF));
+        } finally {
+            FirebirdConnectionResourceManager.getInstance().unregisterConnection(CONNECTION_ID);
+        }
     }
     
     @ParameterizedTest(name = "{0}")
