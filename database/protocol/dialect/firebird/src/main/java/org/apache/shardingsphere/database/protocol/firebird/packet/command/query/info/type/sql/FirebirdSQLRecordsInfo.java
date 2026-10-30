@@ -19,6 +19,7 @@ package org.apache.shardingsphere.database.protocol.firebird.packet.command.quer
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 
 /**
  * Affected records info for Firebird isc_info_sql_records response.
@@ -32,4 +33,11 @@ public final class FirebirdSQLRecordsInfo {
     private final long updateCount;
     
     private final long deleteCount;
+    
+    private final long selectCount;
+    
+    @HighFrequencyInvocation
+    public FirebirdSQLRecordsInfo(final long insertCount, final long updateCount, final long deleteCount) {
+        this(insertCount, updateCount, deleteCount, 0L);
+    }
 }

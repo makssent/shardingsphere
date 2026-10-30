@@ -34,6 +34,7 @@ import org.apache.shardingsphere.infra.binder.context.statement.SQLStatementCont
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.apache.shardingsphere.infra.session.query.QueryContext;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
+import org.apache.shardingsphere.proxy.backend.connector.DatabaseProxyConnector;
 import org.apache.shardingsphere.proxy.backend.context.ProxyContext;
 import org.apache.shardingsphere.proxy.backend.handler.ProxyBackendHandler;
 import org.apache.shardingsphere.proxy.backend.handler.ProxyBackendHandlerFactory;
@@ -76,8 +77,12 @@ public final class FirebirdExecuteStatementCommandExecutor implements CommandExe
         try {
             FirebirdServerPreparedStatement preparedStatement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(packet.getStatementId());
             ShardingSpherePreconditions.checkNotNull(preparedStatement, () -> new InvalidStatementHandleException(packet.getStatementId()));
+            preparedStatement.setExecutionRecordCounts(null);
             validateTransactionHandle();
             ResponseHeader responseHeader = executePreparedStatement(preparedStatement, packet.getParameterValues());
+            if (proxyBackendHandler instanceof DatabaseProxyConnector) {
+                ((DatabaseProxyConnector) proxyBackendHandler).getExecutionRecordCounts().ifPresent(preparedStatement::setExecutionRecordCounts);
+            }
             if (responseHeader instanceof QueryResponseHeader) {
                 responseType = ResponseType.QUERY;
                 FirebirdFetchStatementCache.getInstance().registerStatement(connectionSession.getConnectionId(), packet.getStatementId(), proxyBackendHandler);

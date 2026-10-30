@@ -28,6 +28,11 @@
     
     <dependencies>
         <dependency>
+            <groupId>org.firebirdsql.jdbc</groupId>
+            <artifactId>jaybird</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
             <groupId>org.apache.shardingsphere</groupId>
             <artifactId>shardingsphere-proxy-backend-core</artifactId>
             <version>${project.version}</version>
