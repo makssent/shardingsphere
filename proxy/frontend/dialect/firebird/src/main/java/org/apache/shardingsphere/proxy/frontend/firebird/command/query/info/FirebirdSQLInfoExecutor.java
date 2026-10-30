@@ -84,7 +84,7 @@ public final class FirebirdSQLInfoExecutor implements CommandExecutor {
                 return Collections.singleton(FirebirdErrorPacketFactory.newInstance(ex));
             }
         }
-        return Collections.singleton(new FirebirdGenericResponsePacket().setData(new FirebirdSQLInfoReturnPacket(packet.getInfoItems(), getRecordsInfo(handle), plan, packet.getMaxLength())));
+        return Collections.singleton(new FirebirdGenericResponsePacket().setData(new FirebirdSQLInfoReturnPacket(packet.getInfoItems(), getRecordsInfo(statement), plan, packet.getMaxLength())));
     }
     
     @HighFrequencyInvocation
@@ -121,11 +121,7 @@ public final class FirebirdSQLInfoExecutor implements CommandExecutor {
         return String.join("\n", plans);
     }
     
-    private FirebirdSQLRecordsInfo getRecordsInfo(final int handle) {
-        FirebirdServerPreparedStatement preparedStatement = connectionSession.getServerPreparedStatementRegistry().getPreparedStatement(handle);
-        if (null == preparedStatement) {
-            return new FirebirdSQLRecordsInfo(0L, 0L, 0L);
-        }
+    private FirebirdSQLRecordsInfo getRecordsInfo(final FirebirdServerPreparedStatement preparedStatement) {
         long affectedRows = preparedStatement.getAffectedRows();
         SQLStatement sqlStatement = preparedStatement.getSqlStatementContext().getSqlStatement();
         long insertCount = sqlStatement instanceof InsertStatement ? affectedRows : 0L;
