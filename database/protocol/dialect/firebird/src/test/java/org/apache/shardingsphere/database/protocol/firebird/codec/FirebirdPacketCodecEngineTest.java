@@ -24,6 +24,8 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.embedded.EmbeddedChannel;
 import lombok.SneakyThrows;
+import org.apache.shardingsphere.database.protocol.binary.BinaryCell;
+import org.apache.shardingsphere.database.protocol.binary.BinaryRow;
 import org.apache.shardingsphere.database.protocol.codec.PacketCodec;
 import org.apache.shardingsphere.database.protocol.constant.CommonConstants;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdConstant;
@@ -35,6 +37,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchMessageCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchRegistry;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStatement;
+import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdFetchResponsePacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
@@ -46,6 +49,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -56,6 +60,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
@@ -260,6 +265,50 @@ class FirebirdPacketCodecEngineTest {
         codecEngine.encode(context, packet, byteBuf);
         assertThat(byteBuf.getInt(0), is(FirebirdCommandPacketType.RESPONSE.getValue()));
         verify(context, never()).close();
+    }
+    
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void assertEncodeStopsFetchResponseAfterRowError(final boolean endOfRows) {
+        ByteBuf actual = Unpooled.buffer();
+        BinaryRow row = new BinaryRow(Collections.singleton(new BinaryCell(FirebirdBinaryColumnType.TIME_TZ, "invalid")));
+        codecEngine.encode(context, FirebirdFetchResponsePacket.getFetchRowPacket(row), actual);
+        assertThat(actual.getInt(0), is(FirebirdCommandPacketType.RESPONSE.getValue()));
+        actual.clear();
+        codecEngine.encode(context, FirebirdFetchResponsePacket.getFetchRowPacket(row), actual);
+        assertFalse(actual.isReadable());
+        codecEngine.encode(context, endOfRows ? FirebirdFetchResponsePacket.getFetchNoMoreRowsPacket() : FirebirdFetchResponsePacket.getFetchEndPacket(), actual);
+        assertFalse(actual.isReadable());
+        codecEngine.encode(context, FirebirdFetchResponsePacket.getFetchEndPacket(), actual);
+        assertThat(actual.readInt(), is(FirebirdCommandPacketType.FETCH_RESPONSE.getValue()));
+        actual.release();
+    }
+    
+    @Test
+    void assertEncodeContinuesAfterFetchErrorAndAnotherResponse() {
+        ByteBuf actual = Unpooled.buffer();
+        BinaryRow row = new BinaryRow(Collections.singleton(new BinaryCell(FirebirdBinaryColumnType.TIME_TZ, "invalid")));
+        codecEngine.encode(context, FirebirdFetchResponsePacket.getFetchRowPacket(row), actual);
+        actual.clear();
+        codecEngine.encode(context, new FirebirdGenericResponsePacket(), actual);
+        assertThat(actual.readInt(), is(FirebirdCommandPacketType.RESPONSE.getValue()));
+        actual.clear();
+        codecEngine.encode(context, FirebirdFetchResponsePacket.getFetchEndPacket(), actual);
+        assertThat(actual.readInt(), is(FirebirdCommandPacketType.FETCH_RESPONSE.getValue()));
+        actual.release();
+    }
+    
+    @Test
+    void assertEncodeStopsFetchResponseAfterRowAndBackendErrors() {
+        ByteBuf actual = Unpooled.buffer();
+        BinaryRow row = new BinaryRow(Collections.singleton(new BinaryCell(FirebirdBinaryColumnType.TIME_TZ, "invalid")));
+        codecEngine.encode(context, FirebirdFetchResponsePacket.getFetchRowPacket(row), actual);
+        actual.clear();
+        codecEngine.encode(context, new FirebirdGenericResponsePacket().setErrorStatusVector(new SQLException()), actual);
+        assertFalse(actual.isReadable());
+        codecEngine.encode(context, FirebirdFetchResponsePacket.getFetchEndPacket(), actual);
+        assertThat(actual.readInt(), is(FirebirdCommandPacketType.FETCH_RESPONSE.getValue()));
+        actual.release();
     }
     
     @Test

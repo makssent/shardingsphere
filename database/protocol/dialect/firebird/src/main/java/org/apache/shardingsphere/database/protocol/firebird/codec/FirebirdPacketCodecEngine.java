@@ -34,6 +34,8 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdParseBatchBlr;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdAllocateStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFreeStatementPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdFetchResponsePacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 
@@ -55,6 +57,8 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
     private final Map<Integer, List<FirebirdBatchColumnDescriptor>> deferredBatchFormats = new HashMap<>(1, 1F);
     
     private FirebirdCommandPacketType pendingPacketType;
+    
+    private boolean failedFetchResponse;
     
     @Override
     public boolean isValidHeader(final int readableBytes) {
@@ -190,6 +194,17 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
     
     @Override
     public void encode(final ChannelHandlerContext context, final DatabasePacket message, final ByteBuf out) {
+        if (failedFetchResponse && message instanceof FirebirdFetchResponsePacket) {
+            if (0 == ((FirebirdFetchResponsePacket) message).getCount()) {
+                failedFetchResponse = false;
+            }
+            return;
+        }
+        if (failedFetchResponse && message instanceof FirebirdGenericResponsePacket && null != ((FirebirdGenericResponsePacket) message).getStatusVector()) {
+            failedFetchResponse = false;
+            return;
+        }
+        failedFetchResponse = false;
         FirebirdPacketPayload payload = new FirebirdPacketPayload(out, context.channel().attr(CommonConstants.CHARSET_ATTRIBUTE_KEY).get());
         Integer connectionId = context.channel().attr(FirebirdConstant.CURRENT_CONNECTION).get();
         if (null != connectionId) {
@@ -201,6 +216,7 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
         } catch (final RuntimeException ex) {
             // CHECKSTYLE:ON
             out.resetWriterIndex();
+            failedFetchResponse = message instanceof FirebirdFetchResponsePacket && 0 != ((FirebirdFetchResponsePacket) message).getCount();
             FirebirdErrorPacketFactory.newInstance(ex).write(payload);
         }
     }
