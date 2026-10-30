@@ -19,10 +19,12 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.info;
 
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.FirebirdInfoPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoReturnPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLRecordsInfo;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.infra.binder.context.statement.SQLStatementContext;
 import org.apache.shardingsphere.infra.hint.HintValueContext;
+import org.apache.shardingsphere.proxy.backend.connector.records.ExecutionRecordCounts;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.backend.session.ServerPreparedStatementRegistry;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
@@ -85,6 +87,23 @@ class FirebirdSQLInfoExecutorTest {
         assertThat(returnPacket.getRecordsInfo().getInsertCount(), is(expectedInsertCount));
         assertThat(returnPacket.getRecordsInfo().getUpdateCount(), is(expectedUpdateCount));
         assertThat(returnPacket.getRecordsInfo().getDeleteCount(), is(expectedDeleteCount));
+    }
+    
+    @Test
+    void assertExecuteWithPhysicalRecordCounts() {
+        when(packet.getHandle()).thenReturn(1);
+        ServerPreparedStatementRegistry registry = new ServerPreparedStatementRegistry();
+        SQLStatementContext sqlStatementContext = mock(SQLStatementContext.class);
+        FirebirdServerPreparedStatement preparedStatement = new FirebirdServerPreparedStatement("DML", sqlStatementContext, new HintValueContext());
+        preparedStatement.setExecutionRecordCounts(new ExecutionRecordCounts(2L, 3L, 4L));
+        registry.addPreparedStatement(1, preparedStatement);
+        when(connectionSession.getServerPreparedStatementRegistry()).thenReturn(registry);
+        FirebirdGenericResponsePacket response = (FirebirdGenericResponsePacket) new FirebirdSQLInfoExecutor(packet, connectionSession).execute().iterator().next();
+        FirebirdSQLRecordsInfo actual = ((FirebirdSQLInfoReturnPacket) response.getData()).getRecordsInfo();
+        assertThat(actual.getInsertCount(), is(2L));
+        assertThat(actual.getUpdateCount(), is(3L));
+        assertThat(actual.getDeleteCount(), is(0L));
+        assertThat(actual.getSelectCount(), is(4L));
     }
     
     private static Stream<Arguments> sqlStatementProvider() {

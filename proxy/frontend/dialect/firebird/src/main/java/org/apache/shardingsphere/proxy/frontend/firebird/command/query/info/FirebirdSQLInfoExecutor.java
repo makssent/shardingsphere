@@ -54,6 +54,10 @@ public final class FirebirdSQLInfoExecutor implements CommandExecutor {
         if (null == preparedStatement) {
             return new FirebirdSQLRecordsInfo(0L, 0L, 0L);
         }
+        if (null != preparedStatement.getExecutionRecordCounts()) {
+            return new FirebirdSQLRecordsInfo(preparedStatement.getExecutionRecordCounts().getInserted(), preparedStatement.getExecutionRecordCounts().getUpdated(), 0L,
+                    preparedStatement.getExecutionRecordCounts().getSelected());
+        }
         long affectedRows = preparedStatement.getAffectedRows();
         SQLStatement sqlStatement = preparedStatement.getSqlStatementContext().getSqlStatement();
         long insertCount = sqlStatement instanceof InsertStatement ? affectedRows : 0L;

@@ -72,6 +72,7 @@ import org.apache.shardingsphere.parser.rule.SQLParserRule;
 import org.apache.shardingsphere.proxy.backend.connector.jdbc.fixture.QueryHeaderBuilderFixture;
 import org.apache.shardingsphere.proxy.backend.connector.jdbc.statement.JDBCBackendStatement;
 import org.apache.shardingsphere.proxy.backend.connector.jdbc.transaction.ProxyBackendTransactionManager;
+import org.apache.shardingsphere.proxy.backend.connector.records.ExecutionRecordCounts;
 import org.apache.shardingsphere.proxy.backend.context.BackendExecutorContext;
 import org.apache.shardingsphere.proxy.backend.context.ProxyContext;
 import org.apache.shardingsphere.proxy.backend.response.header.ResponseHeader;
@@ -722,6 +723,35 @@ class StandardDatabaseProxyConnectorTest {
             assertThat(mockedDatabaseTypeRegistry.constructed().size(), is(1));
             assertTrue(mockedTransactionManager.constructed().isEmpty());
         }
+    }
+    
+    @Test
+    void assertGetExecutionRecordCountsWithoutAccumulation() {
+        SQLStatementContext sqlStatementContext = createSQLStatementContext(new SQLStatement(databaseType));
+        DatabaseProxyConnector connector = createDatabaseProxyConnector(JDBCDriverType.STATEMENT, createQueryContext(sqlStatementContext, mockDatabase()));
+        assertFalse(connector.getExecutionRecordCounts().isPresent());
+        connector.addExecutionRecordCounts(new ExecutionRecordCounts(1, 2, 3));
+        connector.addExecutionRecordCounts(new ExecutionRecordCounts(4, 5, 6));
+        ExecutionRecordCounts actual = connector.getExecutionRecordCounts().get();
+        assertThat(actual.getInserted(), is(1L));
+        assertThat(actual.getUpdated(), is(2L));
+        assertThat(actual.getSelected(), is(3L));
+    }
+    
+    @Test
+    void assertGetExecutionRecordCountsWithAccumulation() {
+        SQLStatementContext sqlStatementContext = createSQLStatementContext(new SQLStatement(databaseType));
+        DataNodeRuleAttribute attribute = mock(DataNodeRuleAttribute.class);
+        when(attribute.isNeedAccumulate(any(Collection.class))).thenReturn(true);
+        ShardingSphereDatabase database = mockDatabase();
+        when(database.getRuleMetaData().getAttributes(DataNodeRuleAttribute.class)).thenReturn(Collections.singleton(attribute));
+        DatabaseProxyConnector connector = createDatabaseProxyConnector(JDBCDriverType.STATEMENT, createQueryContext(sqlStatementContext, database));
+        connector.addExecutionRecordCounts(new ExecutionRecordCounts(1, 2, 3));
+        connector.addExecutionRecordCounts(new ExecutionRecordCounts(4, 5, 6));
+        ExecutionRecordCounts actual = connector.getExecutionRecordCounts().get();
+        assertThat(actual.getInserted(), is(5L));
+        assertThat(actual.getUpdated(), is(7L));
+        assertThat(actual.getSelected(), is(9L));
     }
     
     private DatabaseProxyConnector createDatabaseProxyConnector(final JDBCDriverType driverType, final QueryContext queryContext) {
