@@ -54,7 +54,6 @@ class FirebirdDatabaseInfoExecutorTest {
     
     @Test
     void assertExecute() {
-        when(packet.getInfoItems()).thenReturn(Collections.emptyList());
         FirebirdDatabaseInfoExecutor executor = new FirebirdDatabaseInfoExecutor(packet, connectionSession);
         Collection<DatabasePacket> actual = executor.execute();
         assertThat(actual.iterator().next(), isA(FirebirdGenericResponsePacket.class));

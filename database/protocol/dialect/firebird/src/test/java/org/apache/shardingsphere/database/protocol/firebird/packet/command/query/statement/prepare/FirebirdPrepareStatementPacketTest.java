@@ -26,7 +26,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
-import org.mockito.internal.configuration.plugins.Plugins;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Arrays;
@@ -92,9 +91,9 @@ class FirebirdPrepareStatementPacketTest {
     }
     
     @Test
-    void assertGetCurrentItem() throws ReflectiveOperationException {
+    void assertGetCurrentItem() {
         FirebirdPrepareStatementPacket packet = createPacket(2, Collections.singletonList(FirebirdSQLInfoPacketType.STMT_TYPE));
-        Plugins.getMemberAccessor().set(FirebirdPrepareStatementPacket.class.getDeclaredField("currentItemIdx"), packet, 0);
+        packet.nextItem();
         assertThat(packet.getCurrentItem(), is(FirebirdSQLInfoPacketType.STMT_TYPE));
     }
     

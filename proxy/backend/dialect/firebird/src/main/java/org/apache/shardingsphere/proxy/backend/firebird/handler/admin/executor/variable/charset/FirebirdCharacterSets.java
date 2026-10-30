@@ -35,7 +35,6 @@ public enum FirebirdCharacterSets {
     
     ASCII(2, () -> StandardCharsets.US_ASCII),
     BIG_5(56, () -> Charset.forName("BIG5")),
-    // CYRL(() -> Charset.forName("CYRL")),
     DOS437(10, () -> Charset.forName("IBM437")),
     DOS737(9, () -> Charset.forName("IBM737")),
     DOS775(15, () -> Charset.forName("IBM775")),
@@ -66,7 +65,6 @@ public enum FirebirdCharacterSets {
     KOI8R(63, () -> Charset.forName("KOI8-R")),
     KOI8U(64, () -> Charset.forName("KOI8-U")),
     KSC_5601(44, () -> Charset.forName("EUC-KR")),
-    // NEXT(() -> Charset.forName("NEXT")),
     
     // default jvm value as described here: https://www.firebirdsql.org/file/documentation/drivers_documentation/java/faq.html#how-can-i-specify-the-connection-character-set
     NONE(0, Charset::defaultCharset),

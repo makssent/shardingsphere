@@ -63,9 +63,8 @@ class FirebirdPrepareStatementReturnPacketTest {
         FirebirdReturnColumnPacket columnPacket = createColumnPacket(Collections.singleton(FirebirdSQLInfoPacketType.ALIAS), "tbl_alias", "col_alias", "owner");
         packet.getDescribeSelect().add(columnPacket);
         packet.getDescribeBind().add(columnPacket);
-        PacketPayload actualPayload = payload;
         when(payload.getCharset()).thenReturn(StandardCharsets.UTF_8);
-        packet.write(actualPayload);
+        packet.write((PacketPayload) payload);
         verify(payload).writeInt1(FirebirdSQLInfoPacketType.STMT_TYPE.getCode());
         verify(payload, times(2)).writeInt1(FirebirdSQLInfoPacketType.ALIAS.getCode());
         verify(payload, times(2)).getCharset();
@@ -75,14 +74,12 @@ class FirebirdPrepareStatementReturnPacketTest {
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("assertWriteWithNullStringMetadataArguments")
-    void assertWriteWithNullStringMetadata(final String name, final FirebirdSQLInfoPacketType requestedItem,
-                                           final String tableAlias, final String columnAlias, final String owner) {
+    void assertWriteWithNullStringMetadata(final String name, final FirebirdSQLInfoPacketType requestedItem, final String tableAlias, final String columnAlias, final String owner) {
         FirebirdPrepareStatementReturnPacket packet =
                 new FirebirdPrepareStatementReturnPacket(Arrays.asList(FirebirdSQLInfoPacketType.STMT_TYPE, FirebirdSQLInfoPacketType.SELECT, FirebirdSQLInfoPacketType.BIND));
         packet.setType(FirebirdSQLInfoReturnValue.SELECT);
         packet.getDescribeSelect().add(createColumnPacket(Collections.singleton(requestedItem), tableAlias, columnAlias, owner));
-        PacketPayload actualPayload = payload;
-        packet.write(actualPayload);
+        packet.write((PacketPayload) payload);
         verify(payload).writeInt1(requestedItem.getCode());
         verify(payload).writeInt2LE(0);
         verify(payload).writeBytes(argThat(each -> 0 == each.length));
@@ -120,8 +117,7 @@ class FirebirdPrepareStatementReturnPacketTest {
         verifyNoMoreInteractions(payload);
     }
     
-    private FirebirdReturnColumnPacket createColumnPacket(final Collection<FirebirdSQLInfoPacketType> requestedItems,
-                                                          final String tableAlias, final String columnAlias, final String owner) {
+    private FirebirdReturnColumnPacket createColumnPacket(final Collection<FirebirdSQLInfoPacketType> requestedItems, final String tableAlias, final String columnAlias, final String owner) {
         ShardingSphereColumn column = new ShardingSphereColumn("col", Types.INTEGER, false, false, false, true, false, true);
         ShardingSphereTable table = new ShardingSphereTable("tbl", Collections.singleton(column), Collections.emptyList(), Collections.emptyList());
         return new FirebirdReturnColumnPacket(requestedItems, 1, table, column, tableAlias, columnAlias, owner, null, false, null);
