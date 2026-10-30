@@ -159,6 +159,46 @@ class FirebirdPacketCodecEngineTest {
     }
     
     @Test
+    void assertDecodeCoalescedExecuteImmediateAndCommit() {
+        byte[] sql = "SET TRANSACTION".getBytes(StandardCharsets.US_ASCII);
+        ByteBuf in = Unpooled.buffer().writeInt(FirebirdCommandPacketType.EXEC_IMMEDIATE.getValue()).writeInt(0).writeInt(0).writeInt(3)
+                .writeInt(sql.length).writeBytes(sql).writeZero((4 - sql.length % 4) % 4).writeInt(0).writeInt(0)
+                .writeInt(FirebirdCommandPacketType.COMMIT.getValue()).writeInt(1);
+        List<Object> out = new LinkedList<>();
+        codecEngine.decode(context, in, out);
+        assertThat(out.size(), is(2));
+        assertThat(((ByteBuf) out.get(0)).readableBytes(), is(44));
+        assertThat(((ByteBuf) out.get(1)).readableBytes(), is(8));
+        assertThat(((ByteBuf) out.get(1)).getInt(0), is(FirebirdCommandPacketType.COMMIT.getValue()));
+        assertNull(getPendingPacketType());
+        assertTrue(getPendingMessages().isEmpty());
+        ((ByteBuf) out.get(0)).release();
+        ((ByteBuf) out.get(1)).release();
+        in.release();
+    }
+    
+    @Test
+    void assertDecodeFragmentedExecuteImmediate() {
+        byte[] sql = "SET TRANSACTION".getBytes(StandardCharsets.US_ASCII);
+        ByteBuf packet = Unpooled.buffer().writeInt(FirebirdCommandPacketType.EXEC_IMMEDIATE.getValue()).writeInt(0).writeInt(0).writeInt(3)
+                .writeInt(sql.length).writeBytes(sql).writeZero((4 - sql.length % 4) % 4).writeInt(0).writeInt(0);
+        ByteBuf first = packet.readRetainedSlice(24);
+        ByteBuf second = packet.readRetainedSlice(packet.readableBytes());
+        List<Object> out = new LinkedList<>();
+        codecEngine.decode(context, first, out);
+        assertTrue(out.isEmpty());
+        codecEngine.decode(context, second, out);
+        assertThat(out.size(), is(1));
+        assertThat(((ByteBuf) out.get(0)).readableBytes(), is(44));
+        assertNull(getPendingPacketType());
+        assertTrue(getPendingMessages().isEmpty());
+        ((ByteBuf) out.get(0)).release();
+        first.release();
+        second.release();
+        packet.release();
+    }
+    
+    @Test
     void assertDecodeWithExpectedLength() {
         ByteBuf in = createCommandPacket(FirebirdCommandPacketType.PREPARE_STATEMENT, 8);
         List<Object> out = new LinkedList<>();

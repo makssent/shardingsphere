@@ -57,6 +57,7 @@ import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cach
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.FirebirdStatementResourceCleaner;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.statement.fetch.FirebirdFetchStatementCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionSessionRegistry;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.SelectStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.UpdateStatement;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExtension;
@@ -89,6 +90,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -135,6 +137,7 @@ class FirebirdExecuteStatementCommandExecutorTest {
         FirebirdTransactionIdGenerator.getInstance().registerConnection(CONNECTION_ID);
         transactionId = FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        FirebirdTransactionSessionRegistry.getInstance().register(connectionSession, transactionId);
         when(packet.getStatementId()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionId()).thenReturn(transactionId);
         ServerPreparedStatementRegistry registry = new ServerPreparedStatementRegistry();
@@ -170,7 +173,7 @@ class FirebirdExecuteStatementCommandExecutorTest {
         FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
         executor = new FirebirdExecuteStatementCommandExecutor(packet, connectionSession);
         assertThrows(InvalidTransactionHandleException.class, executor::execute);
-        verify(connectionSession).finishPreparedStatementCache();
+        verify(connectionSession, never()).finishPreparedStatementCache();
     }
     
     @Test

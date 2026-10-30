@@ -116,6 +116,7 @@ public final class FirebirdTransactionIdGenerator {
      * @param connectionId connection ID
      */
     public void unregisterConnection(final int connectionId) {
+        FirebirdTransactionSessionRegistry.getInstance().unregisterConnection(connectionId);
         connectionRegistry.remove(connectionId);
         activeTransactionRegistry.remove(connectionId);
     }

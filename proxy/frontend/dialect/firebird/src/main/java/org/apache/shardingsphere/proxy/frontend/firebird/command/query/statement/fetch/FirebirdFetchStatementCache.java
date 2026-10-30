@@ -20,7 +20,9 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statemen
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import lombok.SneakyThrows;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.proxy.backend.handler.ProxyBackendHandler;
+import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
@@ -36,6 +38,8 @@ public final class FirebirdFetchStatementCache {
     private static final FirebirdFetchStatementCache INSTANCE = new FirebirdFetchStatementCache();
     
     private final Map<Integer, Map<Integer, ProxyBackendHandler>> statementRegistry = new ConcurrentHashMap<>();
+    
+    private final Map<Integer, Map<Integer, ConnectionSession>> owners = new ConcurrentHashMap<>();
     
     /**
      * Get fetch statement registry instance.
@@ -53,6 +57,7 @@ public final class FirebirdFetchStatementCache {
      */
     public void registerConnection(final int connectionId) {
         statementRegistry.put(connectionId, new LinkedHashMap<>());
+        owners.remove(connectionId);
     }
     
     /**
@@ -67,6 +72,33 @@ public final class FirebirdFetchStatementCache {
         if (null != statements) {
             statements.put(statementId, proxyBackendHandler);
         }
+    }
+    
+    /**
+     * Associate a statement with its transaction session.
+     *
+     * @param connectionId connection ID
+     * @param statementId statement ID
+     * @param owner transaction session
+     */
+    @HighFrequencyInvocation
+    public void registerOwner(final int connectionId, final int statementId, final ConnectionSession owner) {
+        if (statementRegistry.containsKey(connectionId)) {
+            owners.computeIfAbsent(connectionId, ignored -> new LinkedHashMap<>()).put(statementId, owner);
+        }
+    }
+    
+    /**
+     * Get the session that owns a statement's active cursor.
+     *
+     * @param connectionId connection ID
+     * @param statementId statement ID
+     * @return transaction session or null
+     */
+    @HighFrequencyInvocation
+    public ConnectionSession getOwner(final int connectionId, final int statementId) {
+        Map<Integer, ConnectionSession> connectionOwners = owners.get(connectionId);
+        return null == connectionOwners ? null : connectionOwners.get(statementId);
     }
     
     /**
@@ -92,6 +124,31 @@ public final class FirebirdFetchStatementCache {
         if (null != statements) {
             statements.remove(statementId);
         }
+        Map<Integer, ConnectionSession> connectionOwners = owners.get(connectionId);
+        if (null != connectionOwners) {
+            connectionOwners.remove(statementId);
+        }
+    }
+    
+    /**
+     * Forget cursors belonging to a closed transaction session.
+     *
+     * @param connectionId connection ID
+     * @param owner transaction session
+     */
+    @HighFrequencyInvocation
+    public void unregisterOwner(final int connectionId, final ConnectionSession owner) {
+        Map<Integer, ConnectionSession> connectionOwners = owners.get(connectionId);
+        Map<Integer, ProxyBackendHandler> statements = statementRegistry.get(connectionId);
+        if (null != connectionOwners && null != statements) {
+            connectionOwners.entrySet().removeIf(entry -> {
+                if (entry.getValue() != owner) {
+                    return false;
+                }
+                statements.remove(entry.getKey());
+                return true;
+            });
+        }
     }
     
     /**
@@ -101,6 +158,7 @@ public final class FirebirdFetchStatementCache {
      */
     @SneakyThrows(SQLException.class)
     public void unregisterConnection(final int connectionId) {
+        owners.remove(connectionId);
         Map<Integer, ProxyBackendHandler> statements = statementRegistry.remove(connectionId);
         if (null == statements) {
             return;

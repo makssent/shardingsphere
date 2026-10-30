@@ -42,7 +42,8 @@ public final class FirebirdFetchStatementCommandExecutor implements QueryCommand
     private int fetchCount;
     
     public FirebirdFetchStatementCommandExecutor(final FirebirdFetchStatementPacket packet, final ConnectionSession connectionSession) {
-        this.connectionSession = connectionSession;
+        ConnectionSession owner = FirebirdFetchStatementCache.getInstance().getOwner(connectionSession.getConnectionId(), packet.getStatementId());
+        this.connectionSession = null == owner ? connectionSession : owner;
         proxyBackendHandler = FirebirdFetchStatementCache.getInstance().getFetchBackendHandler(connectionSession.getConnectionId(), packet.getStatementId());
         fetchCount = packet.getFetchSize();
     }

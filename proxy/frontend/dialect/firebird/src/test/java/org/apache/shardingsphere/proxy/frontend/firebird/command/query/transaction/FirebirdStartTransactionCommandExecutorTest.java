@@ -17,31 +17,33 @@
 
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction;
 
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.transaction.FirebirdStartTransactionPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
+import org.apache.shardingsphere.proxy.backend.context.ProxyContext;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.sql.parser.statement.core.enums.TransactionIsolationLevel;
+import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExtension;
+import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockSettings;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Answers;
 import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Collection;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.sameInstance;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith(AutoMockExtension.class)
+@StaticMockSettings(ProxyContext.class)
 class FirebirdStartTransactionCommandExecutorTest {
     
     private static final int CONNECTION_ID = 1;
@@ -79,11 +81,12 @@ class FirebirdStartTransactionCommandExecutorTest {
     }
     
     @Test
-    void assertExecuteWithActiveTransactionExpectsExcessTransactions() {
-        FirebirdTransactionIdGenerator.getInstance().nextTransactionId(CONNECTION_ID);
+    void assertExecuteWithActiveTransactionCreatesIndependentSession() {
         FirebirdStartTransactionCommandExecutor executor = new FirebirdStartTransactionCommandExecutor(packet, connectionSession);
-        assertThrows(ExcessTransactionsException.class, executor::execute);
-        assertFalse(FirebirdTransactionIdGenerator.getInstance().isTransactionActive(CONNECTION_ID, 2));
+        executor.execute();
+        FirebirdGenericResponsePacket actualSecond = (FirebirdGenericResponsePacket) executor.execute().iterator().next();
+        assertThat(actualSecond.getHandle(), is(2));
+        assertThat(FirebirdTransactionSessionRegistry.getInstance().get(connectionSession, 2), not(sameInstance(connectionSession)));
     }
     
     @Test

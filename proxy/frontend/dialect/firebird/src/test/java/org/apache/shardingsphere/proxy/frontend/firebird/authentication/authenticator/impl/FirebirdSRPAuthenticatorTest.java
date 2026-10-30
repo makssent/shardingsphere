@@ -63,17 +63,10 @@ class FirebirdSRPAuthenticatorTest {
     }
     
     private static Stream<Arguments> authenticateSuccessArguments() {
-        return Stream.of(
-                Arguments.of("hex_text_with_leading_zeros", "000A69"),
-                Arguments.of("hex_text_without_leading_zeros", "A69"),
-                Arguments.of("lowercase_hex_text", "a69"));
+        return Stream.of(Arguments.of("hex_text_with_leading_zeros", "000A69"), Arguments.of("hex_text_without_leading_zeros", "A69"), Arguments.of("lowercase_hex_text", "a69"));
     }
     
     private static Stream<Arguments> authenticateFailureArguments() {
-        return Stream.of(
-                Arguments.of("different_number", "A6A"),
-                Arguments.of("non_hex_text", "wrong"),
-                Arguments.of("empty_text", ""),
-                Arguments.of("absent_proof", null));
+        return Stream.of(Arguments.of("different_number", "A6A"), Arguments.of("non_hex_text", "wrong"), Arguments.of("empty_text", ""), Arguments.of("absent_proof", null));
     }
 }
