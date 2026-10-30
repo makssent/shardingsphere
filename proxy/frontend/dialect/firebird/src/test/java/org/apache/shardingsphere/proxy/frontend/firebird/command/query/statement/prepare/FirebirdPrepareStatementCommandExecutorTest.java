@@ -87,7 +87,9 @@ import java.sql.Types;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.stream.Stream;
@@ -315,6 +317,38 @@ class FirebirdPrepareStatementCommandExecutorTest {
         verify(payload).writeInt4LE(63);
         verify(connection, never()).close();
         assertTrue(FirebirdNonFixedLengthColumnSizeRegistry.isSystemTablesRefreshed("foo_db"));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("systemTableStorageUnitArguments")
+    void assertDescribeSystemTableUsingHintedStorageUnit(final String name, final String hintName, final String selectedName, final String unusedName) throws Exception {
+        ShardingSphereDatabase database = ProxyContext.getInstance().getContextManager().getDatabase("foo_db");
+        addSystemSchema(database);
+        Map<String, StorageUnit> storageUnits = new LinkedHashMap<>(2, 1F);
+        storageUnits.put("first_ds", mock(StorageUnit.class));
+        storageUnits.put("selected_ds", mock(StorageUnit.class));
+        ResourceMetaData resourceMetaData = mock(ResourceMetaData.class);
+        when(resourceMetaData.getStorageUnits()).thenReturn(storageUnits);
+        doReturn(resourceMetaData).when(database).getResourceMetaData();
+        Connection connection = mock(Connection.class, RETURNS_DEEP_STUBS);
+        when(connectionManager.getConnections("foo_db", selectedName, 0, 1, ConnectionMode.CONNECTION_STRICTLY)).thenReturn(Collections.singletonList(connection));
+        HintValueContext hint = new HintValueContext();
+        hint.setDataSourceName(hintName);
+        when(packet.getHintValueContext()).thenReturn(hint);
+        when(packet.getSQL()).thenReturn("SELECT RDB$RELATION_ID FROM RDB$DATABASE");
+        mockDescribeRequest(FirebirdSQLInfoPacketType.SELECT);
+        FirebirdPrepareStatementReturnPacket actual = executeAndGetReturnPacket();
+        assertThat(actual.getDescribeSelect().size(), is(1));
+        verify(connectionManager).getConnections("foo_db", selectedName, 0, 1, ConnectionMode.CONNECTION_STRICTLY);
+        verify(connectionManager, never()).getConnections("foo_db", unusedName, 0, 1, ConnectionMode.CONNECTION_STRICTLY);
+        verify(connection, never()).close();
+    }
+    
+    private static Stream<Arguments> systemTableStorageUnitArguments() {
+        return Stream.of(
+                Arguments.of("Selected storage unit", "selected_ds", "selected_ds", "first_ds"),
+                Arguments.of("Unknown storage unit", "unknown_ds", "first_ds", "selected_ds"),
+                Arguments.of("No storage unit hint", "", "first_ds", "selected_ds"));
     }
     
     @Test

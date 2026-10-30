@@ -362,7 +362,8 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
     }
     
     private void refreshSystemTableColumnSizes(final ShardingSphereDatabase database) throws SQLException {
-        String storageUnitName = database.getResourceMetaData().getStorageUnits().keySet().iterator().next();
+        String storageUnitName = packet.getHintValueContext().findHintDataSourceName().filter(database.getResourceMetaData().getStorageUnits()::containsKey)
+                .orElseGet(() -> database.getResourceMetaData().getStorageUnits().keySet().iterator().next());
         Connection connection = connectionSession.getDatabaseConnectionManager().getConnections(database.getName(), storageUnitName, 0, 1, ConnectionMode.CONNECTION_STRICTLY).iterator().next();
         FirebirdNonFixedLengthColumnSizeRegistry.refreshSystemTables(database.getName(), new FirebirdSystemTableColumnSizeLoader(connection).load());
     }
