@@ -68,6 +68,9 @@ public final class FirebirdServerPreparedStatement implements ServerPreparedStat
     }
     
     private boolean hasReturningCursor(final SQLStatement statement) {
+        if (statement instanceof ExecuteStatement) {
+            return ((ExecuteStatement) statement).isReturnsRows();
+        }
         if (statement instanceof InsertStatement) {
             return ((InsertStatement) statement).getInsertSelect().isPresent() && ((InsertStatement) statement).getReturning().isPresent();
         }

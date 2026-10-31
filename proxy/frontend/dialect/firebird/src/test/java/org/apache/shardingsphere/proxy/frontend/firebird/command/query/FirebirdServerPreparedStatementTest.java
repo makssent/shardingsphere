@@ -66,6 +66,8 @@ class FirebirdServerPreparedStatementTest {
         when(updateReturning.getReturning()).thenReturn(Optional.of(mock(ReturningSegment.class)));
         DeleteStatement deleteReturning = mock(DeleteStatement.class);
         when(deleteReturning.getReturning()).thenReturn(Optional.of(mock(ReturningSegment.class)));
+        ExecuteStatement executeBlockReturning = mock(ExecuteStatement.class);
+        when(executeBlockReturning.isReturnsRows()).thenReturn(true);
         return Stream.of(
                 Arguments.of("select", mock(SelectStatement.class), 3),
                 Arguments.of("ddl", mock(DDLStatement.class), 0),
@@ -74,6 +76,7 @@ class FirebirdServerPreparedStatementTest {
                 Arguments.of("create_role", mock(CreateRoleStatement.class), 0),
                 Arguments.of("create_user", mock(CreateUserStatement.class), 0),
                 Arguments.of("execute_procedure", mock(ExecuteStatement.class), 2),
+                Arguments.of("execute_block_returning", executeBlockReturning, 3),
                 Arguments.of("insert", mock(InsertStatement.class), 2),
                 Arguments.of("insert_select", insertSelect, 2),
                 Arguments.of("insert_select_returning", insertSelectReturning, 3),
