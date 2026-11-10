@@ -29,6 +29,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.StringTruncationException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.TransliterationFailedException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnsupportedBlobFilterException;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchColumnDescriptor;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdParseBatchBlr;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdReturnColumnPacket;
@@ -78,6 +79,12 @@ class FirebirdBlobParameterConverterTest {
     }
     
     @ParameterizedTest(name = "{0}")
+    @MethodSource("backendConversionArguments")
+    void assertIsBackendConversion(final String name, final FirebirdReturnColumnPacket parameter, final boolean expected) {
+        assertThat(new FirebirdBlobParameterConverter(UTF8).isBackendConversion(parameter), is(expected));
+    }
+    
+    @ParameterizedTest(name = "{0}")
     @MethodSource("textBlobArguments")
     void assertConvertToTextBlob(final String name, final FirebirdBatchColumnDescriptor field, final byte[] content, final int connectionCharsetId, final Object expected) {
         assertThat(new FirebirdBlobParameterConverter(connectionCharsetId).convert(content, field, createBlobParameter(1)), is(expected));
@@ -116,6 +123,38 @@ class FirebirdBlobParameterConverterTest {
     @Test
     void assertConvertToOtherType() {
         assertThat(new FirebirdBlobParameterConverter(UTF8).convert("1.5e1".getBytes(StandardCharsets.US_ASCII), createField(1, UTF8), createParameter(Types.DOUBLE, null)), is("1.5e1"));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("numericBlobArguments")
+    void assertConvertNumericBlob(final String name, final int jdbcType, final FirebirdBinaryColumnType physicalType, final String value, final String expected) {
+        assertThat(new FirebirdBlobParameterConverter(UTF8).convert(value.getBytes(StandardCharsets.US_ASCII), createField(1, UTF8), createNumericParameter(jdbcType, physicalType)), is(expected));
+    }
+    
+    private static Stream<Arguments> numericBlobArguments() {
+        return Stream.of(Arguments.of("spaces", Types.NUMERIC, FirebirdBinaryColumnType.INT64, "  -12.34  ", "-12.34"),
+                Arguments.of("invalid_mantissa", Types.NUMERIC, FirebirdBinaryColumnType.INT64, "bad1e9999", "bad1e9999"),
+                Arguments.of("missing_mantissa", Types.DECIMAL, FirebirdBinaryColumnType.INT64, "e9999", "e9999"),
+                Arguments.of("repeated_point", Types.NUMERIC, FirebirdBinaryColumnType.INT64, "1.2.3e9999", "1.2.3e9999"),
+                Arguments.of("hex", Types.DECIMAL, FirebirdBinaryColumnType.INT64, "0x10", "16"),
+                Arguments.of("hex_32_in_64", Types.NUMERIC, FirebirdBinaryColumnType.INT64, "0xFFFFFFFF", "4294967295"),
+                Arguments.of("hex_64_signed", Types.NUMERIC, FirebirdBinaryColumnType.INT64, "0xFFFFFFFFFFFFFFFF", "-1"),
+                Arguments.of("hex_16_signed", Types.NUMERIC, FirebirdBinaryColumnType.SHORT, "0xFFFF", "-1"),
+                Arguments.of("hex_64_in_128", Types.NUMERIC, FirebirdBinaryColumnType.INT128, "0xFFFFFFFFFFFFFFFF", "18446744073709551615"),
+                Arguments.of("hex_128_signed", Types.NUMERIC, FirebirdBinaryColumnType.INT128, "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", "-1"),
+                Arguments.of("hex_128_min", Types.NUMERIC, FirebirdBinaryColumnType.INT128, "0x80000000000000000000000000000000", "-170141183460469231731687303715884105728"));
+    }
+    
+    @Test
+    void assertConvertNumericHexWithUnknownPhysicalType() {
+        String content = "0xFFFFFFFFFFFFFFFF";
+        assertThat(new FirebirdBlobParameterConverter(UTF8).convert(content.getBytes(StandardCharsets.US_ASCII), createField(1, UTF8), createParameter(Types.NUMERIC, null)), is(content));
+    }
+    
+    private static FirebirdReturnColumnPacket createNumericParameter(final int jdbcType, final FirebirdBinaryColumnType physicalType) {
+        FirebirdReturnColumnPacket result = createParameter(jdbcType, null);
+        result.setWireNumericType(physicalType, Types.NUMERIC == jdbcType ? 1 : 2, -2);
+        return result;
     }
     
     @ParameterizedTest(name = "{0}")
@@ -160,6 +199,13 @@ class FirebirdBlobParameterConverterTest {
                 Arguments.of("text_blob_without_connection_charset", createField(1, WIN1251), createBlobParameter(1), NONE),
                 Arguments.of("untyped_blob", createField(0, NONE), createBlobParameter(1), UTF8),
                 Arguments.of("binary_blob_parameter", createField(1, WIN1251), createBlobParameter(0), UTF8));
+    }
+    
+    private static Stream<Arguments> backendConversionArguments() {
+        return Stream.of(Arguments.of("numeric", createParameter(Types.NUMERIC, null), true), Arguments.of("decimal", createParameter(Types.DECIMAL, null), true),
+                Arguments.of("double", createParameter(Types.DOUBLE, null), true), Arguments.of("date", createParameter(Types.DATE, null), true),
+                Arguments.of("integer", createParameter(Types.INTEGER, null), false), Arguments.of("text", createParameter(Types.VARCHAR, 20), false),
+                Arguments.of("blob", createBlobParameter(1), false));
     }
     
     private static FirebirdReturnColumnPacket createBlobParameter(final int subType) {
@@ -218,6 +264,12 @@ class FirebirdBlobParameterConverterTest {
                 Arguments.of("blob_internal_filter", createField(2, NONE), new byte[]{1}, createBlobParameter(1), UTF8, UnsupportedBlobFilterException.class),
                 Arguments.of("blob_missing_filter", createField(99, NONE), new byte[]{1}, createBlobParameter(1), UTF8, BlobFilterNotFoundException.class),
                 Arguments.of("blob_missing_reverse_filter", createField(1, NONE), new byte[]{1}, createBlobParameter(2), UTF8, BlobFilterNotFoundException.class),
+                Arguments.of("numeric_hex_too_long", createField(1, UTF8), "0x0FFFFFFFFFFFFFFFF".getBytes(StandardCharsets.US_ASCII),
+                        createNumericParameter(Types.NUMERIC, FirebirdBinaryColumnType.INT64), UTF8, ConversionErrorException.class),
+                Arguments.of("numeric_128_hex_too_long", createField(1, UTF8), "0x000000000000000000000000000000001".getBytes(StandardCharsets.US_ASCII),
+                        createNumericParameter(Types.NUMERIC, FirebirdBinaryColumnType.INT128), UTF8, ConversionErrorException.class),
+                Arguments.of("numeric_exponent_overflow", createField(1, UTF8), "1e9999999999".getBytes(StandardCharsets.US_ASCII),
+                        createNumericParameter(Types.NUMERIC, FirebirdBinaryColumnType.INT64), UTF8, NumericOutOfRangeException.class),
                 Arguments.of("integer_overflow", createField(1, UTF8), "2147483648".getBytes(StandardCharsets.US_ASCII), createParameter(Types.INTEGER, null), UTF8, NumericOutOfRangeException.class),
                 Arguments.of("fraction_overflow", createField(1, UTF8), "1.23456789012".getBytes(StandardCharsets.US_ASCII), createParameter(Types.INTEGER, null), UTF8,
                         NumericOutOfRangeException.class),

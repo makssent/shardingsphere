@@ -18,6 +18,10 @@
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch;
 
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.database.exception.core.exception.SQLDialectException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ConversionErrorException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.NumericOutOfRangeException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
 import org.apache.shardingsphere.infra.binder.context.statement.type.dml.InsertStatementContext;
 import org.apache.shardingsphere.infra.config.props.ConfigurationProperties;
 import org.apache.shardingsphere.infra.connection.kernel.KernelProcessor;
@@ -53,6 +57,8 @@ import org.apache.shardingsphere.sqltranslator.rule.SQLTranslatorRule;
 import org.apache.shardingsphere.sqltranslator.rule.builder.DefaultSQLTranslatorRuleConfigurationBuilder;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExtension;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockSettings;
+import org.firebirdsql.jdbc.field.TypeConversionException;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -67,6 +73,7 @@ import org.mockito.quality.Strictness;
 
 import java.sql.BatchUpdateException;
 import java.sql.Connection;
+import java.sql.ParameterMetaData;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
@@ -83,12 +90,15 @@ import java.util.stream.Stream;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.isA;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
@@ -137,6 +147,76 @@ class FirebirdBatchedStatementsExecutorTest {
         }
         inOrder.verify(preparedStatement).executeBatch();
         inOrder.verify(preparedStatement).close();
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("backendConversionFailureArguments")
+    void assertMultiErrorExecutesPreviousMessageBeforeBackendConversionFailure(final String name, final String first, final String failure, final String third, final int jdbcType,
+                                                                               @Nullable final Throwable cause, final Class<? extends SQLDialectException> expectedErrorType) throws SQLException {
+        PreparedStatement statement = mockSameRoutePreparedStatement();
+        when(statement.executeBatch()).thenReturn(new int[]{1});
+        ParameterMetaData parameterMetaData = mock(ParameterMetaData.class);
+        when(statement.getParameterMetaData()).thenReturn(parameterMetaData);
+        when(parameterMetaData.getParameterType(2)).thenReturn(jdbcType);
+        doThrow(new TypeConversionException("invalid value", cause)).when(statement).setObject(2, failure);
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        List<List<Object>> params = Arrays.asList(Arrays.asList(1, first), Arrays.asList(2, failure), Arrays.asList(3, third));
+        FirebirdBatchedStatementsExecutor executor = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, true, Collections.emptyMap(), true);
+        ParameterConversionException actual = assertThrows(ParameterConversionException.class, executor::executeBatch);
+        assertThat(actual.getConversionError(), isA(expectedErrorType));
+        if (actual.getConversionError() instanceof ConversionErrorException) {
+            assertThat(((ConversionErrorException) actual.getConversionError()).getValue(), is(failure));
+        }
+        InOrder inOrder = inOrder(statement);
+        inOrder.verify(statement).setObject(1, 1);
+        inOrder.verify(statement).setObject(2, first);
+        inOrder.verify(statement).addBatch();
+        inOrder.verify(statement).setObject(1, 2);
+        inOrder.verify(statement).setObject(2, failure);
+        inOrder.verify(statement).executeBatch();
+        verify(statement, never()).setObject(1, 3);
+    }
+    
+    @Test
+    void assertMultiErrorBatchesValidBackendConversions() throws SQLException {
+        PreparedStatement statement = mockSameRoutePreparedStatement();
+        when(statement.executeBatch()).thenReturn(new int[]{1, 1, 1});
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        List<List<Object>> params = Arrays.asList(Arrays.asList(1, "10"), Arrays.asList(2, "15"), Arrays.asList(3, "20"));
+        FirebirdBatchedStatementsExecutor executor = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, true, Collections.emptyMap(), true);
+        FirebirdBatchCompletion actual = executor.executeBatch();
+        assertThat(actual.getUpdateCounts(), is(new int[]{1, 1, 1}));
+        verify(statement, times(3)).addBatch();
+        verify(statement).executeBatch();
+    }
+    
+    @Test
+    void assertMultiErrorRetriesFailedPrefixBeforeBackendConversionFailure() throws SQLException {
+        PreparedStatement statement = mockSameRoutePreparedStatement();
+        when(statement.executeBatch()).thenThrow(createFailure(new int[]{1})).thenReturn(new int[]{1});
+        doThrow(new TypeConversionException("invalid value", new NumberFormatException())).when(statement).setObject(2, "bad");
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        List<List<Object>> params = Arrays.asList(Arrays.asList(1, "10"), Arrays.asList(2, "11"), Arrays.asList(3, "12"), Arrays.asList(4, "bad"), Arrays.asList(5, "20"));
+        FirebirdBatchedStatementsExecutor executor = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, true, Collections.emptyMap(), true);
+        assertThrows(ParameterConversionException.class, executor::executeBatch);
+        verify(statement, times(2)).executeBatch();
+        verify(statement, times(2)).setObject(1, 3);
+        verify(statement, never()).setObject(1, 5);
+    }
+    
+    private static Stream<Arguments> backendConversionFailureArguments() {
+        return Stream.of(Arguments.of("invalid_numeric", "10", "bad", "20", Types.NUMERIC, new NumberFormatException(), ConversionErrorException.class),
+                Arguments.of("numeric_invalid_mantissa", "10", "bad1e9999", "20", Types.NUMERIC, new NumberFormatException(), ConversionErrorException.class),
+                Arguments.of("decimal_missing_mantissa", "10", "e9999", "20", Types.DECIMAL, new NumberFormatException(), ConversionErrorException.class),
+                Arguments.of("numeric_overflow", "10", "999999999999999999999999", "20", Types.NUMERIC, null, NumericOutOfRangeException.class),
+                Arguments.of("decimal_overflow", "10", "999999999999999999999999", "20", Types.DECIMAL, null, NumericOutOfRangeException.class),
+                Arguments.of("invalid_date", "2001-01-01", "bad", "2001-01-02", Types.DATE, new IllegalArgumentException(), ConversionErrorException.class));
     }
     
     @ParameterizedTest(name = "{0}")

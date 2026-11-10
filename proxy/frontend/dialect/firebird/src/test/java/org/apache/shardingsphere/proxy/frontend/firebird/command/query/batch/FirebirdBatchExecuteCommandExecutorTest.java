@@ -927,6 +927,21 @@ class FirebirdBatchExecuteCommandExecutorTest {
     }
     
     @Test
+    void assertExecuteWithBackendConvertedBlobParametersPreservesMessageOrder() throws SQLException {
+        mockBlobParameterBatch(Collections.singletonList(Collections.singletonList(10L)), Collections.singletonList(createParameterColumn(Types.NUMERIC, null)));
+        when(blobWriteCache.useBlobData(CONNECTION_ID, 10L, transactionId)).thenReturn(Optional.of("10".getBytes(StandardCharsets.US_ASCII)));
+        List<Object> actualOrderFlags = new ArrayList<>(1);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualOrderFlags.add(context.arguments().get(5));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
+        })) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
+            new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
+        }
+        assertThat(actualOrderFlags, is(Collections.singletonList(true)));
+    }
+    
+    @Test
     @SuppressWarnings("unchecked")
     void assertExecuteWithSameCharsetTextBlobRetainsOriginalBytes() throws SQLException {
         ShardingSphereTable table = new ShardingSphereTable("foo_tbl", Collections.emptyList(), Collections.emptyList(), Collections.emptyList());

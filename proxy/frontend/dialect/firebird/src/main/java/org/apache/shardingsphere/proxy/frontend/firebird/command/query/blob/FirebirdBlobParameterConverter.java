@@ -34,6 +34,7 @@ import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.firebirdsql.gds.ISCConstants;
 
 import java.io.ByteArrayOutputStream;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
@@ -135,7 +136,76 @@ public final class FirebirdBlobParameterConverter {
             return toText(content, field, parameter);
         }
         String result = new String(readText(content, field, CHARSET_ASCII), StandardCharsets.ISO_8859_1);
+        if (FirebirdBinaryColumnType.NUMERIC == type || FirebirdBinaryColumnType.DECIMAL == type) {
+            return normalizeNumeric(result, parameter);
+        }
         return isInteger(type) ? toInteger(result, type) : result;
+    }
+    
+    private String normalizeNumeric(final String value, final FirebirdReturnColumnPacket parameter) {
+        int start = 0;
+        while (start < value.length() && ' ' == value.charAt(start)) {
+            start++;
+        }
+        int end = value.length();
+        while (end > start && ' ' == value.charAt(end - 1)) {
+            end--;
+        }
+        if (start + 2 < value.length() && '0' == value.charAt(start) && 'X' == Character.toUpperCase(value.charAt(start + 1))) {
+            Optional<FirebirdBinaryColumnType> physicalType = parameter.findWireNumericType();
+            if (!physicalType.isPresent()) {
+                return value;
+            }
+            int bits = physicalType.get().getLength() * Byte.SIZE;
+            return 128 == bits ? normalizeInt128Hex(value, start + 2) : normalizeIntegerHex(value, bits);
+        }
+        for (int i = start; i < end; i++) {
+            if (isExponent(value.charAt(i))) {
+                if (hasNumericMantissa(value, start, i)) {
+                    toExponent(value, i + 1);
+                }
+                break;
+            }
+        }
+        return value.substring(start, end);
+    }
+    
+    private boolean hasNumericMantissa(final String value, final int start, final int end) {
+        boolean digitSeen = false;
+        boolean fraction = false;
+        for (int i = start; i < end; i++) {
+            char each = value.charAt(i);
+            if (each >= '0' && each <= '9') {
+                digitSeen = true;
+            } else if ('.' == each && !fraction) {
+                fraction = true;
+            } else if (i != start || '+' != each && '-' != each) {
+                return false;
+            }
+        }
+        return digitSeen;
+    }
+    
+    private String normalizeIntegerHex(final String value, final int bits) {
+        long result = toLong(value, bits);
+        if (Short.SIZE == bits) {
+            return String.valueOf((short) result);
+        }
+        return Integer.SIZE == bits ? String.valueOf((int) result) : String.valueOf(result);
+    }
+    
+    private String normalizeInt128Hex(final String value, final int start) {
+        int end = start;
+        while (end < value.length() && '\0' != value.charAt(end) && ' ' != value.charAt(end)) {
+            end++;
+        }
+        ShardingSpherePreconditions.checkState(isSpacesToEnd(value, end) && (value.length() - start) * 4L <= 128, () -> createConversionError(value));
+        for (int i = start; i < end; i++) {
+            char each = value.charAt(i);
+            ShardingSpherePreconditions.checkState(each < 128 && Character.digit(each, 16) >= 0, () -> createConversionError(value));
+        }
+        BigInteger result = end == start ? BigInteger.ZERO : new BigInteger(value.substring(start, end), 16);
+        return (result.testBit(127) ? result.subtract(BigInteger.ONE.shiftLeft(128)) : result).toString();
     }
     
     /**
@@ -166,6 +236,17 @@ public final class FirebirdBlobParameterConverter {
     
     private boolean isText(final FirebirdBinaryColumnType type) {
         return FirebirdBinaryColumnType.TEXT == type || FirebirdBinaryColumnType.VARYING == type || FirebirdBinaryColumnType.LEGACY_TEXT == type || FirebirdBinaryColumnType.LEGACY_VARYING == type;
+    }
+    
+    /**
+     * Judge whether conversion of a BLOB parameter is deferred to the backend.
+     *
+     * @param parameter statement parameter
+     * @return whether the backend performs the conversion
+     */
+    public boolean isBackendConversion(final FirebirdReturnColumnPacket parameter) {
+        FirebirdBinaryColumnType type = parameter.getColumnType();
+        return FirebirdBinaryColumnType.BLOB != type && !isText(type) && !isInteger(type);
     }
     
     private Object toText(final byte[] content, final FirebirdBatchColumnDescriptor field, final FirebirdReturnColumnPacket parameter) {
@@ -245,7 +326,13 @@ public final class FirebirdBlobParameterConverter {
         return true;
     }
     
-    private ConversionErrorException createConversionError(final String value) {
+    /**
+     * Create the Firebird conversion error for a text value.
+     *
+     * @param value original text value
+     * @return conversion error
+     */
+    public static ConversionErrorException createConversionError(final String value) {
         StringBuilder result = new StringBuilder(value.length());
         for (int i = 0; i < value.length(); i++) {
             char each = value.charAt(i);

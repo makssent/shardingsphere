@@ -22,6 +22,8 @@ import lombok.RequiredArgsConstructor;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNode;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.NumericOutOfRangeException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.binder.context.aware.ParameterAware;
 import org.apache.shardingsphere.infra.binder.context.statement.SQLStatementContext;
@@ -55,15 +57,19 @@ import org.apache.shardingsphere.proxy.backend.context.BackendExecutorContext;
 import org.apache.shardingsphere.proxy.backend.context.ProxyContext;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdBlobParameterConverter;
 import org.apache.shardingsphere.sql.parser.engine.core.database.parser.SQLParserExecutor;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
 import org.firebirdsql.encodings.EncodingFactory;
+import org.firebirdsql.jdbc.field.TypeConversionException;
 
+import java.math.BigDecimal;
 import java.sql.BatchUpdateException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -114,6 +120,8 @@ public final class FirebirdBatchedStatementsExecutor {
     
     private final boolean multiError;
     
+    private final boolean preserveMessageOrder;
+    
     private final Map<String, RawTextBlob> rawTextBlobs;
     
     private final ExecutionContext anyExecutionContext;
@@ -127,8 +135,14 @@ public final class FirebirdBatchedStatementsExecutor {
     
     FirebirdBatchedStatementsExecutor(final ConnectionSession connectionSession, final FirebirdServerPreparedStatement preparedStatement, final List<List<Object>> parameterSets,
                                       final boolean multiError, final Map<String, RawTextBlob> rawTextBlobs) {
+        this(connectionSession, preparedStatement, parameterSets, multiError, rawTextBlobs, false);
+    }
+    
+    FirebirdBatchedStatementsExecutor(final ConnectionSession connectionSession, final FirebirdServerPreparedStatement preparedStatement, final List<List<Object>> parameterSets,
+                                      final boolean multiError, final Map<String, RawTextBlob> rawTextBlobs, final boolean preserveMessageOrder) {
         jdbcExecutor = new JDBCExecutor(BackendExecutorContext.getInstance().getExecutorEngine(), connectionSession.getConnectionContext());
         this.multiError = multiError;
+        this.preserveMessageOrder = preserveMessageOrder;
         this.rawTextBlobs = rawTextBlobs;
         this.connectionSession = connectionSession;
         metaDataContexts = ProxyContext.getInstance().getContextManager().getMetaDataContexts();
@@ -288,18 +302,59 @@ public final class FirebirdBatchedStatementsExecutor {
         PreparedStatement preparedStatement = (PreparedStatement) batchExecution.executionUnit.getStorageResource();
         List<List<Object>> params = getBatchParams(batchExecution);
         pendingBatchParams.put(preparedStatement, params);
-        addBatchedParameters(preparedStatement, params);
+        if (!preserveMessageOrder) {
+            addBatchedParameters(preparedStatement, params);
+            return;
+        }
+        int addedCount = 0;
+        try {
+            for (List<Object> each : params) {
+                addBatchedParameter(preparedStatement, each);
+                addedCount++;
+            }
+        } catch (final ParameterConversionException ex) {
+            pendingBatchParams.put(preparedStatement, params.subList(0, addedCount));
+            throw ex;
+        }
     }
     
     private void addBatchedParameters(final PreparedStatement preparedStatement, final List<List<Object>> params) throws SQLException {
         for (List<Object> eachGroupParam : params) {
-            ListIterator<Object> eachParams = eachGroupParam.listIterator();
-            while (eachParams.hasNext()) {
-                int paramIndex = eachParams.nextIndex() + 1;
-                Object value = eachParams.next();
+            addBatchedParameter(preparedStatement, eachGroupParam);
+        }
+    }
+    
+    private void addBatchedParameter(final PreparedStatement preparedStatement, final List<Object> params) throws SQLException {
+        ListIterator<Object> eachParams = params.listIterator();
+        while (eachParams.hasNext()) {
+            int paramIndex = eachParams.nextIndex() + 1;
+            Object value = eachParams.next();
+            try {
                 preparedStatement.setObject(paramIndex, value);
+            } catch (final TypeConversionException ex) {
+                if (preserveMessageOrder && value instanceof String) {
+                    throw createParameterConversionException(preparedStatement, paramIndex, (String) value, ex);
+                }
+                throw ex;
             }
-            preparedStatement.addBatch();
+        }
+        preparedStatement.addBatch();
+    }
+    
+    private ParameterConversionException createParameterConversionException(final PreparedStatement statement, final int index, final String value, final TypeConversionException cause) {
+        if (null == cause.getCause() && isNumericOutOfRange(statement, index, value)) {
+            return new ParameterConversionException(new NumericOutOfRangeException());
+        }
+        return new ParameterConversionException(FirebirdBlobParameterConverter.createConversionError(value));
+    }
+    
+    private boolean isNumericOutOfRange(final PreparedStatement statement, final int index, final String value) {
+        try {
+            new BigDecimal(value.trim());
+            int type = statement.getParameterMetaData().getParameterType(index);
+            return Types.NUMERIC == type || Types.DECIMAL == type;
+        } catch (final NumberFormatException | SQLException ignored) {
+            return false;
         }
     }
     
@@ -333,7 +388,15 @@ public final class FirebirdBatchedStatementsExecutor {
     private List<BatchExecutionUnitResult> executeInBatchMessageOrder(final List<BatchExecution> batchExecutions, final JDBCExecutorCallback<BatchExecutionUnitResult> callback) throws SQLException {
         List<BatchExecutionUnitResult> result = new LinkedList<>();
         for (BatchExecution each : batchExecutions) {
-            addPendingBatch(each);
+            try {
+                addPendingBatch(each);
+            } catch (final ParameterConversionException ex) {
+                PreparedStatement statement = (PreparedStatement) each.executionUnit.getStorageResource();
+                if (!pendingBatchParams.get(statement).isEmpty()) {
+                    jdbcExecutor.execute(createSingleUnitExecutionGroupContext(each.executionUnit), callback);
+                }
+                throw ex;
+            }
             List<BatchExecutionUnitResult> executeResults = jdbcExecutor.execute(createSingleUnitExecutionGroupContext(each.executionUnit), callback);
             result.addAll(executeResults);
             if (!multiError && hasFailures(executeResults)) {
@@ -438,7 +501,7 @@ public final class FirebirdBatchedStatementsExecutor {
     }
     
     private boolean useMessageOrder() {
-        if (!multiError) {
+        if (!multiError || preserveMessageOrder) {
             return true;
         }
         if (textBlobSqlVariants.isEmpty()) {

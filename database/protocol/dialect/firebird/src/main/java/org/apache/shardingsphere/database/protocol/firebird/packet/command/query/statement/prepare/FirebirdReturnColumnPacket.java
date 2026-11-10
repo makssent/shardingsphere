@@ -75,6 +75,7 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
         wireColumnType = columnType;
         wireSubType = subType;
         wireScale = scale;
+        wireLength = null;
     }
     
     /**
@@ -87,7 +88,17 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
     public void setWireTextType(final FirebirdBinaryColumnType columnType, final int characterSetId, final int length) {
         wireColumnType = columnType;
         wireSubType = characterSetId;
+        wireScale = null;
         wireLength = length;
+    }
+    
+    /**
+     * Find the physical type of a numeric parameter.
+     *
+     * @return physical type, or empty if it is not known
+     */
+    public Optional<FirebirdBinaryColumnType> findWireNumericType() {
+        return null == wireScale ? Optional.empty() : Optional.of(wireColumnType);
     }
     
     /**

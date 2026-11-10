@@ -113,17 +113,17 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
             containsBlob |= FirebirdBinaryColumnType.BLOB == each.getType();
         }
         if (!containsBlob) {
-            return executeParameters(preparedStatement, batchStatement.getParameterValues(), batchStatement.isMultiError(), Collections.emptyMap());
+            return executeParameters(preparedStatement, batchStatement.getParameterValues(), batchStatement.isMultiError(), Collections.emptyMap(), false);
         }
         return executeBlobBatch(batchStatement, preparedStatement);
     }
     
     private FirebirdBatchCompletion executeParameters(final FirebirdServerPreparedStatement preparedStatement, final List<List<Object>> params, final boolean multiError,
-                                                      final Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs) throws SQLException {
+                                                      final Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs, final boolean preserveMessageOrder) throws SQLException {
         if (params.isEmpty()) {
             return new FirebirdBatchCompletion(0, NO_UPDATE_COUNTS);
         }
-        return new FirebirdBatchedStatementsExecutor(connectionSession, preparedStatement, params, multiError, rawTextBlobs).executeBatch();
+        return new FirebirdBatchedStatementsExecutor(connectionSession, preparedStatement, params, multiError, rawTextBlobs, preserveMessageOrder).executeBatch();
     }
     
     private FirebirdBatchCompletion executeBlobBatch(final FirebirdBatchStatement batchStatement, final FirebirdServerPreparedStatement preparedStatement) throws SQLException {
@@ -132,6 +132,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
         Collection<FirebirdBatchCompletion> completions = new ArrayList<>();
         Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs = new IdentityHashMap<>();
         FirebirdBlobParameterConverter converter = new FirebirdBlobParameterConverter(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get());
+        boolean preserveMessageOrder = requiresBlobMessageOrder(batchStatement.getColumnDescriptors(), preparedStatement.getParameterColumns(), converter);
         for (List<Object> each : batchStatement.getParameterValues()) {
             SQLDialectException failure;
             try {
@@ -140,7 +141,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
             } catch (final InvalidSegstrIdException | UnknownBatchBlobIdException | ParameterConversionException ex) {
                 failure = ex;
             }
-            FirebirdBatchCompletion completion = executeParameters(preparedStatement, params, batchStatement.isMultiError(), rawTextBlobs);
+            FirebirdBatchCompletion completion = executeParameters(preparedStatement, params, batchStatement.isMultiError(), rawTextBlobs, preserveMessageOrder);
             completions.add(completion);
             if (completion.getRecordsCount() < params.size() || !batchStatement.isMultiError() && !completion.getFailures().isEmpty()) {
                 return mergeCompletions(completions);
@@ -157,12 +158,22 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
                 return mergeCompletions(completions);
             }
         }
-        FirebirdBatchCompletion completion = executeParameters(preparedStatement, params, batchStatement.isMultiError(), rawTextBlobs);
+        FirebirdBatchCompletion completion = executeParameters(preparedStatement, params, batchStatement.isMultiError(), rawTextBlobs, preserveMessageOrder);
         if (completions.isEmpty()) {
             return completion;
         }
         completions.add(completion);
         return mergeCompletions(completions);
+    }
+    
+    private boolean requiresBlobMessageOrder(final List<FirebirdBatchColumnDescriptor> fields, final List<FirebirdReturnColumnPacket> parameters,
+                                             final FirebirdBlobParameterConverter converter) {
+        for (int i = 0; i < Math.min(fields.size(), parameters.size()); i++) {
+            if (FirebirdBinaryColumnType.BLOB == fields.get(i).getType() && converter.isBackendConversion(parameters.get(i))) {
+                return true;
+            }
+        }
+        return false;
     }
     
     private List<Object> bindRowBlobParameters(final List<Object> params, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final List<FirebirdReturnColumnPacket> parameterColumns,
