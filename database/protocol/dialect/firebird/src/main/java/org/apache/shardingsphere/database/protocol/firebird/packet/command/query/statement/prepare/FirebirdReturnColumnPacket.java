@@ -56,6 +56,25 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
     
     private final Integer blobSubType;
     
+    private FirebirdBinaryColumnType wireColumnType;
+    
+    private Integer wireSubType;
+    
+    private Integer wireScale;
+    
+    /**
+     * Set the wire representation of a parameter whose SQL type includes precision and scale.
+     *
+     * @param columnType physical Firebird column type
+     * @param subType Firebird numeric sub type
+     * @param scale Firebird numeric scale
+     */
+    public void setWireNumericType(final FirebirdBinaryColumnType columnType, final int subType, final int scale) {
+        wireColumnType = columnType;
+        wireSubType = subType;
+        wireScale = scale;
+    }
+    
     /**
      * Find column length.
      *
@@ -88,7 +107,7 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
     
     @Override
     protected void write(final FirebirdPacketPayload payload) {
-        FirebirdBinaryColumnType columnType = getColumnType();
+        FirebirdBinaryColumnType columnType = null == wireColumnType ? getColumnType() : wireColumnType;
         for (FirebirdSQLInfoPacketType requestedItem : requestedItems) {
             switch (requestedItem) {
                 case SQLDA_SEQ:
@@ -98,11 +117,10 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
                     FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.TYPE, columnType.getValue() + 1, payload);
                     break;
                 case SUB_TYPE:
-                    int subType = FirebirdBinaryColumnType.BLOB == columnType && null != blobSubType ? blobSubType : columnType.getSubtype();
-                    FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.SUB_TYPE, subType, payload);
+                    FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.SUB_TYPE, getWireSubType(columnType), payload);
                     break;
                 case SCALE:
-                    FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.SCALE, 0, payload);
+                    FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.SCALE, null == wireScale ? 0 : wireScale, payload);
                     break;
                 case LENGTH:
                     if (FirebirdBinaryColumnType.VARYING == columnType || FirebirdBinaryColumnType.LEGACY_VARYING == columnType || FirebirdBinaryColumnType.TEXT == columnType
@@ -134,5 +152,12 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
                     throw new DatabaseProtocolException("Unknown statement info request type %d", requestedItem);
             }
         }
+    }
+    
+    private int getWireSubType(final FirebirdBinaryColumnType columnType) {
+        if (null != wireSubType) {
+            return wireSubType;
+        }
+        return FirebirdBinaryColumnType.BLOB == columnType && null != blobSubType ? blobSubType : columnType.getSubtype();
     }
 }

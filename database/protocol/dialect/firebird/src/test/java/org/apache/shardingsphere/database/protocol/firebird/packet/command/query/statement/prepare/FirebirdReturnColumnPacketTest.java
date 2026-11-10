@@ -101,6 +101,19 @@ class FirebirdReturnColumnPacketTest {
     }
     
     @Test
+    void assertWriteNumericWireType() {
+        FirebirdReturnColumnPacket packet = createPacket(Arrays.asList(FirebirdSQLInfoPacketType.TYPE, FirebirdSQLInfoPacketType.SUB_TYPE,
+                FirebirdSQLInfoPacketType.SCALE, FirebirdSQLInfoPacketType.LENGTH), Types.NUMERIC, null, false, null);
+        packet.setWireNumericType(FirebirdBinaryColumnType.SHORT, 1, -3);
+        packet.write(payload);
+        verify(payload).writeInt4LE(FirebirdBinaryColumnType.SHORT.getValue() + 1);
+        verify(payload).writeInt4LE(1);
+        verify(payload).writeInt4LE(-3);
+        verify(payload).writeInt4LE(2);
+        assertThat(packet.getColumnType(), is(FirebirdBinaryColumnType.NUMERIC));
+    }
+    
+    @Test
     void assertWriteWithUnsupportedRequestedItem() {
         FirebirdReturnColumnPacket packet = createPacket(Collections.singletonList(FirebirdSQLInfoPacketType.SELECT), Types.INTEGER, null, false, null);
         try (MockedConstruction<DatabaseProtocolException> ignored = mockConstruction(DatabaseProtocolException.class)) {

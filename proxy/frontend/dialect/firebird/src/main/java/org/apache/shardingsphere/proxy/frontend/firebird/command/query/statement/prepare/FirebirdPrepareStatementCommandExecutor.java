@@ -24,6 +24,7 @@ import org.apache.shardingsphere.database.connector.firebird.metadata.data.Fireb
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNonFixedLengthColumnSizeRegistry;
 import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.database.NoDatabaseSelectedException;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoReturnValue;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdPrepareStatementPacket;
@@ -109,6 +110,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
  * Firebird prepare transaction command executor.
@@ -117,6 +119,8 @@ import java.util.function.Supplier;
 public final class FirebirdPrepareStatementCommandExecutor implements CommandExecutor {
     
     private static final ShardingSphereTable LITERAL_TABLE = new ShardingSphereTable(null, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+    
+    private static final Pattern TEXT_BLOB_SUBTYPE = Pattern.compile("\\bSUB_TYPE\\s+(TEXT|0*1)\\b");
     
     private final FirebirdPrepareStatementPacket packet;
     
@@ -381,7 +385,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
             }
             ColumnSegment column = affectedColumns.get(each.getParameterIndex());
             if (null == column) {
-                processCustomColumn(null, null, null, Types.VARCHAR, describeColumns, requestedItems, columnCount);
+                processUnknownParameter(describeColumns, requestedItems, columnCount);
             } else {
                 processBoundColumn(column, database, schema, describeColumns, requestedItems, columnCount);
             }
@@ -398,8 +402,8 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
             }
             if (value instanceof ParameterMarkerExpressionSegment) {
                 processBoundColumn(each.getColumns().get(0), database, schema, describeColumns, requestedItems, columnCount);
-            } else if (!processCastParameter(value, describeColumns, requestedItems, columnCount)) {
-                processCustomColumn(null, null, null, Types.VARCHAR, describeColumns, requestedItems, columnCount);
+            } else if (!processExpressionParameter(value, describeColumns, requestedItems, columnCount)) {
+                processUnknownParameter(describeColumns, requestedItems, columnCount);
             }
             return true;
         }
@@ -422,7 +426,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         int columnCount = 0;
         for (ParameterMarkerSegment each : markers) {
             if (!processInsertValueParameter(sqlStatementContext, each, table, describeColumns, requestedItems, ++columnCount)) {
-                processCustomColumn(null, null, null, Types.VARCHAR, describeColumns, requestedItems, columnCount);
+                processUnknownParameter(describeColumns, requestedItems, columnCount);
             }
         }
     }
@@ -437,11 +441,41 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
                 }
                 if (value instanceof ParameterMarkerExpressionSegment) {
                     processColumn(describeColumns, requestedItems, table.get(), table.get().getColumn(context.getColumnNames().get(i)), null, null, columnCount);
-                } else if (!processCastParameter(value, describeColumns, requestedItems, columnCount)) {
-                    processCustomColumn(null, null, null, Types.VARCHAR, describeColumns, requestedItems, columnCount);
+                } else if (!processExpressionParameter(value, describeColumns, requestedItems, columnCount)) {
+                    processUnknownParameter(describeColumns, requestedItems, columnCount);
                 }
                 return true;
             }
+        }
+        return false;
+    }
+    
+    private void processUnknownParameter(final Collection<FirebirdReturnColumnPacket> describeColumns, final Collection<FirebirdSQLInfoPacketType> requestedItems, final int columnCount) {
+        ShardingSphereColumn column = new ShardingSphereColumn(null, Types.VARCHAR, false, false, true, true, false, false);
+        String owner = connectionSession.getConnectionContext().getGrantee().getUsername();
+        describeColumns.add(new FirebirdReturnColumnPacket(requestedItems, columnCount, LITERAL_TABLE, column, null, null, owner, FirebirdBinaryColumnType.VARYING.getLength(), false, null));
+    }
+    
+    private boolean processExpressionParameter(final ExpressionSegment value, final Collection<FirebirdReturnColumnPacket> describeColumns,
+                                               final Collection<FirebirdSQLInfoPacketType> requestedItems, final int columnCount) {
+        if (processCastParameter(value, describeColumns, requestedItems, columnCount)) {
+            return true;
+        }
+        if (!(value instanceof FunctionSegment) || !"COALESCE".equalsIgnoreCase(((FunctionSegment) value).getFunctionName()) || 2 != ((FunctionSegment) value).getParameters().size()) {
+            return false;
+        }
+        Object literal = null;
+        boolean marker = false;
+        for (ExpressionSegment each : ((FunctionSegment) value).getParameters()) {
+            if (each instanceof ParameterMarkerExpressionSegment) {
+                marker = true;
+            } else if (each instanceof LiteralExpressionSegment) {
+                literal = ((LiteralExpressionSegment) each).getLiterals();
+            }
+        }
+        if (marker && (literal instanceof Integer || literal instanceof Long)) {
+            processLiteralColumn(literal, null, literal instanceof Integer ? Types.INTEGER : Types.BIGINT, describeColumns, requestedItems, columnCount);
+            return true;
         }
         return false;
     }
@@ -461,14 +495,30 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
                 boolean blob = Types.BLOB == jdbcType;
                 Integer subtype = null;
                 if (blob) {
-                    subtype = typeName.contains("TEXT") || typeName.contains("SUB_TYPE 1") ? 1 : 0;
+                    subtype = TEXT_BLOB_SUBTYPE.matcher(typeName).find() ? 1 : 0;
                 }
                 String owner = connectionSession.getConnectionContext().getGrantee().getUsername();
-                describeColumns.add(new FirebirdReturnColumnPacket(requestedItems, columnCount, LITERAL_TABLE, column, null, null, owner, length, blob, subtype));
+                FirebirdReturnColumnPacket result = new FirebirdReturnColumnPacket(requestedItems, columnCount, LITERAL_TABLE, column, null, null, owner, length, blob, subtype);
+                if (Types.NUMERIC == jdbcType || Types.DECIMAL == jdbcType) {
+                    int precision = null == length ? 9 : length;
+                    int scale = dataType.getDataTypeLength().flatMap(optional -> optional.getScale()).orElse(0);
+                    result.setWireNumericType(getNumericColumnType(precision, jdbcType), Types.NUMERIC == jdbcType ? 1 : 2, -scale);
+                }
+                describeColumns.add(result);
                 return true;
             }
         }
         return false;
+    }
+    
+    private FirebirdBinaryColumnType getNumericColumnType(final int precision, final int jdbcType) {
+        if (18 < precision) {
+            return FirebirdBinaryColumnType.INT128;
+        }
+        if (9 < precision) {
+            return FirebirdBinaryColumnType.INT64;
+        }
+        return 4 < precision || Types.DECIMAL == jdbcType ? FirebirdBinaryColumnType.LONG : FirebirdBinaryColumnType.SHORT;
     }
     
     private int getCastDataType(final String typeName) {

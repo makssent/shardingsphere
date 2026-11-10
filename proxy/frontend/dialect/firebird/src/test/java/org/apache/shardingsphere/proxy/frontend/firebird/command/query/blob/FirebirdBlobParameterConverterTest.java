@@ -149,6 +149,7 @@ class FirebirdBlobParameterConverterTest {
         return Stream.of(
                 Arguments.of("other_type", createField(0, NONE), createParameter(Types.VARCHAR, 20)),
                 Arguments.of("numeric_type", createField(0, NONE), createParameter(Types.INTEGER, null)),
+                Arguments.of("blob_filter", createField(99, NONE), createBlobParameter(1)),
                 Arguments.of("text_blob_in_other_charset", createField(1, WIN1251), createBlobParameter(1)));
     }
     
@@ -214,6 +215,9 @@ class FirebirdBlobParameterConverterTest {
                 Arguments.of("blob_truncation", createField(1, UTF8), new byte[65536], createParameter(Types.VARCHAR, null), UTF8, BlobTruncationException.class),
                 Arguments.of("internal_filter", createField(2, NONE), new byte[]{1}, createParameter(Types.VARCHAR, 20), UTF8, UnsupportedBlobFilterException.class),
                 Arguments.of("missing_filter", createField(4, NONE), new byte[]{1}, createParameter(Types.VARCHAR, 20), UTF8, BlobFilterNotFoundException.class),
+                Arguments.of("blob_internal_filter", createField(2, NONE), new byte[]{1}, createBlobParameter(1), UTF8, UnsupportedBlobFilterException.class),
+                Arguments.of("blob_missing_filter", createField(99, NONE), new byte[]{1}, createBlobParameter(1), UTF8, BlobFilterNotFoundException.class),
+                Arguments.of("blob_missing_reverse_filter", createField(1, NONE), new byte[]{1}, createBlobParameter(2), UTF8, BlobFilterNotFoundException.class),
                 Arguments.of("integer_overflow", createField(1, UTF8), "2147483648".getBytes(StandardCharsets.US_ASCII), createParameter(Types.INTEGER, null), UTF8, NumericOutOfRangeException.class),
                 Arguments.of("fraction_overflow", createField(1, UTF8), "1.23456789012".getBytes(StandardCharsets.US_ASCII), createParameter(Types.INTEGER, null), UTF8,
                         NumericOutOfRangeException.class),

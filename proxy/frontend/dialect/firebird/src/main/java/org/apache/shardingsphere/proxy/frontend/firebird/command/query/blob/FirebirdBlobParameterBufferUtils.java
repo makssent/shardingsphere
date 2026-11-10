@@ -103,7 +103,7 @@ public final class FirebirdBlobParameterBufferUtils {
                 () -> createFilterException(sourceType, targetType));
     }
     
-    private static SQLDialectException createFilterException(final int sourceType, final int targetType) {
+    static SQLDialectException createFilterException(final int sourceType, final int targetType) {
         return ISCConstants.BLOB_SUB_TYPE_TEXT == targetType && hasInternalTextFilter(sourceType) ? new UnsupportedBlobFilterException() : new BlobFilterNotFoundException(sourceType, targetType);
     }
     

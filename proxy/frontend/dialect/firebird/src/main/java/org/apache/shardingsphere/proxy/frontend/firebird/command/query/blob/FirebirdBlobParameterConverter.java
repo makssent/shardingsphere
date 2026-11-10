@@ -92,7 +92,11 @@ public final class FirebirdBlobParameterConverter {
         if (FirebirdBinaryColumnType.BLOB != parameter.getColumnType()) {
             return true;
         }
-        return findTextBlobCharset(field, parameter).isPresent() && connectionCharset.isPresent() && getFieldCharsetId(field) != connectionCharsetId;
+        return requiresBlobFilter(field, parameter) || findTextBlobCharset(field, parameter).isPresent() && connectionCharset.isPresent() && getFieldCharsetId(field) != connectionCharsetId;
+    }
+    
+    private boolean requiresBlobFilter(final FirebirdBatchColumnDescriptor field, final FirebirdReturnColumnPacket parameter) {
+        return parameter.findBlobSubType().filter(subType -> 0 != subType && 0 != field.getSubType() && subType != field.getSubType()).isPresent();
     }
     
     private Optional<Charset> findTextBlobCharset(final FirebirdBatchColumnDescriptor field, final FirebirdReturnColumnPacket parameter) {
@@ -121,6 +125,9 @@ public final class FirebirdBlobParameterConverter {
     private Object convertValue(final byte[] content, final FirebirdBatchColumnDescriptor field, final FirebirdReturnColumnPacket parameter) {
         FirebirdBinaryColumnType type = parameter.getColumnType();
         if (FirebirdBinaryColumnType.BLOB == type) {
+            if (requiresBlobFilter(field, parameter)) {
+                throw FirebirdBlobParameterBufferUtils.createFilterException(field.getSubType(), parameter.findBlobSubType().get());
+            }
             Optional<Charset> fieldCharset = findTextBlobCharset(field, parameter);
             return fieldCharset.isPresent() && isReadOnMove(field, parameter) ? toTextBlob(content, field, fieldCharset.get()) : content;
         }
