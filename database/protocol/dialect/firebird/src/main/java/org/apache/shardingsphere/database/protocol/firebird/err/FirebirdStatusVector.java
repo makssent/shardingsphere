@@ -78,8 +78,8 @@ public final class FirebirdStatusVector extends FirebirdPacket {
         payload.writeInt4(ISCConstants.isc_arg_end);
     }
     
-    private void writeArguments(final FirebirdPacketPayload payload, final Collection<?> arguments) {
-        for (Object each : arguments) {
+    private void writeArguments(final FirebirdPacketPayload payload, final Collection<?> args) {
+        for (Object each : args) {
             if (each instanceof Integer) {
                 payload.writeInt4(ISCConstants.isc_arg_number);
                 payload.writeInt4((Integer) each);

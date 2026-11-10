@@ -166,10 +166,10 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
         return mergeCompletions(completions);
     }
     
-    private boolean requiresBlobMessageOrder(final List<FirebirdBatchColumnDescriptor> fields, final List<FirebirdReturnColumnPacket> parameters,
+    private boolean requiresBlobMessageOrder(final List<FirebirdBatchColumnDescriptor> fields, final List<FirebirdReturnColumnPacket> params,
                                              final FirebirdBlobParameterConverter converter) {
-        for (int i = 0; i < Math.min(fields.size(), parameters.size()); i++) {
-            if (FirebirdBinaryColumnType.BLOB == fields.get(i).getType() && converter.isBackendConversion(parameters.get(i))) {
+        for (int i = 0; i < Math.min(fields.size(), params.size()); i++) {
+            if (FirebirdBinaryColumnType.BLOB == fields.get(i).getType() && converter.isBackendConversion(params.get(i))) {
                 return true;
             }
         }

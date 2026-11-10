@@ -114,6 +114,23 @@ class FirebirdBlobParameterConverterTest {
         assertThat((byte[]) new FirebirdBlobParameterConverter(NONE).convert(content, createField(1, NONE), createParameter(Types.VARCHAR, 20)), is(content));
     }
     
+    @Test
+    void assertConvertToTextWithoutConnectionCharsetTruncatesPadding() {
+        byte[] content = {(byte) 0xFF, 'a', ' ', ' '};
+        byte[] expected = {(byte) 0xFF, 'a'};
+        assertThat((byte[]) new FirebirdBlobParameterConverter(NONE).convert(content, createField(1, NONE), createParameter(Types.VARCHAR, 2)), is(expected));
+    }
+    
+    @Test
+    void assertConvertToTextWithoutConnectionCharsetRejectsNonSpaceTruncation() {
+        byte[] content = {'a', 'b', 'c', 'x', ' '};
+        ParameterConversionException actual = assertThrows(ParameterConversionException.class,
+                () -> new FirebirdBlobParameterConverter(NONE).convert(content, createField(1, NONE), createParameter(Types.VARCHAR, 3)));
+        StringTruncationException actualError = (StringTruncationException) actual.getConversionError();
+        assertThat(actualError.getExpectedLength(), is(3));
+        assertThat(actualError.getActualLength(), is(5));
+    }
+    
     @ParameterizedTest(name = "{0}")
     @MethodSource("integerArguments")
     void assertConvertToInteger(final String name, final int dataType, final String value, final Number expected) {

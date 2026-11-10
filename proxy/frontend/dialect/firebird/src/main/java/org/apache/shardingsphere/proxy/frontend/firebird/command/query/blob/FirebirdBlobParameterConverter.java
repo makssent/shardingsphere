@@ -41,6 +41,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -252,11 +253,11 @@ public final class FirebirdBlobParameterConverter {
     private Object toText(final byte[] content, final FirebirdBatchColumnDescriptor field, final FirebirdReturnColumnPacket parameter) {
         byte[] text = readText(content, field, connectionCharset.isPresent() ? connectionCharsetId : ISCConstants.CS_NONE);
         Optional<Charset> textCharset = connectionCharset.isPresent() ? connectionCharset : findFieldCharset(field);
+        Optional<Integer> length = parameter.findColumnLength();
         if (!textCharset.isPresent()) {
-            return text;
+            return length.isPresent() ? truncate(text, length.get()) : text;
         }
         String result = decode(text, textCharset.get(), true);
-        Optional<Integer> length = parameter.findColumnLength();
         return length.isPresent() ? truncate(result, length.get()) : result;
     }
     
@@ -275,6 +276,16 @@ public final class FirebirdBlobParameterConverter {
         }
         ShardingSpherePreconditions.checkState(textLength - (text.length() - trimmedEnd) <= length, () -> new StringTruncationException(length, textLength));
         return text.substring(0, text.offsetByCodePoints(0, length));
+    }
+    
+    private byte[] truncate(final byte[] text, final int length) {
+        if (text.length <= length) {
+            return text;
+        }
+        for (int i = length; i < text.length; i++) {
+            ShardingSpherePreconditions.checkState(' ' == text[i], () -> new StringTruncationException(length, text.length));
+        }
+        return Arrays.copyOf(text, length);
     }
     
     private boolean isInteger(final FirebirdBinaryColumnType type) {

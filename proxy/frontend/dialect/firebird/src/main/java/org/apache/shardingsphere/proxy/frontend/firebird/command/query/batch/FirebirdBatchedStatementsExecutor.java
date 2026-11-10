@@ -206,23 +206,23 @@ public final class FirebirdBatchedStatementsExecutor {
         }
         String sql = sqlUnit.getSql();
         List<Integer> markers = physicalParameterMarkers.computeIfAbsent(sql, key -> getParameterMarkers(key, storageType));
-        List<Object> parameters = new ArrayList<>(sqlUnit.getParameters());
-        ShardingSpherePreconditions.checkState(markers.size() == parameters.size(), () -> new IllegalStateException("Physical SQL parameter count does not match its values."));
-        List<Integer> charsets = new ArrayList<>(parameters.size());
-        for (int i = 0; i < parameters.size(); i++) {
-            RawTextBlob blob = rawTextBlobs.get(parameters.get(i));
+        List<Object> params = new ArrayList<>(sqlUnit.getParameters());
+        ShardingSpherePreconditions.checkState(markers.size() == params.size(), () -> new IllegalStateException("Physical SQL parameter count does not match its values."));
+        List<Integer> charsets = new ArrayList<>(params.size());
+        for (int i = 0; i < params.size(); i++) {
+            RawTextBlob blob = rawTextBlobs.get(params.get(i));
             charsets.add(null == blob ? -1 : blob.charsetId);
             if (null != blob) {
-                parameters.set(i, blob.content);
+                params.set(i, blob.content);
             }
         }
         String rewritten = textBlobSqlVariants.computeIfAbsent(sql, key -> new HashMap<>()).computeIfAbsent(charsets, key -> rewriteTextBlobSql(sql, markers, key));
-        return new ExecutionUnit(executionUnit.getDataSourceName(), new SQLUnit(rewritten, parameters, sqlUnit.getTableRouteMappers()));
+        return new ExecutionUnit(executionUnit.getDataSourceName(), new SQLUnit(rewritten, params, sqlUnit.getTableRouteMappers()));
     }
     
     @HighFrequencyInvocation
-    private boolean containsTextBlob(final List<Object> parameters) {
-        for (Object each : parameters) {
+    private boolean containsTextBlob(final List<Object> params) {
+        for (Object each : params) {
             if (rawTextBlobs.containsKey(each)) {
                 return true;
             }
@@ -249,12 +249,12 @@ public final class FirebirdBatchedStatementsExecutor {
         return result;
     }
     
-    private void collectParameterMarkers(final ParseTree node, final List<Integer> result) {
+    private void collectParameterMarkers(final ParseTree node, final List<Integer> markers) {
         if (node instanceof TerminalNode && "?".equals(node.getText())) {
-            result.add(((TerminalNode) node).getSymbol().getStartIndex());
+            markers.add(((TerminalNode) node).getSymbol().getStartIndex());
         }
         for (int i = 0; i < node.getChildCount(); i++) {
-            collectParameterMarkers(node.getChild(i), result);
+            collectParameterMarkers(node.getChild(i), markers);
         }
     }
     
@@ -544,15 +544,15 @@ public final class FirebirdBatchedStatementsExecutor {
         return result;
     }
     
-    private void addInMessageOrder(final List<BatchExecution> result, final JDBCExecutionUnit executionUnit, final int offset) {
-        if (multiError && !result.isEmpty()) {
-            BatchExecution previous = result.get(result.size() - 1);
+    private void addInMessageOrder(final List<BatchExecution> batchExecutions, final JDBCExecutionUnit executionUnit, final int offset) {
+        if (multiError && !batchExecutions.isEmpty()) {
+            BatchExecution previous = batchExecutions.get(batchExecutions.size() - 1);
             if (previous.executionUnit == executionUnit && previous.toOffset == offset) {
-                result.set(result.size() - 1, new BatchExecution(executionUnit, previous.fromOffset, offset + 1));
+                batchExecutions.set(batchExecutions.size() - 1, new BatchExecution(executionUnit, previous.fromOffset, offset + 1));
                 return;
             }
         }
-        result.add(new BatchExecution(executionUnit, offset, offset + 1));
+        batchExecutions.add(new BatchExecution(executionUnit, offset, offset + 1));
     }
     
     private void mergeUpdateCounts(final int[] result, final List<Integer> batchMessageIndexes, final int[] updateCounts) {
