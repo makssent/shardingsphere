@@ -329,17 +329,27 @@ public final class FirebirdBatchedStatementsExecutor {
         return useMessageOrder() ? executeInBatchMessageOrder(batchExecutions, callback) : jdbcExecutor.execute(executionGroupContext, callback);
     }
     
+    @HighFrequencyInvocation
     private List<BatchExecutionUnitResult> executeInBatchMessageOrder(final List<BatchExecution> batchExecutions, final JDBCExecutorCallback<BatchExecutionUnitResult> callback) throws SQLException {
         List<BatchExecutionUnitResult> result = new LinkedList<>();
         for (BatchExecution each : batchExecutions) {
             addPendingBatch(each);
             List<BatchExecutionUnitResult> executeResults = jdbcExecutor.execute(createSingleUnitExecutionGroupContext(each.executionUnit), callback);
             result.addAll(executeResults);
-            if (!multiError && executeResults.stream().anyMatch(eachResult -> !eachResult.failures.isEmpty())) {
+            if (!multiError && hasFailures(executeResults)) {
                 break;
             }
         }
         return result;
+    }
+    
+    private boolean hasFailures(final List<BatchExecutionUnitResult> results) {
+        for (BatchExecutionUnitResult each : results) {
+            if (!each.failures.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
     
     private ExecutionGroupContext<JDBCExecutionUnit> createSingleUnitExecutionGroupContext(final JDBCExecutionUnit executionUnit) {

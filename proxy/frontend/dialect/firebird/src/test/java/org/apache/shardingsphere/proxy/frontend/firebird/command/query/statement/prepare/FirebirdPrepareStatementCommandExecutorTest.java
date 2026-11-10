@@ -21,6 +21,7 @@ import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobInfoRegistry;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.database.NoDatabaseSelectedException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.database.UnknownDatabaseException;
+import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdConstant;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoReturnValue;
@@ -69,6 +70,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -122,6 +124,7 @@ class FirebirdPrepareStatementCommandExecutorTest {
         when(connectionSession.getCurrentDatabaseName()).thenReturn("foo_db");
         when(connectionSession.getConnectionContext().getGrantee()).thenReturn(new Grantee("foo_user"));
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(4);
         when(packet.getSQL()).thenReturn("SELECT 1");
         when(packet.getHintValueContext()).thenReturn(new HintValueContext());
         when(packet.isValidStatementHandle()).thenReturn(true);
@@ -424,14 +427,15 @@ class FirebirdPrepareStatementCommandExecutorTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("castBlobSubtypeArguments")
     void assertPrepareCastBlobSubtype(final String typeName, final int expectedSubtype) throws SQLException {
-        when(packet.getSQL()).thenReturn("UPDATE foo_tbl SET content = CAST(? AS BLOB SUB_TYPE " + typeName + ") WHERE id = ?");
+        when(packet.getSQL()).thenReturn("UPDATE foo_tbl SET content = CAST(? AS " + typeName + ") WHERE id = ?");
         executeAndGetReturnPacket();
         List<FirebirdReturnColumnPacket> actual = connectionSession.getServerPreparedStatementRegistry().<FirebirdServerPreparedStatement>getPreparedStatement(1).getParameterColumns();
         assertThat(actual.get(0).findBlobSubType().get(), is(expectedSubtype));
     }
     
     private static Stream<Arguments> castBlobSubtypeArguments() {
-        return Stream.of(Arguments.of("TEXT", 1), Arguments.of(" 1", 1), Arguments.of("01", 1), Arguments.of("0", 0));
+        return Stream.of(Arguments.of("BLOB SUB_TYPE TEXT", 1), Arguments.of("BLOB SUB_TYPE  1", 1), Arguments.of("BLOB SUB_TYPE 01", 1),
+                Arguments.of("BLOB SUB_TYPE 0", 0), Arguments.of("BLOB(,1)", 1), Arguments.of("BLOB(80,01)", 1), Arguments.of("BLOB(80,0)", 0));
     }
     
     @ParameterizedTest(name = "{0}")
@@ -476,15 +480,57 @@ class FirebirdPrepareStatementCommandExecutorTest {
     }
     
     @Test
-    void assertDescribeUnknownExpressionParameterLength() throws SQLException {
+    void assertDescribeCoalesceStringParameter() throws SQLException {
         when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id, content) VALUES (COALESCE(?, 'abc'), ?)");
+        mockBindTextDescription();
+        FirebirdPrepareStatementReturnPacket actual = executeAndGetReturnPacket();
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
+        actual.getDescribeBind().get(0).write(payload);
+        verifyTextDescription(payload, FirebirdBinaryColumnType.TEXT, 4, 12);
+        assertThat(actual.getDescribeBind().get(0).findColumnLength().get(), is(3));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("castTextArguments")
+    void assertDescribeCastText(final String typeName, final int charsetId, final FirebirdBinaryColumnType columnType, final int characters, final int bytes) throws SQLException {
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(charsetId);
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id, content) VALUES (CAST(? AS " + typeName + "), ?)");
+        mockBindTextDescription();
+        FirebirdPrepareStatementReturnPacket actual = executeAndGetReturnPacket();
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
+        actual.getDescribeBind().get(0).write(payload);
+        verifyTextDescription(payload, columnType, charsetId, bytes);
+        assertThat(actual.getDescribeBind().get(0).findColumnLength().get(), is(characters));
+    }
+    
+    private static Stream<Arguments> castTextArguments() {
+        return Stream.of(Arguments.of("CHAR", 4, FirebirdBinaryColumnType.TEXT, 1, 4), Arguments.of("CHARACTER", 52, FirebirdBinaryColumnType.TEXT, 1, 1),
+                Arguments.of("CHAR(7)", 4, FirebirdBinaryColumnType.TEXT, 7, 28), Arguments.of("VARCHAR(7)", 52, FirebirdBinaryColumnType.VARYING, 7, 7));
+    }
+    
+    private void mockBindTextDescription() {
+        when(packet.nextItem()).thenReturn(true, true, true, true, true, true, true, false);
+        when(packet.getCurrentItem()).thenReturn(FirebirdSQLInfoPacketType.STMT_TYPE, FirebirdSQLInfoPacketType.BIND,
+                FirebirdSQLInfoPacketType.TYPE, FirebirdSQLInfoPacketType.TYPE, FirebirdSQLInfoPacketType.SUB_TYPE, FirebirdSQLInfoPacketType.SUB_TYPE,
+                FirebirdSQLInfoPacketType.LENGTH, FirebirdSQLInfoPacketType.LENGTH, FirebirdSQLInfoPacketType.DESCRIBE_END, FirebirdSQLInfoPacketType.DESCRIBE_END);
+    }
+    
+    private void verifyTextDescription(final FirebirdPacketPayload payload, final FirebirdBinaryColumnType columnType, final int charsetId, final int bytes) {
+        ArgumentCaptor<Integer> actual = ArgumentCaptor.forClass(Integer.class);
+        verify(payload, times(3)).writeInt4LE(actual.capture());
+        assertThat(actual.getAllValues(), is(Arrays.asList(columnType.getValue() + 1, charsetId, bytes)));
+    }
+    
+    @Test
+    void assertDescribeUnknownExpressionParameterLength() throws SQLException {
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id, content) VALUES (COALESCE(?, 1.5), ?)");
         when(packet.nextItem()).thenReturn(true, true, true, true, true, false);
         when(packet.getCurrentItem()).thenReturn(FirebirdSQLInfoPacketType.STMT_TYPE, FirebirdSQLInfoPacketType.BIND, FirebirdSQLInfoPacketType.LENGTH,
                 FirebirdSQLInfoPacketType.LENGTH, FirebirdSQLInfoPacketType.DESCRIBE_END, FirebirdSQLInfoPacketType.DESCRIBE_END);
         FirebirdPrepareStatementReturnPacket actual = executeAndGetReturnPacket();
         FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
         actual.getDescribeBind().get(0).write(payload);
-        verify(payload).writeInt4LE(FirebirdBinaryColumnType.VARYING.getLength());
+        verify(payload).writeInt1(FirebirdSQLInfoPacketType.LENGTH.getCode());
     }
     
     @Test

@@ -62,6 +62,8 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
     
     private Integer wireScale;
     
+    private Integer wireLength;
+    
     /**
      * Set the wire representation of a parameter whose SQL type includes precision and scale.
      *
@@ -73,6 +75,19 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
         wireColumnType = columnType;
         wireSubType = subType;
         wireScale = scale;
+    }
+    
+    /**
+     * Set the wire representation of a text parameter.
+     *
+     * @param columnType physical Firebird text type
+     * @param characterSetId Firebird character set ID
+     * @param length text length in bytes
+     */
+    public void setWireTextType(final FirebirdBinaryColumnType columnType, final int characterSetId, final int length) {
+        wireColumnType = columnType;
+        wireSubType = characterSetId;
+        wireLength = length;
     }
     
     /**
@@ -125,7 +140,7 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
                 case LENGTH:
                     if (FirebirdBinaryColumnType.VARYING == columnType || FirebirdBinaryColumnType.LEGACY_VARYING == columnType || FirebirdBinaryColumnType.TEXT == columnType
                             || FirebirdBinaryColumnType.LEGACY_TEXT == columnType) {
-                        FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.LENGTH, columnLength, payload);
+                        FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.LENGTH, null == wireLength ? columnLength : wireLength, payload);
                     } else {
                         FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.LENGTH, columnType.getLength(), payload);
                     }

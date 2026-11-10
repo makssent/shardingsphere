@@ -378,7 +378,7 @@ public final class FirebirdBlobWriteCache {
         }
         
         @HighFrequencyInvocation
-        synchronized long append(final byte[] data) {
+        long append(final byte[] data) {
             if (0 == data.length) {
                 return Long.MIN_VALUE;
             }
@@ -404,7 +404,7 @@ public final class FirebirdBlobWriteCache {
         }
         
         @HighFrequencyInvocation
-        synchronized byte[] read(final long offset, final int size) {
+        byte[] read(final long offset, final int size) {
             if (Long.MIN_VALUE == offset) {
                 return new byte[0];
             }

@@ -24,6 +24,7 @@ import org.apache.shardingsphere.database.connector.firebird.metadata.data.Fireb
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNonFixedLengthColumnSizeRegistry;
 import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.database.NoDatabaseSelectedException;
+import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdConstant;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoReturnValue;
@@ -94,6 +95,8 @@ import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.Co
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.RollbackStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.tcl.SavepointStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.value.identifier.IdentifierValue;
+import org.firebirdsql.encodings.EncodingDefinition;
+import org.firebirdsql.encodings.EncodingFactory;
 import org.jspecify.annotations.Nullable;
 
 import java.sql.SQLException;
@@ -120,7 +123,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
     
     private static final ShardingSphereTable LITERAL_TABLE = new ShardingSphereTable(null, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
     
-    private static final Pattern TEXT_BLOB_SUBTYPE = Pattern.compile("\\bSUB_TYPE\\s+(TEXT|0*1)\\b");
+    private static final Pattern TEXT_BLOB_SUBTYPE = Pattern.compile("\\bSUB_TYPE\\s+(TEXT|0*1)\\b|\\(\\s*\\d*\\s*,\\s*0*1\\s*\\)");
     
     private final FirebirdPrepareStatementPacket packet;
     
@@ -477,6 +480,15 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
             processLiteralColumn(literal, null, literal instanceof Integer ? Types.INTEGER : Types.BIGINT, describeColumns, requestedItems, columnCount);
             return true;
         }
+        if (marker && literal instanceof String) {
+            ShardingSphereColumn column = new ShardingSphereColumn(null, Types.CHAR, false, false, true, true, false, false);
+            String owner = connectionSession.getConnectionContext().getGrantee().getUsername();
+            int length = getStringLiteralLength((String) literal);
+            FirebirdReturnColumnPacket result = new FirebirdReturnColumnPacket(requestedItems, columnCount, LITERAL_TABLE, column, null, null, owner, length, false, null);
+            setWireTextType(result, FirebirdBinaryColumnType.TEXT, length);
+            describeColumns.add(result);
+            return true;
+        }
         return false;
     }
     
@@ -492,6 +504,9 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
                 int jdbcType = getCastDataType(typeName);
                 ShardingSphereColumn column = new ShardingSphereColumn(null, jdbcType, false, false, true, true, false, false);
                 Integer length = dataType.getDataTypeLength().map(optional -> optional.getPrecision()).orElse(null);
+                if (Types.CHAR == jdbcType && null == length) {
+                    length = 1;
+                }
                 boolean blob = Types.BLOB == jdbcType;
                 Integer subtype = null;
                 if (blob) {
@@ -503,12 +518,20 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
                     int precision = null == length ? 9 : length;
                     int scale = dataType.getDataTypeLength().flatMap(optional -> optional.getScale()).orElse(0);
                     result.setWireNumericType(getNumericColumnType(precision, jdbcType), Types.NUMERIC == jdbcType ? 1 : 2, -scale);
+                } else if ((Types.CHAR == jdbcType || Types.VARCHAR == jdbcType) && null != length) {
+                    setWireTextType(result, Types.CHAR == jdbcType ? FirebirdBinaryColumnType.TEXT : FirebirdBinaryColumnType.VARYING, length);
                 }
                 describeColumns.add(result);
                 return true;
             }
         }
         return false;
+    }
+    
+    private void setWireTextType(final FirebirdReturnColumnPacket packet, final FirebirdBinaryColumnType columnType, final int length) {
+        int charsetId = connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get();
+        EncodingDefinition encoding = EncodingFactory.getPlatformDefault().getEncodingDefinitionByCharacterSetId(charsetId);
+        packet.setWireTextType(columnType, charsetId, length * (null == encoding ? 1 : encoding.getMaxBytesPerChar()));
     }
     
     private FirebirdBinaryColumnType getNumericColumnType(final int precision, final int jdbcType) {
