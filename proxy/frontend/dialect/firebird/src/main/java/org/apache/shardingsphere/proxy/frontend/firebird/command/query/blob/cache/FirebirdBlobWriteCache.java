@@ -19,8 +19,20 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cac
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
+import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobHandleGenerator;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -38,6 +50,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * and can be substituted into the statement as a regular parameter on execute.</p>
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
+@Slf4j
 public final class FirebirdBlobWriteCache {
     
     private static final FirebirdBlobWriteCache INSTANCE = new FirebirdBlobWriteCache();
@@ -45,6 +58,8 @@ public final class FirebirdBlobWriteCache {
     private final Map<Integer, Map<Integer, FirebirdBlobWrite>> writesByHandle = new ConcurrentHashMap<>(16);
     
     private final Map<Integer, Map<Long, FirebirdBlobWrite>> writesById = new ConcurrentHashMap<>(16);
+    
+    private final Map<Integer, Map<Integer, BlobStore>> storesByTransaction = new ConcurrentHashMap<>(16);
     
     public static FirebirdBlobWriteCache getInstance() {
         return INSTANCE;
@@ -56,8 +71,17 @@ public final class FirebirdBlobWriteCache {
      * @param connectionId connection id
      */
     public void registerConnection(final int connectionId) {
-        writesByHandle.put(connectionId, new ConcurrentHashMap<>(4));
-        writesById.put(connectionId, new ConcurrentHashMap<>(4));
+        while (true) {
+            Map<Long, FirebirdBlobWrite> idMap = getIdMap(connectionId);
+            synchronized (idMap) {
+                if (writesById.get(connectionId) == idMap) {
+                    closeStores(storesByTransaction.remove(connectionId));
+                    writesByHandle.put(connectionId, new ConcurrentHashMap<>(4));
+                    writesById.put(connectionId, new ConcurrentHashMap<>(4));
+                    return;
+                }
+            }
+        }
     }
     
     /**
@@ -66,8 +90,17 @@ public final class FirebirdBlobWriteCache {
      * @param connectionId connection id
      */
     public void unregisterConnection(final int connectionId) {
-        writesByHandle.remove(connectionId);
-        writesById.remove(connectionId);
+        while (true) {
+            Map<Long, FirebirdBlobWrite> idMap = getIdMap(connectionId);
+            synchronized (idMap) {
+                if (writesById.get(connectionId) == idMap) {
+                    writesByHandle.remove(connectionId);
+                    closeStores(storesByTransaction.remove(connectionId));
+                    writesById.remove(connectionId, idMap);
+                    return;
+                }
+            }
+        }
     }
     
     /**
@@ -81,8 +114,38 @@ public final class FirebirdBlobWriteCache {
      */
     public void registerBlob(final int connectionId, final int blobHandle, final long blobId, final int transactionId, final boolean streamBlob) {
         FirebirdBlobWrite write = new FirebirdBlobWrite(blobHandle, blobId, transactionId, streamBlob);
-        getHandleMap(connectionId).put(blobHandle, write);
-        getIdMap(connectionId).put(blobId, write);
+        while (true) {
+            Map<Long, FirebirdBlobWrite> idMap = getIdMap(connectionId);
+            synchronized (idMap) {
+                if (writesById.get(connectionId) == idMap) {
+                    getHandleMap(connectionId).put(blobHandle, write);
+                    idMap.put(blobId, write);
+                    return;
+                }
+            }
+        }
+    }
+    
+    /**
+     * Store a materialized batch BLOB until its transaction ends.
+     *
+     * @param connectionId connection id
+     * @param blobId blob id
+     * @param transactionId owning transaction id
+     * @param content materialized BLOB data
+     */
+    @HighFrequencyInvocation
+    public void registerMaterializedBlob(final int connectionId, final long blobId, final int transactionId, final byte[] content) {
+        Map<Long, FirebirdBlobWrite> idMap = writesById.get(connectionId);
+        ShardingSpherePreconditions.checkNotNull(idMap, () -> new IllegalStateException(String.format("Connection %d is not registered.", connectionId)));
+        synchronized (idMap) {
+            ShardingSpherePreconditions.checkState(writesById.get(connectionId) == idMap, () -> new IllegalStateException(String.format("Connection %d has been closed.", connectionId)));
+            FirebirdBlobWrite write = new FirebirdBlobWrite(0, blobId, transactionId, false);
+            write.markClosed(content);
+            BlobStore store = storesByTransaction.computeIfAbsent(connectionId, key -> new ConcurrentHashMap<>(4)).computeIfAbsent(transactionId, key -> new BlobStore());
+            write.markUsed(store);
+            idMap.put(blobId, write);
+        }
     }
     
     /**
@@ -140,8 +203,14 @@ public final class FirebirdBlobWriteCache {
      * @return optional buffered bytes
      */
     public Optional<byte[]> getBlobData(final int connectionId, final long blobId) {
-        FirebirdBlobWrite write = getIdMap(connectionId).get(blobId);
-        return null == write ? Optional.empty() : write.getBytes();
+        Map<Long, FirebirdBlobWrite> idMap = writesById.get(connectionId);
+        if (null == idMap) {
+            return Optional.empty();
+        }
+        synchronized (idMap) {
+            FirebirdBlobWrite write = idMap.get(blobId);
+            return writesById.get(connectionId) != idMap || null == write ? Optional.empty() : write.getBytes();
+        }
     }
     
     /**
@@ -171,27 +240,27 @@ public final class FirebirdBlobWriteCache {
     /**
      * Use data of a closed BLOB write in a statement of transaction.
      *
-     * <p>After the first use the data stays available for reuse in the transaction only until the garbage collector releases it, see {@link FirebirdBlobWrite}.</p>
-     *
      * @param connectionId connection id
      * @param blobId blob id
      * @param transactionId transaction id of the statement
-     * @return BLOB data, or empty if the BLOB cannot be used by transaction or its data was released
+     * @return BLOB data, or empty if the BLOB cannot be used by the transaction
      */
     @HighFrequencyInvocation
     public Optional<byte[]> useBlobData(final int connectionId, final long blobId, final int transactionId) {
-        if (!isAvailable(connectionId, blobId, transactionId)) {
+        Map<Long, FirebirdBlobWrite> idMap = writesById.get(connectionId);
+        if (null == idMap) {
             return Optional.empty();
         }
-        FirebirdBlobWrite write = getIdMap(connectionId).get(blobId);
-        Optional<byte[]> result = write.getBytes();
-        write.markUsed();
-        return result;
-    }
-    
-    private boolean isAvailable(final int connectionId, final long blobId, final int transactionId) {
-        FirebirdBlobWrite write = getIdMap(connectionId).get(blobId);
-        return null != write && write.isClosed() && write.getTransactionId() == transactionId;
+        synchronized (idMap) {
+            FirebirdBlobWrite write = idMap.get(blobId);
+            if (writesById.get(connectionId) != idMap || null == write || !write.isClosed() || write.getTransactionId() != transactionId) {
+                return Optional.empty();
+            }
+            Optional<byte[]> result = write.getBytes();
+            BlobStore store = storesByTransaction.computeIfAbsent(connectionId, key -> new ConcurrentHashMap<>(4)).computeIfAbsent(transactionId, key -> new BlobStore());
+            write.markUsed(store);
+            return result;
+        }
     }
     
     /**
@@ -220,6 +289,55 @@ public final class FirebirdBlobWriteCache {
         }
     }
     
+    /**
+     * Remove BLOB writes owned by a completed transaction.
+     *
+     * @param connectionId connection id
+     * @param transactionId transaction id
+     */
+    @HighFrequencyInvocation
+    public void removeTransactionWrites(final int connectionId, final int transactionId) {
+        Map<Long, FirebirdBlobWrite> idMap = writesById.get(connectionId);
+        if (null == idMap) {
+            return;
+        }
+        synchronized (idMap) {
+            if (writesById.get(connectionId) != idMap) {
+                return;
+            }
+            Map<Integer, FirebirdBlobWrite> handleMap = writesByHandle.get(connectionId);
+            idMap.values().removeIf(each -> {
+                if (each.getTransactionId() != transactionId) {
+                    return false;
+                }
+                if (null != handleMap && handleMap.remove(each.getBlobHandle(), each)) {
+                    FirebirdBlobHandleGenerator.getInstance().releaseBlobHandle(connectionId, each.getBlobHandle());
+                }
+                return true;
+            });
+            Map<Integer, BlobStore> stores = storesByTransaction.get(connectionId);
+            if (null != stores) {
+                closeStore(stores.remove(transactionId));
+            }
+        }
+    }
+    
+    private void closeStores(final Map<Integer, BlobStore> stores) {
+        if (null != stores) {
+            stores.values().forEach(this::closeStore);
+        }
+    }
+    
+    private void closeStore(final BlobStore store) {
+        if (null != store) {
+            try {
+                store.close();
+            } catch (final IOException ex) {
+                log.warn("Failed to close the temporary Firebird BLOB store.", ex);
+            }
+        }
+    }
+    
     private Map<Integer, FirebirdBlobWrite> getHandleMap(final int connectionId) {
         Map<Integer, FirebirdBlobWrite> result = writesByHandle.get(connectionId);
         return null == result ? writesByHandle.computeIfAbsent(connectionId, key -> new ConcurrentHashMap<>(4)) : result;
@@ -228,5 +346,91 @@ public final class FirebirdBlobWriteCache {
     private Map<Long, FirebirdBlobWrite> getIdMap(final int connectionId) {
         Map<Long, FirebirdBlobWrite> result = writesById.get(connectionId);
         return null == result ? writesById.computeIfAbsent(connectionId, key -> new ConcurrentHashMap<>(4)) : result;
+    }
+    
+    static final class BlobStore implements AutoCloseable {
+        
+        private static final int MEMORY_CACHE_SIZE = 128 * 1024;
+        
+        private final List<byte[]> cached = new ArrayList<>();
+        
+        private FileChannel channel;
+        
+        private long length;
+        
+        private int cachedBytes;
+        
+        private FileChannel openChannel() {
+            Path path = null;
+            try {
+                path = Files.createTempFile("shardingsphere-firebird-blob-", ".tmp");
+                return FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE, StandardOpenOption.DELETE_ON_CLOSE);
+            } catch (final IOException ex) {
+                if (null != path) {
+                    try {
+                        Files.deleteIfExists(path);
+                    } catch (final IOException suppressed) {
+                        ex.addSuppressed(suppressed);
+                    }
+                }
+                throw new UncheckedIOException(ex);
+            }
+        }
+        
+        @HighFrequencyInvocation
+        synchronized long append(final byte[] data) {
+            if (0 == data.length) {
+                return Long.MIN_VALUE;
+            }
+            if (data.length <= MEMORY_CACHE_SIZE - cachedBytes) {
+                cached.add(data);
+                cachedBytes += data.length;
+                return -cached.size();
+            }
+            if (null == channel) {
+                channel = openChannel();
+            }
+            long result = length;
+            try {
+                ByteBuffer buffer = ByteBuffer.wrap(data);
+                while (buffer.hasRemaining()) {
+                    length += channel.write(buffer, length);
+                }
+                return result;
+            } catch (final IOException ex) {
+                length = result;
+                throw new UncheckedIOException(ex);
+            }
+        }
+        
+        @HighFrequencyInvocation
+        synchronized byte[] read(final long offset, final int size) {
+            if (Long.MIN_VALUE == offset) {
+                return new byte[0];
+            }
+            if (offset < 0L) {
+                return cached.get((int) -offset - 1);
+            }
+            byte[] result = new byte[size];
+            try {
+                ByteBuffer buffer = ByteBuffer.wrap(result);
+                while (buffer.hasRemaining()) {
+                    int count = channel.read(buffer, offset + buffer.position());
+                    if (count < 0) {
+                        throw new IOException("Unexpected end of temporary Firebird BLOB store");
+                    }
+                }
+                return result;
+            } catch (final IOException ex) {
+                throw new UncheckedIOException(ex);
+            }
+        }
+        
+        @Override
+        public void close() throws IOException {
+            if (null != channel) {
+                channel.close();
+            }
+        }
     }
 }

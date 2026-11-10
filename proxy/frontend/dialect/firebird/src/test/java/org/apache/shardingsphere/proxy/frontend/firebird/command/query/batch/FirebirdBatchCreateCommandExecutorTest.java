@@ -81,6 +81,8 @@ class FirebirdBatchCreateCommandExecutorTest {
     
     private static final int BLOB_NONE = 0;
     
+    private static final int BLOB_STREAM = 3;
+    
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private ConnectionSession connectionSession;
     
@@ -111,6 +113,7 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertThat(actualBatchStatement.getStatementHandle(), is(STATEMENT_ID));
         assertFalse(actualBatchStatement.isRecordCounts());
         assertFalse(actualBatchStatement.isMultiError());
+        assertFalse(actualBatchStatement.isBlobStreamAllowed());
         assertThat(actualBatchStatement.getColumnDescriptors().size(), is(1));
         assertThat(actualBatchStatement.getColumnDescriptors().get(0).getType(), is(FirebirdBinaryColumnType.LEGACY_TEXT));
         assertThat(actualBatchStatement.getColumnDescriptors().get(0).getLength(), is(4));
@@ -204,7 +207,6 @@ class FirebirdBatchCreateCommandExecutorTest {
         assertThat(actual.getBufferSize(), is(DEFAULT_BUFFER_SIZE));
         assertFalse(actual.isRecordCounts());
         assertFalse(actual.isMultiError());
-        assertFalse(actual.isBlobStreamAllowed());
     }
     
     @ParameterizedTest(name = "{0}")
@@ -232,20 +234,28 @@ class FirebirdBatchCreateCommandExecutorTest {
     }
     
     @Test
-    void assertParseBatchParametersWithBlobPolicy() {
-        FirebirdBatchCreateCommandExecutor.BatchParameters actual =
-                FirebirdBatchCreateCommandExecutor.BatchParameters.parse(createBatchParametersBuffer(TAG_BLOB_POLICY, BLOB_NONE));
-        assertTrue(actual.isBlobStreamAllowed());
-    }
-    
-    @Test
     void assertExecuteWithBlobPolicy() {
         mockPreparedStatement();
         when(packet.getBatchBlr()).thenReturn(createBatchBlr());
         when(packet.getBatchMessageLength()).thenReturn(6L);
-        when(packet.getBatchParametersBuffer()).thenReturn(createBatchParametersBuffer(TAG_BLOB_POLICY, BLOB_NONE));
+        when(packet.getBatchParametersBuffer()).thenReturn(createBatchParametersBuffer(TAG_BLOB_POLICY, BLOB_STREAM));
         new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute();
         assertTrue(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID).isBlobStreamAllowed());
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("disabledBlobPolicies")
+    void assertExecuteWithNonStreamBlobPolicy(final String name, final int policy) {
+        mockPreparedStatement();
+        when(packet.getBatchBlr()).thenReturn(createBatchBlr());
+        when(packet.getBatchMessageLength()).thenReturn(6L);
+        when(packet.getBatchParametersBuffer()).thenReturn(createBatchParametersBuffer(TAG_BLOB_POLICY, policy));
+        new FirebirdBatchCreateCommandExecutor(packet, connectionSession).execute();
+        assertFalse(FirebirdBatchRegistry.getInstance().getBatchStatement(CONNECTION_ID, STATEMENT_ID).isBlobStreamAllowed());
+    }
+    
+    private static Stream<Arguments> disabledBlobPolicies() {
+        return Stream.of(Arguments.of("none", BLOB_NONE), Arguments.of("engine IDs", 1), Arguments.of("user IDs", 2), Arguments.of("unknown", 99));
     }
     
     @Test

@@ -55,6 +55,10 @@ import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExt
 import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockSettings;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.MockedConstruction;
@@ -68,13 +72,16 @@ import java.sql.SQLException;
 import java.sql.Types;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -130,6 +137,136 @@ class FirebirdBatchedStatementsExecutorTest {
         }
         inOrder.verify(preparedStatement).executeBatch();
         inOrder.verify(preparedStatement).close();
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("textBlobCharsetArguments")
+    void assertExecuteBatchWithTextBlobCharset(final String name, final int sourceCharset, final String charsetName, final String text) throws SQLException {
+        Connection connection = mock(Connection.class, RETURNS_DEEP_STUBS);
+        when(connection.getMetaData().getURL()).thenReturn("jdbc:firebirdsql://127.0.0.1/db");
+        when(databaseConnectionManager.getConnections(any(), nullable(String.class), anyInt(), anyInt(), any(ConnectionMode.class))).thenReturn(Collections.singletonList(connection));
+        PreparedStatement statement = mock(PreparedStatement.class);
+        when(statement.getConnection()).thenReturn(connection);
+        when(statement.executeBatch()).thenReturn(new int[]{1});
+        when(backendStatement.createStorageResource(any(ExecutionUnit.class), eq(connection), anyInt(), any(ConnectionMode.class), any(StatementOption.class), nullable(DatabaseType.class)))
+                .thenReturn(statement);
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        String value = new String(text);
+        byte[] originalBytes = {(byte) 0xFF};
+        Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs = new IdentityHashMap<>();
+        rawTextBlobs.put(value, new FirebirdBatchedStatementsExecutor.RawTextBlob(originalBytes, sourceCharset));
+        new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, Collections.singletonList(Arrays.asList(1, value)), false, rawTextBlobs).executeBatch();
+        verify(statement).setObject(2, originalBytes);
+        ArgumentCaptor<ExecutionUnit> executionUnit = ArgumentCaptor.forClass(ExecutionUnit.class);
+        verify(backendStatement).createStorageResource(executionUnit.capture(), eq(connection), anyInt(), any(ConnectionMode.class), any(StatementOption.class), nullable(DatabaseType.class));
+        assertThat(executionUnit.getValue().getSqlUnit().getSql(), containsString("CAST(CAST(? AS BLOB SUB_TYPE TEXT CHARACTER SET NONE) AS BLOB SUB_TYPE TEXT CHARACTER SET " + charsetName + ")"));
+    }
+    
+    private static Stream<Arguments> textBlobCharsetArguments() {
+        return Stream.of(
+                Arguments.of("utf8", 4, "UTF8", "\0"),
+                Arguments.of("ascii", 2, "ASCII", "\0"),
+                Arguments.of("win1251", 52, "WIN1251", "я"));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("textBlobSqlMarkerArguments")
+    void assertTextBlobRewriteUsesPhysicalParameterMarkers(final String name, final String sql, final String expectedSql) throws SQLException {
+        Connection connection = mock(Connection.class, RETURNS_DEEP_STUBS);
+        when(connection.getMetaData().getURL()).thenReturn("jdbc:firebirdsql://127.0.0.1/db");
+        when(databaseConnectionManager.getConnections(any(), nullable(String.class), anyInt(), anyInt(), any(ConnectionMode.class))).thenReturn(Collections.singletonList(connection));
+        PreparedStatement statement = mock(PreparedStatement.class);
+        when(statement.getConnection()).thenReturn(connection);
+        when(statement.executeBatch()).thenReturn(new int[]{1});
+        when(backendStatement.createStorageResource(any(ExecutionUnit.class), eq(connection), anyInt(), any(ConnectionMode.class), any(StatementOption.class), nullable(DatabaseType.class)))
+                .thenReturn(statement);
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        String value = new String("\0");
+        byte[] originalBytes = {(byte) 0xFF};
+        List<Object> params = Arrays.asList(1, value);
+        Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs = new IdentityHashMap<>();
+        rawTextBlobs.put(value, new FirebirdBatchedStatementsExecutor.RawTextBlob(originalBytes, 4));
+        ExecutionUnit unit = new ExecutionUnit("ds_0", new SQLUnit(sql, params));
+        try (
+                MockedConstruction<KernelProcessor> ignored = mockConstruction(KernelProcessor.class,
+                        (mock, context) -> when(mock.generateExecutionContext(any(), any(), any()))
+                                .thenReturn(new ExecutionContext(null, Collections.singletonList(unit), mock(RouteContext.class))))) {
+            new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, Collections.singletonList(params), false, rawTextBlobs).executeBatch();
+        }
+        ArgumentCaptor<ExecutionUnit> actual = ArgumentCaptor.forClass(ExecutionUnit.class);
+        verify(backendStatement).createStorageResource(actual.capture(), eq(connection), anyInt(), any(ConnectionMode.class), any(StatementOption.class), nullable(DatabaseType.class));
+        assertThat(actual.getValue().getSqlUnit().getSql(), is(expectedSql));
+        verify(statement).setObject(2, originalBytes);
+    }
+    
+    private static Stream<Arguments> textBlobSqlMarkerArguments() {
+        String cast = "CAST(CAST(? AS BLOB SUB_TYPE TEXT CHARACTER SET NONE) AS BLOB SUB_TYPE TEXT CHARACTER SET UTF8)";
+        return Stream.of(
+                Arguments.of("quoted_and_commented", "INSERT INTO t (id, col) VALUES (?, COALESCE('😀?', ?)) /* ? */",
+                        "INSERT INTO t (id, col) VALUES (?, COALESCE('😀?', " + cast + ")) /* ? */"),
+                Arguments.of("gen_id", "INSERT INTO t (id, col) VALUES (GEN_ID(GEN_TEST, ?), ?)", "INSERT INTO t (id, col) VALUES (GEN_ID(GEN_TEST, ?), " + cast + ")"),
+                Arguments.of("merge", "MERGE INTO t x USING (SELECT ? AS id FROM RDB$DATABASE) s ON (x.id = s.id) WHEN MATCHED THEN UPDATE SET col = ?",
+                        "MERGE INTO t x USING (SELECT ? AS id FROM RDB$DATABASE) s ON (x.id = s.id) WHEN MATCHED THEN UPDATE SET col = " + cast));
+    }
+    
+    @Test
+    void assertTextBlobBytesArePreservedWhenBatchRetries() throws SQLException {
+        PreparedStatement statement = mockSameRoutePreparedStatement();
+        when(statement.executeBatch()).thenThrow(createFailure(new int[]{1})).thenReturn(new int[]{1});
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        String first = new String("\0");
+        String second = new String("\0");
+        String third = new String("\0");
+        byte[] firstBytes = {(byte) 0xFF};
+        byte[] secondBytes = {(byte) 0xFE};
+        byte[] thirdBytes = {(byte) 0xFD};
+        Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs = new IdentityHashMap<>();
+        rawTextBlobs.put(first, new FirebirdBatchedStatementsExecutor.RawTextBlob(firstBytes, 4));
+        rawTextBlobs.put(second, new FirebirdBatchedStatementsExecutor.RawTextBlob(secondBytes, 4));
+        rawTextBlobs.put(third, new FirebirdBatchedStatementsExecutor.RawTextBlob(thirdBytes, 4));
+        List<List<Object>> params = Arrays.asList(Arrays.asList(1, first), Arrays.asList(2, second), Arrays.asList(3, third));
+        FirebirdBatchCompletion actual = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, true, rawTextBlobs).executeBatch();
+        assertThat(actual.getUpdateCounts(), is(new int[]{1, FirebirdBatchCompletion.EXECUTE_FAILED, 1}));
+        verify(statement).setObject(2, firstBytes);
+        verify(statement).setObject(2, secondBytes);
+        verify(statement, times(2)).setObject(2, thirdBytes);
+    }
+    
+    @Test
+    void assertMultiErrorKeepsMessageOrderAcrossTextBlobSqlVariants() throws SQLException {
+        Connection connection = mock(Connection.class, RETURNS_DEEP_STUBS);
+        when(connection.getMetaData().getURL()).thenReturn("jdbc:firebirdsql://127.0.0.1/db");
+        when(databaseConnectionManager.getConnections(any(), nullable(String.class), anyInt(), anyInt(), any(ConnectionMode.class))).thenReturn(Collections.singletonList(connection));
+        PreparedStatement plainStatement = mock(PreparedStatement.class);
+        PreparedStatement blobStatement = mock(PreparedStatement.class);
+        when(plainStatement.getConnection()).thenReturn(connection);
+        when(blobStatement.getConnection()).thenReturn(connection);
+        when(plainStatement.executeBatch()).thenReturn(new int[]{1}, new int[]{1});
+        when(blobStatement.executeBatch()).thenThrow(createFailure(new int[0]));
+        when(backendStatement.createStorageResource(any(ExecutionUnit.class), eq(connection), anyInt(), any(ConnectionMode.class), any(StatementOption.class), nullable(DatabaseType.class)))
+                .thenAnswer(invocation -> invocation.<ExecutionUnit>getArgument(0).getSqlUnit().getSql().contains("CAST(") ? blobStatement : plainStatement);
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        String value = new String("\0");
+        Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs = new IdentityHashMap<>();
+        rawTextBlobs.put(value, new FirebirdBatchedStatementsExecutor.RawTextBlob(new byte[]{(byte) 0xFF}, 4));
+        List<List<Object>> params = Arrays.asList(Arrays.asList(1, null), Arrays.asList(2, value), Arrays.asList(3, null));
+        FirebirdBatchCompletion actual = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, true, rawTextBlobs).executeBatch();
+        assertThat(actual.getUpdateCounts(), is(new int[]{1, FirebirdBatchCompletion.EXECUTE_FAILED, 1}));
+        InOrder inOrder = inOrder(plainStatement, blobStatement);
+        inOrder.verify(plainStatement).setObject(1, 1);
+        inOrder.verify(plainStatement).executeBatch();
+        inOrder.verify(blobStatement).setObject(1, 2);
+        inOrder.verify(blobStatement).executeBatch();
+        inOrder.verify(plainStatement).setObject(1, 3);
+        inOrder.verify(plainStatement).executeBatch();
     }
     
     @Test

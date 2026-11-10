@@ -52,8 +52,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @RequiredArgsConstructor
 public final class FirebirdBatchExecuteCommandExecutor implements CommandExecutor {
@@ -96,7 +98,8 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
             return;
         }
         try {
-            batchStatementManager.registerStreamBlobs(batchStatement, connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get());
+            batchStatementManager.registerStreamBlobs(batchStatement, connectionSession.getConnectionId(), packet.getTransactionHandle(),
+                    connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get());
         } catch (final SQLDialectException ex) {
             batchStatementManager.resetBatchStatement(batchStatement);
             throw ex;
@@ -110,41 +113,42 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
             containsBlob |= FirebirdBinaryColumnType.BLOB == each.getType();
         }
         if (!containsBlob) {
-            return executeParameters(preparedStatement, batchStatement.getParameterValues(), batchStatement.isMultiError());
+            return executeParameters(preparedStatement, batchStatement.getParameterValues(), batchStatement.isMultiError(), Collections.emptyMap());
         }
         return executeBlobBatch(batchStatement, preparedStatement);
     }
     
-    private FirebirdBatchCompletion executeParameters(final FirebirdServerPreparedStatement preparedStatement, final List<List<Object>> params, final boolean multiError) throws SQLException {
+    private FirebirdBatchCompletion executeParameters(final FirebirdServerPreparedStatement preparedStatement, final List<List<Object>> params, final boolean multiError,
+                                                      final Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs) throws SQLException {
         if (params.isEmpty()) {
             return new FirebirdBatchCompletion(0, NO_UPDATE_COUNTS);
         }
-        return new FirebirdBatchedStatementsExecutor(connectionSession, preparedStatement, params, multiError).executeBatch();
+        return new FirebirdBatchedStatementsExecutor(connectionSession, preparedStatement, params, multiError, rawTextBlobs).executeBatch();
     }
     
     private FirebirdBatchCompletion executeBlobBatch(final FirebirdBatchStatement batchStatement, final FirebirdServerPreparedStatement preparedStatement) throws SQLException {
         Map<Long, Long> blobIds = new HashMap<>(batchStatement.getBlobIds());
-        Map<Long, byte[]> streamBlobContents = new HashMap<>(batchStatement.getStreamBlobContents());
         List<List<Object>> params = new ArrayList<>(batchStatement.getParameterValues().size());
         Collection<FirebirdBatchCompletion> completions = new ArrayList<>();
+        Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs = new IdentityHashMap<>();
         FirebirdBlobParameterConverter converter = new FirebirdBlobParameterConverter(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get());
         for (List<Object> each : batchStatement.getParameterValues()) {
             SQLDialectException failure;
             try {
-                params.add(bindRowBlobParameters(each, batchStatement.getColumnDescriptors(), preparedStatement.getParameterColumns(), blobIds, streamBlobContents, converter));
+                params.add(bindRowBlobParameters(each, batchStatement.getColumnDescriptors(), preparedStatement.getParameterColumns(), blobIds, converter, rawTextBlobs));
                 continue;
             } catch (final InvalidSegstrIdException | UnknownBatchBlobIdException | ParameterConversionException ex) {
                 failure = ex;
             }
-            FirebirdBatchCompletion completion = executeParameters(preparedStatement, params, batchStatement.isMultiError());
+            FirebirdBatchCompletion completion = executeParameters(preparedStatement, params, batchStatement.isMultiError(), rawTextBlobs);
             completions.add(completion);
             if (completion.getRecordsCount() < params.size() || !batchStatement.isMultiError() && !completion.getFailures().isEmpty()) {
                 return mergeCompletions(completions);
             }
             params.clear();
+            rawTextBlobs.clear();
             if (!(failure instanceof InvalidSegstrIdException)) {
                 batchStatement.getBlobIds().keySet().retainAll(blobIds.keySet());
-                batchStatement.getStreamBlobContents().keySet().retainAll(streamBlobContents.keySet());
                 throw failure;
             }
             SQLException cause = SQLExceptionTransformEngine.toSQLException(failure, DATABASE_TYPE);
@@ -153,7 +157,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
                 return mergeCompletions(completions);
             }
         }
-        FirebirdBatchCompletion completion = executeParameters(preparedStatement, params, batchStatement.isMultiError());
+        FirebirdBatchCompletion completion = executeParameters(preparedStatement, params, batchStatement.isMultiError(), rawTextBlobs);
         if (completions.isEmpty()) {
             return completion;
         }
@@ -162,27 +166,39 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
     }
     
     private List<Object> bindRowBlobParameters(final List<Object> params, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final List<FirebirdReturnColumnPacket> parameterColumns,
-                                               final Map<Long, Long> blobIds, final Map<Long, byte[]> streamBlobContents, final FirebirdBlobParameterConverter converter) {
+                                               final Map<Long, Long> blobIds, final FirebirdBlobParameterConverter converter,
+                                               final Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs) {
         List<Object> result = new ArrayList<>(params);
-        resolveBatchBlobIds(result, columnDescriptors, blobIds, streamBlobContents);
+        resolveBatchBlobIds(result, columnDescriptors, blobIds);
         boolean[] moved = moveReadBlobParameters(result, columnDescriptors, parameterColumns, converter);
         for (int i = 0; i < columnDescriptors.size(); i++) {
             if (!moved[i] && isBlobValue(columnDescriptors.get(i), result.get(i))) {
                 byte[] content = getBlobContent(result.get(i));
-                result.set(i, i < parameterColumns.size() ? converter.convert(content, columnDescriptors.get(i), parameterColumns.get(i)) : content);
+                if (i >= parameterColumns.size()) {
+                    result.set(i, content);
+                    continue;
+                }
+                FirebirdBatchColumnDescriptor field = columnDescriptors.get(i);
+                FirebirdReturnColumnPacket parameter = parameterColumns.get(i);
+                Object value = converter.convert(content, field, parameter);
+                Optional<String> text = value instanceof byte[] ? converter.findTextBlobForRouting(content, field, parameter) : Optional.empty();
+                if (text.isPresent()) {
+                    rawTextBlobs.put(text.get(), new FirebirdBatchedStatementsExecutor.RawTextBlob(content, converter.getFieldCharsetId(field)));
+                    value = text.get();
+                }
+                result.set(i, value);
             }
         }
         return result;
     }
     
-    private void resolveBatchBlobIds(final List<Object> params, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final Map<Long, Long> blobIds,
-                                     final Map<Long, byte[]> streamBlobContents) {
+    private void resolveBatchBlobIds(final List<Object> params, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final Map<Long, Long> blobIds) {
         for (int i = 0; i < columnDescriptors.size(); i++) {
             if (!columnDescriptors.get(i).isBatchBlobId() || null == params.get(i) || 0L == (Long) params.get(i)) {
                 continue;
             }
             long batchBlobId = (Long) params.get(i);
-            Object blob = blobIds.containsKey(batchBlobId) ? blobIds.remove(batchBlobId) : streamBlobContents.remove(batchBlobId);
+            Long blob = blobIds.remove(batchBlobId);
             ShardingSpherePreconditions.checkNotNull(blob, () -> new UnknownBatchBlobIdException(batchBlobId));
             params.set(i, blob);
         }

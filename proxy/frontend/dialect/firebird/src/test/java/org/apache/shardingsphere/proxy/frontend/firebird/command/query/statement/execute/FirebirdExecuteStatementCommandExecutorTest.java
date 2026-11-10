@@ -285,7 +285,7 @@ class FirebirdExecuteStatementCommandExecutorTest {
     }
     
     @Test
-    void assertBindBlobParameterAndClearUpload() throws SQLException {
+    void assertBindBlobParameterAndKeepUploadUntilTransactionEnds() throws SQLException {
         int blobHandle = 13;
         long blobId = 17L;
         byte[] expectedBytes = new byte[]{3, 4};
@@ -296,6 +296,8 @@ class FirebirdExecuteStatementCommandExecutorTest {
         List<Object> actualParams = executeAndGetParameters();
         assertThat(actualParams.size(), is(1));
         assertThat(actualParams.get(0), is(expectedBytes));
+        assertThat(FirebirdBlobWriteCache.getInstance().useBlobData(CONNECTION_ID, blobId, transactionId).get(), is(expectedBytes));
+        FirebirdBlobWriteCache.getInstance().removeTransactionWrites(CONNECTION_ID, transactionId);
         assertFalse(FirebirdBlobWriteCache.getInstance().getBlobData(CONNECTION_ID, blobId).isPresent());
     }
     

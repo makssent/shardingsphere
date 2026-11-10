@@ -21,7 +21,6 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobBufferFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBpbException;
@@ -29,6 +28,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentExceedsBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSmallDataException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
@@ -48,7 +48,6 @@ import java.util.Map;
  * Firebird batch statement metadata.
  */
 @HighFrequencyInvocation
-@RequiredArgsConstructor
 @Getter
 public final class FirebirdBatchStatement {
     
@@ -66,6 +65,10 @@ public final class FirebirdBatchStatement {
     
     private final boolean blobStreamAllowed;
     
+    private final int messageLength;
+    
+    private final int messageAlignment;
+    
     private final List<List<Object>> parameterValues = new ArrayList<>();
     
     private long accumulatedSize;
@@ -76,12 +79,22 @@ public final class FirebirdBatchStatement {
     
     private final Collection<byte[]> blobBuffer = new ArrayList<>();
     
-    private final Map<Long, byte[]> streamBlobContents = new HashMap<>();
-    
     private long blobStreamSize;
     
     @Setter
     private byte[] defaultBpb = {ISCConstants.isc_bpb_version1, ISCConstants.isc_bpb_type, 1, ISCConstants.isc_bpb_type_stream};
+    
+    public FirebirdBatchStatement(final int statementHandle, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final long bufferSize,
+                                  final boolean recordCounts, final boolean multiError, final boolean blobStreamAllowed) {
+        this.statementHandle = statementHandle;
+        this.columnDescriptors = columnDescriptors;
+        this.bufferSize = bufferSize;
+        this.recordCounts = recordCounts;
+        this.multiError = multiError;
+        this.blobStreamAllowed = blobStreamAllowed;
+        messageLength = getMessageLength(columnDescriptors);
+        messageAlignment = getMessageAlignment(columnDescriptors);
+    }
     
     public FirebirdBatchStatement(final int statementHandle) {
         this(statementHandle, Collections.emptyList(), 0L, false, false, false);
@@ -89,6 +102,38 @@ public final class FirebirdBatchStatement {
     
     public FirebirdBatchStatement(final int statementHandle, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final long bufferSize) {
         this(statementHandle, columnDescriptors, bufferSize, false, false, false);
+    }
+    
+    private int getMessageLength(final List<FirebirdBatchColumnDescriptor> descriptors) {
+        if (descriptors.isEmpty()) {
+            return 0;
+        }
+        FirebirdBatchColumnDescriptor last = descriptors.get(descriptors.size() - 1);
+        return (last.getOffset() + last.getLength() + Short.BYTES - 1 & -Short.BYTES) + Short.BYTES;
+    }
+    
+    private int getMessageAlignment(final List<FirebirdBatchColumnDescriptor> descriptors) {
+        int result = Short.BYTES;
+        for (FirebirdBatchColumnDescriptor each : descriptors) {
+            switch (each.getType()) {
+                case INT64:
+                case INT128:
+                case DOUBLE:
+                case D_FLOAT:
+                    return Long.BYTES;
+                case LONG:
+                case FLOAT:
+                case DATE:
+                case TIME:
+                case TIMESTAMP:
+                case BLOB:
+                    result = Integer.BYTES;
+                    break;
+                default:
+                    break;
+            }
+        }
+        return result;
     }
     
     /**
@@ -126,9 +171,14 @@ public final class FirebirdBatchStatement {
      *
      * @param data packet data starting at the stream portion
      * @param length declared length of the stream portion
+     * @throws BatchTooBigException if the restored portion exceeds the BLOB buffer limit
      */
     public void appendBlobStream(final ByteBuf data, final long length) {
-        byte[] portion = blobStream.read(data, length);
+        byte[] portion = blobStream.read(data, length, bufferSize - blobStreamSize,
+                size -> new BatchTooBigException(statementHandle, blobStreamSize, size, bufferSize));
+        if (0 == portion.length) {
+            return;
+        }
         blobBuffer.add(portion);
         blobStreamSize += portion.length;
     }
@@ -180,7 +230,7 @@ public final class FirebirdBatchStatement {
             byte[] bpb = 0L == bpbLength ? defaultBpb : ByteBufUtil.getBytes(buffer.readSlice((int) bpbLength));
             blobRemaining = Integer.toUnsignedLong((int) (blobRemaining - bpbLength));
             currentBlob = new FirebirdBatchStreamBlob(batchBlobId, bpb, 0L == bpbLength ? defaultSegmented : FirebirdBatchBlobStream.isSegmented(bpb));
-            ShardingSpherePreconditions.checkState(!blobIds.containsKey(batchBlobId) && !streamBlobContents.containsKey(batchBlobId) && !result.containsKey(batchBlobId),
+            ShardingSpherePreconditions.checkState(!blobIds.containsKey(batchBlobId) && !result.containsKey(batchBlobId),
                     () -> new RepeatedBatchBlobIdException(batchBlobId));
             result.put(batchBlobId, currentBlob);
         }
@@ -228,7 +278,6 @@ public final class FirebirdBatchStatement {
         parameterValues.clear();
         accumulatedSize = 0;
         blobIds.clear();
-        streamBlobContents.clear();
         blobBuffer.clear();
         blobStreamSize = 0L;
     }

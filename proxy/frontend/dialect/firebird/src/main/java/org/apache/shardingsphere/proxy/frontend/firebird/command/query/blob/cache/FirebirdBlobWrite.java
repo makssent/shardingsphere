@@ -28,8 +28,7 @@ import java.util.Optional;
 /**
  * Firebird BLOB data written by the client and buffered by the proxy.
  *
- * <p>Firebird keeps the BLOB ID of a temporary BLOB used by a statement valid until the transaction ends, but stores its data in the database instead of memory.
- * That is why the proxy keeps the data of a used BLOB only softly reachable: it stays available for reuse until the garbage collector needs the memory.</p>
+ * <p>A closed BLOB write keeps its data while the write remains registered.</p>
  */
 @RequiredArgsConstructor
 public final class FirebirdBlobWrite {
@@ -52,6 +51,12 @@ public final class FirebirdBlobWrite {
     
     private SoftReference<byte[]> usedContent;
     
+    private FirebirdBlobWriteCache.BlobStore store;
+    
+    private long storeOffset;
+    
+    private int size;
+    
     @Getter
     private boolean closed;
     
@@ -70,22 +75,30 @@ public final class FirebirdBlobWrite {
      * @return size of BLOB data in bytes
      */
     public int getSize() {
-        return closed ? content.length : buffer.size();
+        return closed ? size : buffer.size();
     }
     
     /**
      * Get BLOB data.
      *
-     * <p>The data of a closed write is shared by every caller without copying and must not be modified.</p>
+     * <p>The returned data may be shared and must not be modified.</p>
      *
-     * @return BLOB data, or empty if the garbage collector released the data of a used write
+     * @return BLOB data
      */
     @HighFrequencyInvocation
     public Optional<byte[]> getBytes() {
         if (!closed) {
             return Optional.of(buffer.toByteArray());
         }
-        return Optional.ofNullable(null == content ? usedContent.get() : content);
+        if (null != content) {
+            return Optional.of(content);
+        }
+        byte[] result = usedContent.get();
+        if (null == result) {
+            result = store.read(storeOffset, size);
+            usedContent = new SoftReference<>(result);
+        }
+        return Optional.of(result);
     }
     
     /**
@@ -93,17 +106,22 @@ public final class FirebirdBlobWrite {
      */
     @HighFrequencyInvocation
     public void markClosed() {
-        content = buffer.toByteArray();
+        markClosed(buffer.toByteArray());
+    }
+    
+    @HighFrequencyInvocation
+    void markClosed(final byte[] data) {
+        content = data;
+        size = content.length;
         buffer = null;
         closed = true;
     }
     
-    /**
-     * Mark this closed BLOB write as used by a statement and keep its data only softly reachable.
-     */
     @HighFrequencyInvocation
-    void markUsed() {
+    void markUsed(final FirebirdBlobWriteCache.BlobStore blobStore) {
         if (null != content) {
+            storeOffset = blobStore.append(content);
+            store = blobStore;
             usedContent = new SoftReference<>(content);
             content = null;
         }

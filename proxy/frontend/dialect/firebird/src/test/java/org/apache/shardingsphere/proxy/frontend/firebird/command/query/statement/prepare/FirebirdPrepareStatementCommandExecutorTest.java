@@ -89,6 +89,7 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
 import static org.hamcrest.Matchers.sameInstance;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
@@ -376,6 +377,48 @@ class FirebirdPrepareStatementCommandExecutorTest {
         assertThat(actualParameterColumns, is(actualReturnPacket.getDescribeBind()));
         assertThat(actualParameterColumns.get(0).getColumnType(), is(FirebirdBinaryColumnType.LONG));
         assertThat(actualParameterColumns.get(1).getColumnType(), is(FirebirdBinaryColumnType.BLOB));
+    }
+    
+    @Test
+    void assertPrepareRetainsParameterColumnsWithoutBindRequest() throws SQLException {
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id, content) VALUES (?, ?)");
+        FirebirdPrepareStatementReturnPacket actual = executeAndGetReturnPacket();
+        assertTrue(actual.getDescribeBind().isEmpty());
+        List<FirebirdReturnColumnPacket> actualParameterColumns = connectionSession.getServerPreparedStatementRegistry().<FirebirdServerPreparedStatement>getPreparedStatement(1).getParameterColumns();
+        assertThat(actualParameterColumns.size(), is(2));
+        assertThat(actualParameterColumns.get(0).getColumnType(), is(FirebirdBinaryColumnType.LONG));
+        assertThat(actualParameterColumns.get(1).getColumnType(), is(FirebirdBinaryColumnType.BLOB));
+    }
+    
+    @Test
+    void assertPrepareKeepsParameterOrderForCastWithoutBindRequest() throws SQLException {
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id, content) VALUES (CAST(? AS INTEGER), ?)");
+        executeAndGetReturnPacket();
+        List<FirebirdReturnColumnPacket> actual = connectionSession.getServerPreparedStatementRegistry().<FirebirdServerPreparedStatement>getPreparedStatement(1).getParameterColumns();
+        assertThat(actual.size(), is(2));
+        assertThat(actual.get(0).getColumnType(), is(FirebirdBinaryColumnType.LONG));
+        assertThat(actual.get(1).getColumnType(), is(FirebirdBinaryColumnType.BLOB));
+    }
+    
+    @Test
+    void assertPrepareUsesCastTypeInsteadOfInsertColumnType() throws SQLException {
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id, content) VALUES (CAST(? AS VARCHAR(10)), ?)");
+        executeAndGetReturnPacket();
+        List<FirebirdReturnColumnPacket> actual = connectionSession.getServerPreparedStatementRegistry().<FirebirdServerPreparedStatement>getPreparedStatement(1).getParameterColumns();
+        assertThat(actual.get(0).getColumnType(), is(FirebirdBinaryColumnType.VARYING));
+        assertThat(actual.get(0).findColumnLength().get(), is(10));
+        assertThat(actual.get(1).getColumnType(), is(FirebirdBinaryColumnType.BLOB));
+    }
+    
+    @Test
+    void assertPrepareKeepsUpdateCastAndWhereParameterOrder() throws SQLException {
+        when(packet.getSQL()).thenReturn("UPDATE foo_tbl SET content = CAST(? AS BLOB SUB_TYPE TEXT) WHERE id = ?");
+        executeAndGetReturnPacket();
+        List<FirebirdReturnColumnPacket> actual = connectionSession.getServerPreparedStatementRegistry().<FirebirdServerPreparedStatement>getPreparedStatement(1).getParameterColumns();
+        assertThat(actual.size(), is(2));
+        assertThat(actual.get(0).getColumnType(), is(FirebirdBinaryColumnType.BLOB));
+        assertThat(actual.get(0).findBlobSubType().get(), is(1));
+        assertThat(actual.get(1).getColumnType(), is(FirebirdBinaryColumnType.LONG));
     }
     
     @Test

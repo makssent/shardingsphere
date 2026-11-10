@@ -23,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 
 import java.io.ByteArrayOutputStream;
+import java.util.BitSet;
 
 /**
  * BLOB read from the BLOB buffer of a Firebird batch.
@@ -40,6 +41,10 @@ public final class FirebirdBatchStreamBlob {
     
     private final ByteArrayOutputStream data = new ByteArrayOutputStream();
     
+    private final BitSet segmentEnds = new BitSet();
+    
+    private final BitSet emptySegments = new BitSet();
+    
     /**
      * Append BLOB data that Firebird puts into the BLOB at once: one segment, or the stream data up to the next BLOB header.
      *
@@ -47,5 +52,8 @@ public final class FirebirdBatchStreamBlob {
      */
     void appendData(final byte[] bytes) {
         data.write(bytes, 0, bytes.length);
+        if (segmented) {
+            (0 == bytes.length ? emptySegments : segmentEnds).set(data.size());
+        }
     }
 }

@@ -57,6 +57,8 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
     
     private static final int TAG_BLOB_POLICY = 4;
     
+    private static final int BLOB_STREAM = 3;
+    
     private static final int WIDE_CLUMPLET_LENGTH_SIZE = 4;
     
     private static final int INTEGER_VALUE_LENGTH = 4;
@@ -121,8 +123,7 @@ public final class FirebirdBatchCreateCommandExecutor implements CommandExecutor
                 } else if (TAG_BUFFER_BYTES_SIZE == tag) {
                     bufferSize = getBufferSize(readIntegerValue(reader, tag, valueLength));
                 } else if (TAG_BLOB_POLICY == tag) {
-                    readIntegerValue(reader, tag, valueLength);
-                    blobStreamAllowed = true;
+                    blobStreamAllowed = BLOB_STREAM == readIntegerValue(reader, tag, valueLength);
                 } else {
                     reader.skipBytes(valueLength);
                 }

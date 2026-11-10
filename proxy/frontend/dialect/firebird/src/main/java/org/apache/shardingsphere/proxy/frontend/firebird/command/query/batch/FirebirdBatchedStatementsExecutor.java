@@ -19,18 +19,23 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch;
 
 import com.google.common.primitives.Ints;
 import lombok.RequiredArgsConstructor;
+import org.antlr.v4.runtime.tree.ParseTree;
+import org.antlr.v4.runtime.tree.TerminalNode;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.binder.context.aware.ParameterAware;
 import org.apache.shardingsphere.infra.binder.context.statement.SQLStatementContext;
 import org.apache.shardingsphere.infra.binder.engine.SQLBindEngine;
 import org.apache.shardingsphere.infra.config.props.ConfigurationPropertyKey;
 import org.apache.shardingsphere.infra.connection.kernel.KernelProcessor;
+import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.apache.shardingsphere.infra.executor.audit.SQLAuditEngine;
 import org.apache.shardingsphere.infra.executor.kernel.model.ExecutionGroup;
 import org.apache.shardingsphere.infra.executor.kernel.model.ExecutionGroupContext;
 import org.apache.shardingsphere.infra.executor.kernel.model.ExecutionGroupReportContext;
 import org.apache.shardingsphere.infra.executor.sql.context.ExecutionContext;
 import org.apache.shardingsphere.infra.executor.sql.context.ExecutionUnit;
+import org.apache.shardingsphere.infra.executor.sql.context.SQLUnit;
 import org.apache.shardingsphere.infra.executor.sql.execute.engine.ConnectionMode;
 import org.apache.shardingsphere.infra.executor.sql.execute.engine.SQLExecutorExceptionHandler;
 import org.apache.shardingsphere.infra.executor.sql.execute.engine.driver.jdbc.JDBCExecutionUnit;
@@ -41,6 +46,7 @@ import org.apache.shardingsphere.infra.executor.sql.prepare.driver.jdbc.JDBCDriv
 import org.apache.shardingsphere.infra.executor.sql.prepare.driver.jdbc.StatementOption;
 import org.apache.shardingsphere.infra.metadata.database.ShardingSphereDatabase;
 import org.apache.shardingsphere.infra.metadata.database.resource.ResourceMetaData;
+import org.apache.shardingsphere.infra.metadata.database.resource.unit.StorageUnit;
 import org.apache.shardingsphere.infra.rule.ShardingSphereRule;
 import org.apache.shardingsphere.infra.session.query.QueryContext;
 import org.apache.shardingsphere.mode.metadata.MetaDataContexts;
@@ -49,7 +55,9 @@ import org.apache.shardingsphere.proxy.backend.context.BackendExecutorContext;
 import org.apache.shardingsphere.proxy.backend.context.ProxyContext;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdServerPreparedStatement;
+import org.apache.shardingsphere.sql.parser.engine.core.database.parser.SQLParserExecutor;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
+import org.firebirdsql.encodings.EncodingFactory;
 
 import java.sql.BatchUpdateException;
 import java.sql.Connection;
@@ -60,6 +68,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -70,6 +80,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
@@ -95,9 +106,15 @@ public final class FirebirdBatchedStatementsExecutor {
     
     private final Map<PreparedStatement, List<List<Object>>> pendingBatchParams = new IdentityHashMap<>();
     
+    private final Map<String, List<Integer>> physicalParameterMarkers = new HashMap<>();
+    
+    private final Map<String, Map<List<Integer>, String>> textBlobSqlVariants = new HashMap<>();
+    
     private final int batchMessageCount;
     
     private final boolean multiError;
+    
+    private final Map<String, RawTextBlob> rawTextBlobs;
     
     private final ExecutionContext anyExecutionContext;
     
@@ -105,8 +122,14 @@ public final class FirebirdBatchedStatementsExecutor {
     
     public FirebirdBatchedStatementsExecutor(final ConnectionSession connectionSession, final FirebirdServerPreparedStatement preparedStatement, final List<List<Object>> parameterSets,
                                              final boolean multiError) {
+        this(connectionSession, preparedStatement, parameterSets, multiError, Collections.emptyMap());
+    }
+    
+    FirebirdBatchedStatementsExecutor(final ConnectionSession connectionSession, final FirebirdServerPreparedStatement preparedStatement, final List<List<Object>> parameterSets,
+                                      final boolean multiError, final Map<String, RawTextBlob> rawTextBlobs) {
         jdbcExecutor = new JDBCExecutor(BackendExecutorContext.getInstance().getExecutorEngine(), connectionSession.getConnectionContext());
         this.multiError = multiError;
+        this.rawTextBlobs = rawTextBlobs;
         this.connectionSession = connectionSession;
         metaDataContexts = ProxyContext.getInstance().getContextManager().getMetaDataContexts();
         this.preparedStatement = preparedStatement;
@@ -146,10 +169,78 @@ public final class FirebirdBatchedStatementsExecutor {
         }
     }
     
+    @HighFrequencyInvocation
     private void addExecutionUnitParams(final ExecutionContext executionContext, final int batchMessageIndex) {
         for (ExecutionUnit each : executionContext.getExecutionUnits()) {
-            executionUnitParams.computeIfAbsent(each, key -> new LinkedList<>()).add(each.getSqlUnit().getParameters());
-            executionUnitBatchMessageIndexes.computeIfAbsent(each, key -> new LinkedList<>()).add(batchMessageIndex);
+            ExecutionUnit executionUnit = rewriteTextBlobParameters(each);
+            executionUnitParams.computeIfAbsent(executionUnit, key -> new LinkedList<>()).add(executionUnit.getSqlUnit().getParameters());
+            executionUnitBatchMessageIndexes.computeIfAbsent(executionUnit, key -> new LinkedList<>()).add(batchMessageIndex);
+        }
+    }
+    
+    @HighFrequencyInvocation
+    private ExecutionUnit rewriteTextBlobParameters(final ExecutionUnit executionUnit) {
+        SQLUnit sqlUnit = executionUnit.getSqlUnit();
+        if (rawTextBlobs.isEmpty() || !containsTextBlob(sqlUnit.getParameters())) {
+            return executionUnit;
+        }
+        Map<String, StorageUnit> storageUnits = metaDataContexts.getMetaData().getDatabase(connectionSession.getUsedDatabaseName()).getResourceMetaData().getStorageUnits();
+        StorageUnit storageUnit = storageUnits.get(executionUnit.getDataSourceName());
+        DatabaseType storageType = null == storageUnit ? storageUnits.values().iterator().next().getStorageType() : storageUnit.getStorageType();
+        if (!"Firebird".equals(storageType.getType())) {
+            return executionUnit;
+        }
+        String sql = sqlUnit.getSql();
+        List<Integer> markers = physicalParameterMarkers.computeIfAbsent(sql, key -> getParameterMarkers(key, storageType));
+        List<Object> parameters = new ArrayList<>(sqlUnit.getParameters());
+        ShardingSpherePreconditions.checkState(markers.size() == parameters.size(), () -> new IllegalStateException("Physical SQL parameter count does not match its values."));
+        List<Integer> charsets = new ArrayList<>(parameters.size());
+        for (int i = 0; i < parameters.size(); i++) {
+            RawTextBlob blob = rawTextBlobs.get(parameters.get(i));
+            charsets.add(null == blob ? -1 : blob.charsetId);
+            if (null != blob) {
+                parameters.set(i, blob.content);
+            }
+        }
+        String rewritten = textBlobSqlVariants.computeIfAbsent(sql, key -> new HashMap<>()).computeIfAbsent(charsets, key -> rewriteTextBlobSql(sql, markers, key));
+        return new ExecutionUnit(executionUnit.getDataSourceName(), new SQLUnit(rewritten, parameters, sqlUnit.getTableRouteMappers()));
+    }
+    
+    @HighFrequencyInvocation
+    private boolean containsTextBlob(final List<Object> parameters) {
+        for (Object each : parameters) {
+            if (rawTextBlobs.containsKey(each)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    @HighFrequencyInvocation
+    private String rewriteTextBlobSql(final String sql, final List<Integer> markers, final List<Integer> charsets) {
+        StringBuilder rewritten = new StringBuilder(sql);
+        for (int i = markers.size() - 1; i >= 0; i--) {
+            if (charsets.get(i) >= 0) {
+                String charsetName = EncodingFactory.getPlatformDefault().getEncodingDefinitionByCharacterSetId(charsets.get(i)).getFirebirdEncodingName();
+                String replacement = new StringBuilder("CAST(CAST(? AS BLOB SUB_TYPE TEXT CHARACTER SET NONE) AS BLOB SUB_TYPE TEXT CHARACTER SET ").append(charsetName).append(')').toString();
+                rewritten.replace(markers.get(i), markers.get(i) + 1, replacement);
+            }
+        }
+        return rewritten.toString();
+    }
+    
+    private List<Integer> getParameterMarkers(final String sql, final DatabaseType storageType) {
+        List<Integer> result = new ArrayList<>();
+        collectParameterMarkers(new SQLParserExecutor(storageType).parse(sql).getRootNode(), result);
+        return result;
+    }
+    
+    private void collectParameterMarkers(final ParseTree node, final List<Integer> result) {
+        if (node instanceof TerminalNode && "?".equals(node.getText())) {
+            result.add(((TerminalNode) node).getSymbol().getStartIndex());
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            collectParameterMarkers(node.getChild(i), result);
         }
     }
     
@@ -235,7 +326,7 @@ public final class FirebirdBatchedStatementsExecutor {
         ShardingSphereDatabase database = metaDataContexts.getMetaData().getDatabase(connectionSession.getUsedDatabaseName());
         JDBCExecutorCallback<BatchExecutionUnitResult> callback =
                 new BatchedStatementsJDBCExecutorCallback(database.getProtocolType(), database.getResourceMetaData(), preparedStatement.getSqlStatementContext().getSqlStatement(), isExceptionThrown);
-        return multiError ? jdbcExecutor.execute(executionGroupContext, callback) : executeInBatchMessageOrder(batchExecutions, callback);
+        return useMessageOrder() ? executeInBatchMessageOrder(batchExecutions, callback) : jdbcExecutor.execute(executionGroupContext, callback);
     }
     
     private List<BatchExecutionUnitResult> executeInBatchMessageOrder(final List<BatchExecution> batchExecutions, final JDBCExecutorCallback<BatchExecutionUnitResult> callback) throws SQLException {
@@ -244,7 +335,7 @@ public final class FirebirdBatchedStatementsExecutor {
             addPendingBatch(each);
             List<BatchExecutionUnitResult> executeResults = jdbcExecutor.execute(createSingleUnitExecutionGroupContext(each.executionUnit), callback);
             result.addAll(executeResults);
-            if (executeResults.stream().anyMatch(eachResult -> !eachResult.failures.isEmpty())) {
+            if (!multiError && executeResults.stream().anyMatch(eachResult -> !eachResult.failures.isEmpty())) {
                 break;
             }
         }
@@ -333,7 +424,23 @@ public final class FirebirdBatchedStatementsExecutor {
         for (ExecutionGroup<JDBCExecutionUnit> eachGroup : executionGroupContext.getInputGroups()) {
             executionUnits.addAll(eachGroup.getInputs());
         }
-        return multiError ? createWholeUnitBatchExecutions(executionUnits) : createBatchExecutionsInMessageOrder(executionUnits);
+        return useMessageOrder() ? createBatchExecutionsInMessageOrder(executionUnits) : createWholeUnitBatchExecutions(executionUnits);
+    }
+    
+    private boolean useMessageOrder() {
+        if (!multiError) {
+            return true;
+        }
+        if (textBlobSqlVariants.isEmpty()) {
+            return false;
+        }
+        Set<String> dataSources = new HashSet<>();
+        for (ExecutionUnit each : executionUnitParams.keySet()) {
+            if (!dataSources.add(each.getDataSourceName())) {
+                return true;
+            }
+        }
+        return false;
     }
     
     private List<BatchExecution> createWholeUnitBatchExecutions(final Collection<JDBCExecutionUnit> executionUnits) throws SQLException {
@@ -358,10 +465,21 @@ public final class FirebirdBatchedStatementsExecutor {
         for (Entry<Integer, Collection<JDBCExecutionUnit>> entry : unitsByBatchMessageIndex.entrySet()) {
             for (JDBCExecutionUnit each : entry.getValue()) {
                 int offset = consumedOffsets.merge(each, 1, Integer::sum) - 1;
-                result.add(new BatchExecution(each, offset, offset + 1));
+                addInMessageOrder(result, each, offset);
             }
         }
         return result;
+    }
+    
+    private void addInMessageOrder(final List<BatchExecution> result, final JDBCExecutionUnit executionUnit, final int offset) {
+        if (multiError && !result.isEmpty()) {
+            BatchExecution previous = result.get(result.size() - 1);
+            if (previous.executionUnit == executionUnit && previous.toOffset == offset) {
+                result.set(result.size() - 1, new BatchExecution(executionUnit, previous.fromOffset, offset + 1));
+                return;
+            }
+        }
+        result.add(new BatchExecution(executionUnit, offset, offset + 1));
     }
     
     private void mergeUpdateCounts(final int[] result, final List<Integer> batchMessageIndexes, final int[] updateCounts) {
@@ -459,6 +577,14 @@ public final class FirebirdBatchedStatementsExecutor {
         protected Optional<BatchExecutionUnitResult> getSaneResult(final SQLStatement sqlStatement, final SQLException ex) {
             return Optional.empty();
         }
+    }
+    
+    @RequiredArgsConstructor
+    static final class RawTextBlob {
+        
+        private final byte[] content;
+        
+        private final int charsetId;
     }
     
     @RequiredArgsConstructor

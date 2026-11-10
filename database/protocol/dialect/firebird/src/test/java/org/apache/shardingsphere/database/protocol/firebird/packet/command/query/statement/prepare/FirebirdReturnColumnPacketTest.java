@@ -116,7 +116,8 @@ class FirebirdReturnColumnPacketTest {
     }
     
     private static Stream<Arguments> assertGetColumnTypeArguments() {
-        return Stream.of(Arguments.of("jdbc_type", Types.VARCHAR, false, FirebirdBinaryColumnType.VARYING), Arguments.of("blob_column", Types.VARCHAR, true, FirebirdBinaryColumnType.BLOB));
+        return Stream.of(Arguments.of("jdbc_type", Types.VARCHAR, false, FirebirdBinaryColumnType.VARYING), Arguments.of("blob_column", Types.VARCHAR, true, FirebirdBinaryColumnType.BLOB),
+                Arguments.of("integer_column", Types.INTEGER, false, FirebirdBinaryColumnType.LONG));
     }
     
     private static Stream<Arguments> assertWriteLengthArguments() {

@@ -60,6 +60,7 @@ import static org.hamcrest.Matchers.isA;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
@@ -98,7 +99,9 @@ class FirebirdBatchMessageCommandExecutorTest {
     void assertExecute() throws SQLException {
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
-        when(packet.getDataLength()).thenReturn(8);
+        when(packet.getMessageCount()).thenReturn(1L);
+        when(batchStatement.getMessageAlignment()).thenReturn(4);
+        when(batchStatement.getMessageLength()).thenReturn(6);
         when(batchStatement.getBufferSize()).thenReturn(16L);
         when(packet.readParameterValues(any())).thenReturn(Collections.singletonList(Collections.singletonList("foo")));
         when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
@@ -108,7 +111,7 @@ class FirebirdBatchMessageCommandExecutorTest {
             assertThat(actual.size(), is(1));
             assertThat(actual.iterator().next(), isA(FirebirdGenericResponsePacket.class));
             verify(batchStatement).addParameterValues(Collections.singletonList("foo"));
-            verify(batchStatement).addSize(8);
+            verify(batchStatement).addSize(6L);
         }
     }
     
@@ -126,14 +129,16 @@ class FirebirdBatchMessageCommandExecutorTest {
     void assertExecuteWhenBatchTooBig() {
         when(connectionSession.getConnectionId()).thenReturn(CONNECTION_ID);
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
-        when(packet.getDataLength()).thenReturn(9);
+        when(packet.getMessageCount()).thenReturn(1L);
+        when(batchStatement.getMessageAlignment()).thenReturn(4);
+        when(batchStatement.getMessageLength()).thenReturn(6);
         when(batchStatement.getAccumulatedSize()).thenReturn(8L);
-        when(batchStatement.getBufferSize()).thenReturn(16L);
+        when(batchStatement.getBufferSize()).thenReturn(13L);
         when(batchRegistry.getBatchStatement(CONNECTION_ID, STATEMENT_ID)).thenReturn(batchStatement);
         try (MockedStatic<FirebirdBatchRegistry> mockedRegistry = mockStatic(FirebirdBatchRegistry.class)) {
             mockedRegistry.when(FirebirdBatchRegistry::getInstance).thenReturn(batchRegistry);
             assertThrows(BatchTooBigException.class, () -> new FirebirdBatchMessageCommandExecutor(packet, connectionSession).execute());
-            verify(batchStatement, never()).addSize(9);
+            verify(batchStatement, never()).addSize(anyLong());
             verify(batchStatement, never()).reset();
         }
     }
@@ -155,10 +160,10 @@ class FirebirdBatchMessageCommandExecutorTest {
             new FirebirdBatchMessageCommandExecutor(createBatchSendMessagePacket((ByteBuf) out.get(0)), connectionSession).execute();
             assertThat(batchStatement.getParameterValues().size(), is(1));
             assertThat(batchStatement.getParameterValues().get(0), is(Collections.singletonList(100)));
-            assertThat(batchStatement.getAccumulatedSize(), is(8L));
+            assertThat(batchStatement.getAccumulatedSize(), is(6L));
             assertThrows(BatchTooBigException.class, () -> new FirebirdBatchMessageCommandExecutor(createBatchSendMessagePacket((ByteBuf) out.get(1)), connectionSession).execute());
             assertThat(batchStatement.getParameterValues(), is(Collections.singletonList(Collections.singletonList(100))));
-            assertThat(batchStatement.getAccumulatedSize(), is(8L));
+            assertThat(batchStatement.getAccumulatedSize(), is(6L));
             assertExecuteExecutesAcceptedMessages(batchStatement);
         } finally {
             FirebirdBatchRegistry.getInstance().unregisterConnection(CONNECTION_ID);

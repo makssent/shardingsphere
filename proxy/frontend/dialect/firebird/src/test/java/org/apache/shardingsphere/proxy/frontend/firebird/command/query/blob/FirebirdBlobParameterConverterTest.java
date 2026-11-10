@@ -79,8 +79,14 @@ class FirebirdBlobParameterConverterTest {
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("textBlobArguments")
-    void assertConvertToTextBlob(final String name, final FirebirdBatchColumnDescriptor field, final byte[] content, final int connectionCharsetId, final String expected) {
+    void assertConvertToTextBlob(final String name, final FirebirdBatchColumnDescriptor field, final byte[] content, final int connectionCharsetId, final Object expected) {
         assertThat(new FirebirdBlobParameterConverter(connectionCharsetId).convert(content, field, createBlobParameter(1)), is(expected));
+    }
+    
+    @Test
+    void assertConvertToSameCharsetTextBlobPreservesBytes() {
+        byte[] content = {(byte) 0xFF};
+        assertThat(new FirebirdBlobParameterConverter(UTF8).convert(content, createField(1, UTF8), createBlobParameter(1)), sameInstance(content));
     }
     
     @Test
@@ -142,6 +148,7 @@ class FirebirdBlobParameterConverterTest {
     private static Stream<Arguments> conversionArguments() {
         return Stream.of(
                 Arguments.of("other_type", createField(0, NONE), createParameter(Types.VARCHAR, 20)),
+                Arguments.of("numeric_type", createField(0, NONE), createParameter(Types.INTEGER, null)),
                 Arguments.of("text_blob_in_other_charset", createField(1, WIN1251), createBlobParameter(1)));
     }
     
@@ -162,8 +169,8 @@ class FirebirdBlobParameterConverterTest {
     private static Stream<Arguments> textBlobArguments() {
         return Stream.of(
                 Arguments.of("transliterated", createField(1, WIN1251), "Привет".getBytes(WIN1251_CHARSET), UTF8, "Привет"),
-                Arguments.of("connection_charset", createField(1, UTF8), "Привет".getBytes(StandardCharsets.UTF_8), UTF8, "Привет"),
-                Arguments.of("without_connection_charset", createField(1, WIN1251), "Привет".getBytes(WIN1251_CHARSET), NONE, "Привет"));
+                Arguments.of("connection_charset", createField(1, UTF8), "Привет".getBytes(StandardCharsets.UTF_8), UTF8, "Привет".getBytes(StandardCharsets.UTF_8)),
+                Arguments.of("without_connection_charset", createField(1, WIN1251), "Привет".getBytes(WIN1251_CHARSET), NONE, "Привет".getBytes(WIN1251_CHARSET)));
     }
     
     private static Stream<Arguments> textArguments() {

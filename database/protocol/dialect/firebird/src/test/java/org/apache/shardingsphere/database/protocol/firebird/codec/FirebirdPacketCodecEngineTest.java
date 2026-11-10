@@ -479,57 +479,57 @@ class FirebirdPacketCodecEngineTest {
     @Test
     void assertDecodeBlobStreamFollowedByPacket() {
         ByteBuf in = Unpooled.wrappedUnmodifiableBuffer(buildBlobStream(24, buildBlobHeader(1L, 5, 0).writeZero(5)), createCommandPacket(FirebirdCommandPacketType.BATCH_EXEC, 12));
-        List<Object> out = new LinkedList<>();
-        codecEngine.decode(context, in, out);
-        assertThat(out.size(), is(2));
-        assertThat(((ByteBuf) out.get(0)).readableBytes(), is(33));
-        assertThat(((ByteBuf) out.get(1)).readableBytes(), is(12));
+        List<Object> actualOut = new LinkedList<>();
+        codecEngine.decode(context, in, actualOut);
+        assertThat(actualOut.size(), is(2));
+        assertThat(((ByteBuf) actualOut.get(0)).readableBytes(), is(33));
+        assertThat(((ByteBuf) actualOut.get(1)).readableBytes(), is(12));
     }
     
     @Test
     void assertDecodeBlobStreamContinuedByNextPacket() {
         ByteBuf in = Unpooled.wrappedUnmodifiableBuffer(buildBlobStream(32, buildBlobHeader(1L, 20, 0).writeZero(16)), buildBlobStream(4, Unpooled.buffer().writeZero(4)),
                 createCommandPacket(FirebirdCommandPacketType.BATCH_EXEC, 12));
-        List<Object> out = new LinkedList<>();
-        codecEngine.decode(context, in, out);
-        assertThat(out.size(), is(3));
-        assertThat(((ByteBuf) out.get(0)).readableBytes(), is(44));
-        assertThat(((ByteBuf) out.get(1)).readableBytes(), is(16));
-        assertThat(((ByteBuf) out.get(2)).readableBytes(), is(12));
+        List<Object> actualOut = new LinkedList<>();
+        codecEngine.decode(context, in, actualOut);
+        assertThat(actualOut.size(), is(3));
+        assertThat(((ByteBuf) actualOut.get(0)).readableBytes(), is(44));
+        assertThat(((ByteBuf) actualOut.get(1)).readableBytes(), is(16));
+        assertThat(((ByteBuf) actualOut.get(2)).readableBytes(), is(12));
     }
     
     @Test
     void assertDecodeSplitBlobStream() {
         ByteBuf blobStream = buildBlobStream(32, buildBlobHeader(1L, 20, 0).writeZero(16));
-        List<Object> firstOut = new LinkedList<>();
-        codecEngine.decode(context, blobStream.readRetainedSlice(30), firstOut);
-        assertTrue(firstOut.isEmpty());
+        List<Object> actualFirstOut = new LinkedList<>();
+        codecEngine.decode(context, blobStream.readRetainedSlice(30), actualFirstOut);
+        assertTrue(actualFirstOut.isEmpty());
         assertThat(getPendingPacketType(), is(FirebirdCommandPacketType.BATCH_BLOB_STREAM));
-        List<Object> secondOut = new LinkedList<>();
-        codecEngine.decode(context, Unpooled.wrappedUnmodifiableBuffer(blobStream.readRetainedSlice(blobStream.readableBytes()), buildBlobStream(4, Unpooled.buffer().writeZero(4))), secondOut);
-        assertThat(secondOut.size(), is(2));
-        assertThat(((ByteBuf) secondOut.get(0)).readableBytes(), is(44));
-        assertThat(((ByteBuf) secondOut.get(1)).readableBytes(), is(16));
+        List<Object> actualSecondOut = new LinkedList<>();
+        codecEngine.decode(context, Unpooled.wrappedUnmodifiableBuffer(blobStream.readRetainedSlice(blobStream.readableBytes()), buildBlobStream(4, Unpooled.buffer().writeZero(4))), actualSecondOut);
+        assertThat(actualSecondOut.size(), is(2));
+        assertThat(((ByteBuf) actualSecondOut.get(0)).readableBytes(), is(44));
+        assertThat(((ByteBuf) actualSecondOut.get(1)).readableBytes(), is(16));
     }
     
     @Test
     void assertDecodeBlobStreamWithSegmentedDefaultBpb() {
         ByteBuf setBpb = Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_SET_BPB.getValue()).writeInt(BATCH_STATEMENT_HANDLE).writeInt(4).writeBytes(new byte[]{1, 3, 1, 0});
         ByteBuf in = Unpooled.wrappedUnmodifiableBuffer(setBpb, buildBlobStream(20, buildBlobHeader(1L, 4, 0).writeInt(2).writeZero(2)), createCommandPacket(FirebirdCommandPacketType.BATCH_EXEC, 12));
-        List<Object> out = new LinkedList<>();
-        codecEngine.decode(context, in, out);
-        assertThat(out.size(), is(3));
-        assertThat(((ByteBuf) out.get(1)).readableBytes(), is(34));
-        assertThat(((ByteBuf) out.get(2)).readableBytes(), is(12));
+        List<Object> actualOut = new LinkedList<>();
+        codecEngine.decode(context, in, actualOut);
+        assertThat(actualOut.size(), is(3));
+        assertThat(((ByteBuf) actualOut.get(1)).readableBytes(), is(34));
+        assertThat(((ByteBuf) actualOut.get(2)).readableBytes(), is(12));
     }
     
     @Test
     void assertDecodeBlobStreamAfterBatchCreate() {
         ByteBuf in = Unpooled.wrappedUnmodifiableBuffer(buildBlobStream(32, buildBlobHeader(1L, 20, 0).writeZero(16)), buildBatchCreate(), buildBlobStream(16, buildBlobHeader(2L, 0, 0)));
-        List<Object> out = new LinkedList<>();
-        codecEngine.decode(context, in, out);
-        assertThat(out.size(), is(3));
-        assertThat(((ByteBuf) out.get(2)).readableBytes(), is(28));
+        List<Object> actualOut = new LinkedList<>();
+        codecEngine.decode(context, in, actualOut);
+        assertThat(actualOut.size(), is(3));
+        assertThat(((ByteBuf) actualOut.get(2)).readableBytes(), is(28));
     }
     
     @Test
@@ -560,7 +560,8 @@ class FirebirdPacketCodecEngineTest {
     private static Stream<Arguments> invalidBlobStreamArguments() {
         return Stream.of(
                 Arguments.of("unaligned_length", buildBlobStream(6, Unpooled.buffer().writeZero(8))),
-                Arguments.of("wrong_bpb_version", buildBlobStream(24, buildBlobHeader(1L, 4, 4).writeBytes(new byte[]{2, 3, 1, 1}).writeZero(4))));
+                Arguments.of("wrong_bpb_version", buildBlobStream(24, buildBlobHeader(1L, 4, 4).writeBytes(new byte[]{2, 3, 1, 1}).writeZero(4))),
+                Arguments.of("incomplete_bpb_clumplet", buildBlobStream(24, buildBlobHeader(1L, 4, 4).writeBytes(new byte[]{1, 3, 4, 0}).writeZero(4))));
     }
     
     private static ByteBuf buildBlobStream(final int length, final ByteBuf data) {

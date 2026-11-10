@@ -28,6 +28,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSmallDataException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchWithoutBlobsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
@@ -44,8 +45,14 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdBlobParameterBufferUtils;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdBlobTransliterator;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
+import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.generator.FirebirdBlobIdGenerator;
 
+import java.io.ByteArrayOutputStream;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Batch statement manager for Firebird.
@@ -118,16 +125,24 @@ public final class FirebirdBatchStatementManager {
      * @throws InvalidBatchHandleException if batch statement does not exist
      * @throws BatchTooBigException if appending the message exceeds the batch buffer size
      */
+    @HighFrequencyInvocation
     public void appendBatchMessage(final int connectionId, final FirebirdBatchMessageCommandPacket packet) {
         FirebirdBatchStatement batchStatement = getBatchStatement(connectionId, packet.getStatementHandle());
         ShardingSpherePreconditions.checkNotNull(batchStatement, () -> new InvalidBatchHandleException(packet.getStatementHandle()));
-        int dataLength = packet.getDataLength();
-        ShardingSpherePreconditions.checkState(batchStatement.getAccumulatedSize() + dataLength <= batchStatement.getBufferSize(),
-                () -> new BatchTooBigException(packet.getStatementHandle(), batchStatement.getAccumulatedSize(), dataLength, batchStatement.getBufferSize()));
+        long messageCount = packet.getMessageCount();
+        if (0L == messageCount) {
+            return;
+        }
+        int alignment = batchStatement.getMessageAlignment();
+        long alignedSize = batchStatement.getAccumulatedSize() + alignment - 1 & -alignment;
+        long alignedMessageLength = (long) batchStatement.getMessageLength() + alignment - 1 & -alignment;
+        long dataLength = (messageCount - 1) * alignedMessageLength + batchStatement.getMessageLength();
+        ShardingSpherePreconditions.checkState(alignedSize + dataLength <= batchStatement.getBufferSize(),
+                () -> new BatchTooBigException(packet.getStatementHandle(), alignedSize, dataLength, batchStatement.getBufferSize()));
         for (List<Object> each : packet.readParameterValues(batchStatement.getColumnDescriptors())) {
             batchStatement.addParameterValues(each);
         }
-        batchStatement.addSize(dataLength);
+        batchStatement.addSize(alignedSize - batchStatement.getAccumulatedSize() + dataLength);
     }
     
     /**
@@ -142,6 +157,10 @@ public final class FirebirdBatchStatementManager {
     void appendBlobStream(final int connectionId, final FirebirdBatchBlobStreamCommandPacket packet) {
         FirebirdBatchStatement batchStatement = getBatchStatement(connectionId, packet.getStatementHandle());
         ShardingSpherePreconditions.checkNotNull(batchStatement, () -> new InvalidBatchHandleException(packet.getStatementHandle()));
+        if (0L == packet.getLength()) {
+            return;
+        }
+        ShardingSpherePreconditions.checkState(batchStatement.hasBatchBlobIdColumn(), () -> new BatchWithoutBlobsException(packet.getStatementHandle()));
         ShardingSpherePreconditions.checkState(batchStatement.isBlobStreamAllowed(), () -> new InvalidBatchBlobPolicyException("addBlobStream"));
         batchStatement.appendBlobStream(packet.getData(), packet.getLength());
     }
@@ -166,6 +185,8 @@ public final class FirebirdBatchStatementManager {
      * Register BLOBs of the BLOB buffer under their batch BLOB IDs, as Firebird does before executing batch messages, and clear the BLOB buffer.
      *
      * @param batchStatement batch statement
+     * @param connectionId connection ID
+     * @param transactionId transaction ID
      * @param connectionCharsetId character set ID of the connection
      * @throws BatchSmallDataException if a BLOB header is incomplete
      * @throws BatchBlobBufferFormatException if a continuation has no BLOB to continue
@@ -179,13 +200,40 @@ public final class FirebirdBatchStatementManager {
      * @throws TransliterationFailedException if BLOB data cannot be transliterated as its BLOB parameter buffer requires
      */
     @HighFrequencyInvocation
-    void registerStreamBlobs(final FirebirdBatchStatement batchStatement, final int connectionCharsetId) {
+    void registerStreamBlobs(final FirebirdBatchStatement batchStatement, final int connectionId, final int transactionId, final int connectionCharsetId) {
         for (FirebirdBatchStreamBlob each : batchStatement.readStreamBlobs()) {
-            byte[] data = each.getData().toByteArray();
-            byte[] content = FirebirdBlobParameterBufferUtils.createTransliterator(each.getBpb(), connectionCharsetId).map(transliterator -> transliterator.put(data)).orElse(data);
-            batchStatement.getStreamBlobContents().put(each.getBatchBlobId(), content);
+            byte[] content = transliterate(each, connectionCharsetId);
+            long blobId = FirebirdBlobIdGenerator.getInstance().nextBlobId(connectionId);
+            FirebirdBlobWriteCache.getInstance().registerMaterializedBlob(connectionId, blobId, transactionId, content);
+            batchStatement.getBlobIds().put(each.getBatchBlobId(), blobId);
         }
         batchStatement.clearBlobStream();
+    }
+    
+    @HighFrequencyInvocation
+    private byte[] transliterate(final FirebirdBatchStreamBlob blob, final int connectionCharsetId) {
+        byte[] data = blob.getData().toByteArray();
+        Optional<FirebirdBlobTransliterator> transliterator = FirebirdBlobParameterBufferUtils.createTransliterator(blob.getBpb(), connectionCharsetId);
+        if (!transliterator.isPresent()) {
+            return data;
+        }
+        if (!blob.isSegmented()) {
+            return transliterator.get().put(data);
+        }
+        ByteArrayOutputStream result = new ByteArrayOutputStream(data.length);
+        int offset = 0;
+        if (blob.getEmptySegments().get(0)) {
+            transliterator.get().put(new byte[0]);
+        }
+        for (int end = blob.getSegmentEnds().nextSetBit(0); end >= 0; end = blob.getSegmentEnds().nextSetBit(end + 1)) {
+            byte[] converted = transliterator.get().put(Arrays.copyOfRange(data, offset, end));
+            result.write(converted, 0, converted.length);
+            if (blob.getEmptySegments().get(end)) {
+                transliterator.get().put(new byte[0]);
+            }
+            offset = end;
+        }
+        return result.toByteArray();
     }
     
     /**

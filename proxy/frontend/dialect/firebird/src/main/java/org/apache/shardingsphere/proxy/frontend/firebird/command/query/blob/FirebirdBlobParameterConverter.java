@@ -101,10 +101,6 @@ public final class FirebirdBlobParameterConverter {
         return textBlobMove ? FirebirdBlobParameterBufferUtils.findJavaCharset(getFieldCharsetId(field)) : Optional.empty();
     }
     
-    private int getFieldCharsetId(final FirebirdBatchColumnDescriptor field) {
-        return FirebirdBlobParameterBufferUtils.getActualCharset(field.getScale(), connectionCharsetId);
-    }
-    
     /**
      * Convert BLOB value of message to parameter value.
      *
@@ -126,13 +122,35 @@ public final class FirebirdBlobParameterConverter {
         FirebirdBinaryColumnType type = parameter.getColumnType();
         if (FirebirdBinaryColumnType.BLOB == type) {
             Optional<Charset> fieldCharset = findTextBlobCharset(field, parameter);
-            return fieldCharset.isPresent() ? toTextBlob(content, field, fieldCharset.get()) : content;
+            return fieldCharset.isPresent() && isReadOnMove(field, parameter) ? toTextBlob(content, field, fieldCharset.get()) : content;
         }
         if (isText(type)) {
             return toText(content, field, parameter);
         }
         String result = new String(readText(content, field, CHARSET_ASCII), StandardCharsets.ISO_8859_1);
         return isInteger(type) ? toInteger(result, type) : result;
+    }
+    
+    /**
+     * Get the text representation used while routing a text BLOB parameter.
+     *
+     * @param content BLOB content
+     * @param field BLOB field of message
+     * @param parameter statement parameter
+     * @return text representation, or empty for a non-text BLOB
+     */
+    public Optional<String> findTextBlobForRouting(final byte[] content, final FirebirdBatchColumnDescriptor field, final FirebirdReturnColumnPacket parameter) {
+        return findTextBlobCharset(field, parameter).map(optional -> new String(toTextBlob(content, field, optional)));
+    }
+    
+    /**
+     * Get the character set of a BLOB message field.
+     *
+     * @param field BLOB field of message
+     * @return Firebird character set ID
+     */
+    public int getFieldCharsetId(final FirebirdBatchColumnDescriptor field) {
+        return FirebirdBlobParameterBufferUtils.getActualCharset(field.getScale(), connectionCharsetId);
     }
     
     private String toTextBlob(final byte[] content, final FirebirdBatchColumnDescriptor field, final Charset fieldCharset) {

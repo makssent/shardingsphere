@@ -31,7 +31,7 @@ import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.firebirdsql.gds.ISCConstants;
 
-import java.util.Arrays;
+import java.util.function.LongFunction;
 
 /**
  * BLOB stream state of a Firebird batch.
@@ -60,8 +60,6 @@ public final class FirebirdBatchBlobStream {
     private static final int MAX_BPB_INTEGER_LENGTH = 4;
     
     private static final int WIRE_SEGMENT_LENGTH_SIZE = 4;
-    
-    private static final byte[] NO_BPB = new byte[0];
     
     private static final Handler SKIPPING_HANDLER = new Handler() {
         
@@ -92,7 +90,7 @@ public final class FirebirdBatchBlobStream {
     
     private int segmentRemaining;
     
-    private byte[] bpb = NO_BPB;
+    private BpbReader bpb = new BpbReader();
     
     /**
      * Copy stream state.
@@ -100,7 +98,7 @@ public final class FirebirdBatchBlobStream {
      * @return copied stream state
      */
     public FirebirdBatchBlobStream copy() {
-        return new FirebirdBatchBlobStream(defaultSegmented, segmented, blobRemaining, bpbRemaining, segmentRemaining, bpb);
+        return new FirebirdBatchBlobStream(defaultSegmented, segmented, blobRemaining, bpbRemaining, segmentRemaining, bpb.copy());
     }
     
     /**
@@ -140,17 +138,28 @@ public final class FirebirdBatchBlobStream {
      *
      * @param data packet data starting at the stream portion
      * @param length declared length of the stream portion
+     * @param limit maximum restored size
+     * @param limitException creates the exception for a portion exceeding the limit
      * @return restored stream portion
      * @throws IndexOutOfBoundsException when packet data is incomplete
      * @throws DatabaseProtocolException when stream portion is invalid
      * @throws InvalidClumpletStructureException when BLOB parameter buffer of stream portion has invalid structure
      * @throws InvalidBpbVersionException when BLOB parameter buffer of stream portion has wrong version
      */
-    byte[] read(final ByteBuf data, final long length) {
-        ByteBuf result = Unpooled.buffer((int) length);
-        ShardingSpherePreconditions.checkState(read(data, length, new RestoringHandler(result)),
-                () -> new IndexOutOfBoundsException(String.format("Batch BLOB stream portion of %d bytes is incomplete, only %d bytes are readable", length, data.readableBytes())));
-        return ByteBufUtil.getBytes(result);
+    byte[] read(final ByteBuf data, final long length, final long limit, final LongFunction<? extends RuntimeException> limitException) {
+        int maxCapacity = (int) Math.min(Integer.MAX_VALUE, limit);
+        ByteBuf result = Unpooled.buffer((int) Math.min(length, Math.min(maxCapacity, 8192)), maxCapacity);
+        RestoringHandler handler = new RestoringHandler(result, limit);
+        try {
+            ShardingSpherePreconditions.checkState(read(data, length, handler),
+                    () -> new IndexOutOfBoundsException(String.format("Batch BLOB stream portion of %d bytes is incomplete, only %d bytes are readable", length, data.readableBytes())));
+            if (handler.size > limit) {
+                throw limitException.apply(handler.size);
+            }
+            return ByteBufUtil.getBytes(result);
+        } finally {
+            result.release();
+        }
     }
     
     private boolean read(final ByteBuf data, final long length, final Handler handler) {
@@ -216,7 +225,7 @@ public final class FirebirdBatchBlobStream {
         blobRemaining = blobLength;
         bpbRemaining = bpbLength;
         segmentRemaining = 0;
-        bpb = NO_BPB;
+        bpb = new BpbReader();
         if (0L == bpbLength) {
             segmented = defaultSegmented;
         }
@@ -225,14 +234,12 @@ public final class FirebirdBatchBlobStream {
     
     private void readBpb(final ByteBuf data, final int length, final Handler handler) {
         ByteBuf chunk = data.readSlice(length);
-        int receivedLength = bpb.length;
-        bpb = Arrays.copyOf(bpb, receivedLength + length);
-        chunk.getBytes(chunk.readerIndex(), bpb, receivedLength, length);
+        bpb.read(chunk, bpbRemaining - length);
         bpbRemaining -= length;
         blobRemaining = Integer.toUnsignedLong((int) (blobRemaining - length));
         if (0L == bpbRemaining) {
-            segmented = isSegmented(bpb);
-            bpb = NO_BPB;
+            segmented = bpb.isSegmented();
+            bpb = new BpbReader();
         }
         handler.onBytes(chunk);
     }
@@ -282,6 +289,88 @@ public final class FirebirdBatchBlobStream {
         return result;
     }
     
+    private static final class BpbReader {
+        
+        private int version = -1;
+        
+        private int tag = -1;
+        
+        private int valueLength = -1;
+        
+        private int valueRemaining = -1;
+        
+        private boolean segmented = true;
+        
+        private boolean done;
+        
+        private String error;
+        
+        private int errorData;
+        
+        private BpbReader copy() {
+            BpbReader result = new BpbReader();
+            result.version = version;
+            result.tag = tag;
+            result.valueLength = valueLength;
+            result.valueRemaining = valueRemaining;
+            result.segmented = segmented;
+            result.done = done;
+            result.error = error;
+            result.errorData = errorData;
+            return result;
+        }
+        
+        private void read(final ByteBuf chunk, final long remainingAfterChunk) {
+            for (int i = 0; i < chunk.readableBytes() && !done; i++) {
+                int value = chunk.getUnsignedByte(chunk.readerIndex() + i);
+                if (-1 == version) {
+                    version = value;
+                    if (ISCConstants.isc_bpb_version1 != version) {
+                        done = true;
+                    }
+                } else if (-1 == tag) {
+                    tag = value;
+                } else if (-1 == valueRemaining) {
+                    valueLength = value;
+                    valueRemaining = value;
+                    long remaining = remainingAfterChunk + chunk.readableBytes() - i - 1;
+                    if (valueLength > remaining) {
+                        error = "buffer end before end of clumplet - clumplet too long";
+                        errorData = 2 + valueLength;
+                        done = true;
+                    } else if (ISCConstants.isc_bpb_type == tag && valueLength > MAX_BPB_INTEGER_LENGTH) {
+                        error = "length of integer exceeds 4 bytes";
+                        errorData = valueLength;
+                        done = true;
+                    } else if (0 == valueRemaining) {
+                        finishValue();
+                    }
+                } else {
+                    if (ISCConstants.isc_bpb_type == tag && valueRemaining == valueLength) {
+                        segmented = 0 == (value & ISCConstants.isc_bpb_type_stream);
+                    }
+                    if (0 == --valueRemaining) {
+                        finishValue();
+                    }
+                }
+            }
+        }
+        
+        private void finishValue() {
+            done = ISCConstants.isc_bpb_type == tag;
+            tag = -1;
+            valueLength = -1;
+            valueRemaining = -1;
+        }
+        
+        private boolean isSegmented() {
+            ShardingSpherePreconditions.checkState(ISCConstants.isc_bpb_version1 == version, () -> new InvalidBpbVersionException(version, ISCConstants.isc_bpb_version1));
+            ShardingSpherePreconditions.checkState(null == error, () -> new InvalidClumpletStructureException(error, errorData));
+            ShardingSpherePreconditions.checkState(-1 == tag, () -> new InvalidClumpletStructureException("buffer end before end of clumplet - no length component", 1));
+            return segmented;
+        }
+    }
+    
     private interface Handler {
         
         void onPadding(int length);
@@ -299,24 +388,41 @@ public final class FirebirdBatchBlobStream {
         
         private final ByteBuf restored;
         
+        private final long limit;
+        
+        private long size;
+        
         @Override
         public void onPadding(final int length) {
-            restored.writeZero(length);
+            if (canWrite(length)) {
+                restored.writeZero(length);
+            }
         }
         
         @Override
         public void onBlobHeader(final long batchBlobId, final long blobLength, final long bpbLength) {
-            restored.writeIntLE((int) (batchBlobId >>> 32)).writeIntLE((int) batchBlobId).writeIntLE((int) blobLength).writeIntLE((int) bpbLength);
+            if (canWrite(HEADER_LENGTH)) {
+                restored.writeIntLE((int) (batchBlobId >>> 32)).writeIntLE((int) batchBlobId).writeIntLE((int) blobLength).writeIntLE((int) bpbLength);
+            }
         }
         
         @Override
         public void onSegment(final int segmentLength) {
-            restored.writeShortLE(segmentLength);
+            if (canWrite(SEGMENT_LENGTH_SIZE)) {
+                restored.writeShortLE(segmentLength);
+            }
         }
         
         @Override
         public void onBytes(final ByteBuf data) {
-            restored.writeBytes(data, data.readerIndex(), data.readableBytes());
+            if (canWrite(data.readableBytes())) {
+                restored.writeBytes(data, data.readerIndex(), data.readableBytes());
+            }
+        }
+        
+        private boolean canWrite(final int length) {
+            size += length;
+            return size <= limit;
         }
     }
 }
