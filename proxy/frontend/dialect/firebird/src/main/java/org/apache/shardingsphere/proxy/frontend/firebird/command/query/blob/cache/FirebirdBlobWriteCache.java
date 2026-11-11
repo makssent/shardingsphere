@@ -360,23 +360,6 @@ public final class FirebirdBlobWriteCache {
         
         private int cachedBytes;
         
-        private FileChannel openChannel() {
-            Path path = null;
-            try {
-                path = Files.createTempFile("shardingsphere-firebird-blob-", ".tmp");
-                return FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE, StandardOpenOption.DELETE_ON_CLOSE);
-            } catch (final IOException ex) {
-                if (null != path) {
-                    try {
-                        Files.deleteIfExists(path);
-                    } catch (final IOException suppressed) {
-                        ex.addSuppressed(suppressed);
-                    }
-                }
-                throw new UncheckedIOException(ex);
-            }
-        }
-        
         @HighFrequencyInvocation
         long append(final byte[] data) {
             if (0 == data.length) {
@@ -399,6 +382,23 @@ public final class FirebirdBlobWriteCache {
                 return result;
             } catch (final IOException ex) {
                 length = result;
+                throw new UncheckedIOException(ex);
+            }
+        }
+        
+        private FileChannel openChannel() {
+            Path path = null;
+            try {
+                path = Files.createTempFile("shardingsphere-firebird-blob-", ".tmp");
+                return FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE, StandardOpenOption.DELETE_ON_CLOSE);
+            } catch (final IOException ex) {
+                if (null != path) {
+                    try {
+                        Files.deleteIfExists(path);
+                    } catch (final IOException suppressed) {
+                        ex.addSuppressed(suppressed);
+                    }
+                }
                 throw new UncheckedIOException(ex);
             }
         }

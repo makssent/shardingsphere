@@ -22,6 +22,7 @@ import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.firebirdsql.gds.BlrConstants;
 
@@ -66,12 +67,14 @@ public final class FirebirdParseBatchBlr {
      * @return parsed message format
      * @throws IllegalArgumentException when BLR format is structurally invalid
      */
+    @HighFrequencyInvocation
     public static FirebirdParseBatchBlr parseForFraming(final ByteBuf blr, final int blrLength) {
-        ShardingSpherePreconditions.checkState(blrLength >= HEADER_LENGTH, () -> new IllegalArgumentException("BLR is too short: " + blrLength));
+        ShardingSpherePreconditions.checkState(blrLength >= HEADER_LENGTH, () -> new IllegalArgumentException(new StringBuilder("BLR is too short: ").append(blrLength).toString()));
         ByteBuf buffer = blr.duplicate();
         int startReaderIndex = buffer.readerIndex();
         int version = buffer.readUnsignedByte();
-        ShardingSpherePreconditions.checkState(BlrConstants.blr_version4 == version || BlrConstants.blr_version5 == version, () -> new IllegalArgumentException("Unsupported BLR version: " + version));
+        ShardingSpherePreconditions.checkState(BlrConstants.blr_version4 == version || BlrConstants.blr_version5 == version,
+                () -> new IllegalArgumentException(new StringBuilder("Unsupported BLR version: ").append(version).toString()));
         ShardingSpherePreconditions.checkState(BlrConstants.blr_begin == buffer.readUnsignedByte(), () -> new IllegalArgumentException("Expected blr_begin"));
         ShardingSpherePreconditions.checkState(BlrConstants.blr_message == buffer.readUnsignedByte(), () -> new IllegalArgumentException("Expected blr_message"));
         buffer.skipBytes(1);
@@ -175,7 +178,7 @@ public final class FirebirdParseBatchBlr {
         if (BlrConstants.blr_bool == blrType) {
             return Byte.BYTES;
         }
-        throw new IllegalArgumentException("Unsupported BLR type: " + blrType);
+        throw new IllegalArgumentException(new StringBuilder("Unsupported BLR type: ").append(blrType).toString());
     }
     
     private static boolean isVarying(final FirebirdBinaryColumnType type) {
@@ -185,7 +188,8 @@ public final class FirebirdParseBatchBlr {
     private static int appendNullIndicator(final ByteBuf buffer, final int offset) {
         int nullType = buffer.readUnsignedByte();
         buffer.skipBytes(1);
-        ShardingSpherePreconditions.checkState(BlrConstants.blr_short == nullType, () -> new IllegalArgumentException("Expected blr_short NULL indicator, got: " + nullType));
+        ShardingSpherePreconditions.checkState(BlrConstants.blr_short == nullType,
+                () -> new IllegalArgumentException(new StringBuilder("Expected blr_short NULL indicator, got: ").append(nullType).toString()));
         return alignTo(offset, Short.BYTES) + Short.BYTES;
     }
     

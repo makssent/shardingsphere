@@ -31,9 +31,14 @@ public final class ParameterConversionException extends SQLDialectException {
     
     private static final long serialVersionUID = 5724397585632840137L;
     
-    private final SQLDialectException conversionError;
+    private final Exception conversionError;
     
-    public ParameterConversionException(final SQLDialectException conversionError) {
+    /**
+     * Preserve the local dialect or native SQL error that prevented a parameter move.
+     *
+     * @param conversionError original conversion failure
+     */
+    public ParameterConversionException(final Exception conversionError) {
         super(conversionError.getMessage());
         this.conversionError = conversionError;
     }

@@ -22,14 +22,14 @@ import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import lombok.Getter;
 import lombok.Setter;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBPBTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobBufferFormatException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBpbException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBpbTooBigException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBPBException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentExceedsBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSmallDataException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBPBVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
@@ -174,8 +174,7 @@ public final class FirebirdBatchStatement {
      * @throws BatchTooBigException if the restored portion exceeds the BLOB buffer limit
      */
     public void appendBlobStream(final ByteBuf data, final long length) {
-        byte[] portion = blobStream.read(data, length, bufferSize - blobStreamSize,
-                size -> new BatchTooBigException(statementHandle, blobStreamSize, size, bufferSize));
+        byte[] portion = blobStream.read(data, length, bufferSize - blobStreamSize, size -> new BatchTooBigException(statementHandle, blobStreamSize, size, bufferSize));
         if (0 == portion.length) {
             return;
         }
@@ -193,10 +192,10 @@ public final class FirebirdBatchStatement {
      * @return BLOBs in the order of the BLOB buffer
      * @throws BatchSmallDataException if a BLOB header is incomplete
      * @throws BatchBlobBufferFormatException if a continuation has no BLOB to continue
-     * @throws BatchBlobContinuationBpbException if a BLOB continuation contains a BLOB parameter buffer
-     * @throws BatchBpbTooBigException if a BLOB parameter buffer is incomplete
+     * @throws BatchBlobContinuationBPBException if a BLOB continuation contains a BLOB parameter buffer
+     * @throws BatchBPBTooBigException if a BLOB parameter buffer is incomplete
      * @throws InvalidClumpletStructureException if a BLOB parameter buffer has invalid structure
-     * @throws InvalidBpbVersionException if a BLOB parameter buffer has wrong version
+     * @throws InvalidBPBVersionException if a BLOB parameter buffer has wrong version
      * @throws RepeatedBatchBlobIdException if batch BLOB ID is already registered
      * @throws BatchSegmentExceedsBlobException if a BLOB segment exceeds its BLOB
      * @throws BatchSegmentTooBigException if a BLOB segment is incomplete
@@ -222,16 +221,15 @@ public final class FirebirdBatchStatement {
             blobRemaining = buffer.readUnsignedIntLE();
             long bpbLength = buffer.readUnsignedIntLE();
             if (0L == batchBlobId) {
-                ShardingSpherePreconditions.checkState(0L == bpbLength, () -> new BatchBlobContinuationBpbException(bpbLength));
+                ShardingSpherePreconditions.checkState(0L == bpbLength, () -> new BatchBlobContinuationBPBException(bpbLength));
                 ShardingSpherePreconditions.checkNotNull(currentBlob, () -> new BatchBlobBufferFormatException(statementHandle));
                 continue;
             }
-            ShardingSpherePreconditions.checkState(bpbLength <= buffer.readableBytes(), () -> new BatchBpbTooBigException(bpbLength, buffer.readableBytes()));
+            ShardingSpherePreconditions.checkState(bpbLength <= buffer.readableBytes(), () -> new BatchBPBTooBigException(bpbLength, buffer.readableBytes()));
             byte[] bpb = 0L == bpbLength ? defaultBpb : ByteBufUtil.getBytes(buffer.readSlice((int) bpbLength));
             blobRemaining = Integer.toUnsignedLong((int) (blobRemaining - bpbLength));
             currentBlob = new FirebirdBatchStreamBlob(batchBlobId, bpb, 0L == bpbLength ? defaultSegmented : FirebirdBatchBlobStream.isSegmented(bpb));
-            ShardingSpherePreconditions.checkState(!blobIds.containsKey(batchBlobId) && !result.containsKey(batchBlobId),
-                    () -> new RepeatedBatchBlobIdException(batchBlobId));
+            ShardingSpherePreconditions.checkState(!blobIds.containsKey(batchBlobId) && !result.containsKey(batchBlobId), () -> new RepeatedBatchBlobIdException(batchBlobId));
             result.put(batchBlobId, currentBlob);
         }
         return result.values();

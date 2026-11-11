@@ -18,9 +18,10 @@
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch;
 
 import lombok.RequiredArgsConstructor;
-import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBPBCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.command.executor.CommandExecutor;
 
@@ -31,15 +32,16 @@ import java.util.Collections;
  * Batch set default BLOB parameter buffer command executor for Firebird.
  */
 @RequiredArgsConstructor
-public final class FirebirdBatchSetBpbCommandExecutor implements CommandExecutor {
+public final class FirebirdBatchSetBPBCommandExecutor implements CommandExecutor {
     
-    private final FirebirdBatchSetBpbCommandPacket packet;
+    private final FirebirdBatchSetBPBCommandPacket packet;
     
     private final ConnectionSession connectionSession;
     
     @Override
+    @HighFrequencyInvocation
     public Collection<DatabasePacket> execute() {
-        FirebirdBatchStatementManager.getInstance().setDefaultBpb(connectionSession.getConnectionId(), packet);
+        FirebirdBatchStatementManager.getInstance().setDefaultBPB(connectionSession.getConnectionId(), packet);
         return Collections.singleton(new FirebirdGenericResponsePacket());
     }
 }

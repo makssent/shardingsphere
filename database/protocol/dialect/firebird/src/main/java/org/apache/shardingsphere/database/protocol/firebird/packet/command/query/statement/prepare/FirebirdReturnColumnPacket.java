@@ -18,6 +18,7 @@
 package org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare;
 
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.FirebirdPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
@@ -64,6 +65,54 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
     
     private Integer wireLength;
     
+    @Setter
+    private Integer targetCharacterSetId;
+    
+    /**
+     * Set an exact physical field descriptor.
+     *
+     * @param columnType physical type
+     * @param subType physical subtype
+     * @param scale numeric scale
+     * @param length length in bytes
+     */
+    public void setWireType(final FirebirdBinaryColumnType columnType, final int subType, final int scale, final int length) {
+        wireColumnType = columnType;
+        wireSubType = subType;
+        wireScale = scale;
+        wireLength = length;
+    }
+    
+    /**
+     * Find the physical destination character set.
+     *
+     * @return physical character set
+     */
+    @HighFrequencyInvocation
+    public Optional<Integer> findTargetCharacterSetId() {
+        return Optional.ofNullable(FirebirdBinaryColumnType.BLOB == wireColumnType ? wireScale : targetCharacterSetId);
+    }
+    
+    /**
+     * Find the destination table.
+     *
+     * @return table name
+     */
+    @HighFrequencyInvocation
+    public Optional<String> findTableName() {
+        return Optional.ofNullable(table.getName());
+    }
+    
+    /**
+     * Find the destination column.
+     *
+     * @return column name
+     */
+    @HighFrequencyInvocation
+    public Optional<String> findColumnName() {
+        return Optional.ofNullable(column.getName());
+    }
+    
     /**
      * Set the wire representation of a parameter whose SQL type includes precision and scale.
      *
@@ -97,8 +146,10 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
      *
      * @return physical type, or empty if it is not known
      */
+    @HighFrequencyInvocation
     public Optional<FirebirdBinaryColumnType> findWireNumericType() {
-        return null == wireScale ? Optional.empty() : Optional.of(wireColumnType);
+        return FirebirdBinaryColumnType.SHORT == wireColumnType || FirebirdBinaryColumnType.LONG == wireColumnType
+                || FirebirdBinaryColumnType.INT64 == wireColumnType || FirebirdBinaryColumnType.INT128 == wireColumnType ? Optional.of(wireColumnType) : Optional.empty();
     }
     
     /**
@@ -118,7 +169,7 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
      */
     @HighFrequencyInvocation
     public Optional<Integer> findBlobSubType() {
-        return Optional.ofNullable(blobSubType);
+        return Optional.ofNullable(FirebirdBinaryColumnType.BLOB == wireColumnType ? wireSubType : blobSubType);
     }
     
     /**
@@ -128,7 +179,18 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
      */
     @HighFrequencyInvocation
     public FirebirdBinaryColumnType getColumnType() {
-        return blobColumn ? FirebirdBinaryColumnType.BLOB : FirebirdBinaryColumnType.valueOfJDBCType(column.getDataType());
+        if (null == wireColumnType) {
+            return blobColumn ? FirebirdBinaryColumnType.BLOB : FirebirdBinaryColumnType.valueOfJDBCType(column.getDataType());
+        }
+        if (findWireNumericType().isPresent()) {
+            if (1 == wireSubType) {
+                return FirebirdBinaryColumnType.NUMERIC;
+            }
+            if (2 == wireSubType) {
+                return FirebirdBinaryColumnType.DECIMAL;
+            }
+        }
+        return wireColumnType;
     }
     
     @Override
@@ -153,7 +215,7 @@ public final class FirebirdReturnColumnPacket extends FirebirdPacket {
                             || FirebirdBinaryColumnType.LEGACY_TEXT == columnType) {
                         FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.LENGTH, null == wireLength ? columnLength : wireLength, payload);
                     } else {
-                        FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.LENGTH, columnType.getLength(), payload);
+                        FirebirdPrepareStatementReturnPacket.writeInt(FirebirdSQLInfoPacketType.LENGTH, null == wireLength ? columnType.getLength() : wireLength, payload);
                     }
                     break;
                 case FIELD:

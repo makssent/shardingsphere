@@ -22,6 +22,9 @@ import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobInfoRegistry;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdNonFixedLengthColumnSizeRegistry;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdTypeMetadataRegistry;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdTypeMetadataRegistry.FieldType;
+import org.apache.shardingsphere.database.exception.core.exception.data.InvalidParameterValueException;
 import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.database.NoDatabaseSelectedException;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdConstant;
@@ -50,9 +53,11 @@ import org.apache.shardingsphere.infra.binder.context.statement.type.dml.InsertS
 import org.apache.shardingsphere.infra.binder.context.statement.type.dml.SelectStatementContext;
 import org.apache.shardingsphere.infra.binder.context.statement.type.dml.UpdateStatementContext;
 import org.apache.shardingsphere.infra.binder.engine.SQLBindEngine;
+import org.apache.shardingsphere.infra.datanode.DataNode;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
 import org.apache.shardingsphere.infra.exception.kernel.metadata.TableNotFoundException;
 import org.apache.shardingsphere.infra.metadata.database.ShardingSphereDatabase;
+import org.apache.shardingsphere.infra.metadata.database.resource.unit.StorageUnit;
 import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereColumn;
 import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereSchema;
 import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereTable;
@@ -106,13 +111,16 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.ListIterator;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -124,6 +132,8 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
     private static final ShardingSphereTable LITERAL_TABLE = new ShardingSphereTable(null, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
     
     private static final Pattern TEXT_BLOB_SUBTYPE = Pattern.compile("\\bSUB_TYPE\\s+(TEXT|0*1)\\b|\\(\\s*\\d*\\s*,\\s*0*1\\s*\\)");
+    
+    private static final Pattern CAST_TYPE_TOKENS = Pattern.compile("/\\*[\\s\\S]*?\\*/|--[^\\r\\n]*|'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|[A-Za-z_][A-Za-z_0-9$]*|[^\\s]");
     
     private final FirebirdPrepareStatementPacket packet;
     
@@ -369,48 +379,72 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         return result;
     }
     
+    @HighFrequencyInvocation
     private void processParameters(final SQLStatementContext sqlStatementContext, final Supplier<ShardingSphereDatabase> database,
                                    final Supplier<Optional<ShardingSphereSchema>> schema, final Collection<FirebirdReturnColumnPacket> describeColumns,
                                    final Collection<FirebirdSQLInfoPacketType> requestedItems) {
+        if (sqlStatementContext.getSqlStatement().getParameterMarkers().isEmpty()) {
+            return;
+        }
         if (sqlStatementContext instanceof InsertStatementContext) {
             processInsertStatement((InsertStatementContext) sqlStatementContext, database, schema, describeColumns, requestedItems);
             return;
         }
         Map<Integer, ColumnSegment> affectedColumns = findAffectedColumns(sqlStatementContext);
         List<ParameterMarkerSegment> markers = new ArrayList<>(sqlStatementContext.getSqlStatement().getParameterMarkers());
+        Map<Integer, ExpressionSegment> expressions = new HashMap<>();
+        if (sqlStatementContext instanceof UpdateStatementContext) {
+            markers.sort(Comparator.comparingInt(ParameterMarkerSegment::getStartIndex));
+            collectUpdateParameters((UpdateStatementContext) sqlStatementContext, markers.listIterator(), affectedColumns, expressions);
+        }
         markers.sort(Comparator.comparingInt(ParameterMarkerSegment::getParameterIndex));
         int columnCount = 0;
         for (ParameterMarkerSegment each : markers) {
             columnCount++;
-            if (sqlStatementContext instanceof UpdateStatementContext
-                    && processUpdateValueParameter((UpdateStatementContext) sqlStatementContext, each, database, schema, describeColumns, requestedItems, columnCount)) {
-                continue;
-            }
             ColumnSegment column = affectedColumns.get(each.getParameterIndex());
-            if (null == column) {
-                processUnknownParameter(describeColumns, requestedItems, columnCount);
-            } else {
+            ExpressionSegment value = expressions.get(each.getParameterIndex());
+            if (null != column) {
                 processBoundColumn(column, database, schema, describeColumns, requestedItems, columnCount);
+            } else if (null == value || !processExpressionParameter(value, describeColumns, requestedItems, columnCount)) {
+                processUnknownParameter(describeColumns, requestedItems, columnCount);
             }
         }
     }
     
-    private boolean processUpdateValueParameter(final UpdateStatementContext context, final ParameterMarkerSegment marker, final Supplier<ShardingSphereDatabase> database,
-                                                final Supplier<Optional<ShardingSphereSchema>> schema, final Collection<FirebirdReturnColumnPacket> describeColumns,
-                                                final Collection<FirebirdSQLInfoPacketType> requestedItems, final int columnCount) {
+    private void collectUpdateParameters(final UpdateStatementContext context, final ListIterator<ParameterMarkerSegment> markers,
+                                         final Map<Integer, ColumnSegment> columns, final Map<Integer, ExpressionSegment> expressions) {
         for (ColumnAssignmentSegment each : context.getSqlStatement().getSetAssignment().getAssignments()) {
             ExpressionSegment value = each.getValue();
-            if (marker.getStartIndex() < value.getStartIndex() || marker.getStopIndex() > value.getStopIndex()) {
-                continue;
-            }
+            collectParameterExpressions(value, markers, expressions);
             if (value instanceof ParameterMarkerExpressionSegment) {
-                processBoundColumn(each.getColumns().get(0), database, schema, describeColumns, requestedItems, columnCount);
-            } else if (!processExpressionParameter(value, describeColumns, requestedItems, columnCount)) {
-                processUnknownParameter(describeColumns, requestedItems, columnCount);
+                columns.put(((ParameterMarkerExpressionSegment) value).getParameterMarkerIndex(), each.getColumns().get(0));
             }
-            return true;
         }
-        return false;
+    }
+    
+    private void collectParameterExpressions(final ExpressionSegment value, final ListIterator<ParameterMarkerSegment> markers, final Map<Integer, ExpressionSegment> expressions) {
+        while (markers.hasNext()) {
+            ParameterMarkerSegment marker = markers.next();
+            if (marker.getStartIndex() > value.getStopIndex()) {
+                markers.previous();
+                return;
+            }
+            if (marker.getStartIndex() >= value.getStartIndex() && marker.getStopIndex() <= value.getStopIndex() && !(value instanceof ParameterMarkerExpressionSegment)) {
+                expressions.put(marker.getParameterIndex(), findCastParameterExpression(value, marker));
+            }
+        }
+    }
+    
+    private ExpressionSegment findCastParameterExpression(final ExpressionSegment value, final ParameterMarkerSegment marker) {
+        if (value instanceof FunctionSegment && "CAST".equalsIgnoreCase(((FunctionSegment) value).getFunctionName())) {
+            for (ExpressionSegment each : ((FunctionSegment) value).getParameters()) {
+                if (each instanceof FunctionSegment && "CAST".equalsIgnoreCase(((FunctionSegment) each).getFunctionName())
+                        && each.getStartIndex() <= marker.getStartIndex() && each.getStopIndex() >= marker.getStopIndex()) {
+                    return findCastParameterExpression(each, marker);
+                }
+            }
+        }
+        return value;
     }
     
     private void processBoundColumn(final ColumnSegment column, final Supplier<ShardingSphereDatabase> database, final Supplier<Optional<ShardingSphereSchema>> schema,
@@ -425,32 +459,41 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
                                         final Collection<FirebirdSQLInfoPacketType> requestedItems) {
         Supplier<ShardingSphereTable> table = Suppliers.memoize(() -> getTable(getTableNames(sqlStatementContext).iterator().next(), database, schema));
         List<ParameterMarkerSegment> markers = new ArrayList<>(sqlStatementContext.getSqlStatement().getParameterMarkers());
+        markers.sort(Comparator.comparingInt(ParameterMarkerSegment::getStartIndex));
+        Map<Integer, String> columns = new HashMap<>();
+        Map<Integer, ExpressionSegment> expressions = new HashMap<>();
+        collectInsertParameters(sqlStatementContext, markers.listIterator(), columns, expressions);
         markers.sort(Comparator.comparingInt(ParameterMarkerSegment::getParameterIndex));
         int columnCount = 0;
         for (ParameterMarkerSegment each : markers) {
-            if (!processInsertValueParameter(sqlStatementContext, each, table, describeColumns, requestedItems, ++columnCount)) {
+            columnCount++;
+            String columnName = columns.get(each.getParameterIndex());
+            ExpressionSegment value = expressions.get(each.getParameterIndex());
+            if (null != columnName) {
+                processColumn(describeColumns, requestedItems, table.get(), table.get().getColumn(columnName), null, null, columnCount);
+            } else if (null == value || !processExpressionParameter(value, describeColumns, requestedItems, columnCount)) {
                 processUnknownParameter(describeColumns, requestedItems, columnCount);
             }
         }
     }
     
-    private boolean processInsertValueParameter(final InsertStatementContext context, final ParameterMarkerSegment marker, final Supplier<ShardingSphereTable> table,
-                                                final Collection<FirebirdReturnColumnPacket> describeColumns, final Collection<FirebirdSQLInfoPacketType> requestedItems, final int columnCount) {
+    private void collectInsertParameters(final InsertStatementContext context, final ListIterator<ParameterMarkerSegment> markers,
+                                         final Map<Integer, String> columns, final Map<Integer, ExpressionSegment> expressions) {
         for (InsertValueContext each : context.getInsertValueContexts()) {
-            for (int i = 0; i < each.getValueExpressions().size(); i++) {
-                ExpressionSegment value = each.getValueExpressions().get(i);
-                if (marker.getStartIndex() < value.getStartIndex() || marker.getStopIndex() > value.getStopIndex()) {
-                    continue;
-                }
-                if (value instanceof ParameterMarkerExpressionSegment) {
-                    processColumn(describeColumns, requestedItems, table.get(), table.get().getColumn(context.getColumnNames().get(i)), null, null, columnCount);
-                } else if (!processExpressionParameter(value, describeColumns, requestedItems, columnCount)) {
-                    processUnknownParameter(describeColumns, requestedItems, columnCount);
-                }
-                return true;
+            collectInsertValueParameters(each, context.getColumnNames(), markers, columns, expressions);
+        }
+    }
+    
+    private void collectInsertValueParameters(final InsertValueContext context, final Collection<String> columnNames, final ListIterator<ParameterMarkerSegment> markers,
+                                              final Map<Integer, String> columns, final Map<Integer, ExpressionSegment> expressions) {
+        Iterator<String> columnName = columnNames.iterator();
+        for (ExpressionSegment each : context.getValueExpressions()) {
+            String name = columnName.next();
+            collectParameterExpressions(each, markers, expressions);
+            if (each instanceof ParameterMarkerExpressionSegment) {
+                columns.put(((ParameterMarkerExpressionSegment) each).getParameterMarkerIndex(), name);
             }
         }
-        return false;
     }
     
     private void processUnknownParameter(final Collection<FirebirdReturnColumnPacket> describeColumns, final Collection<FirebirdSQLInfoPacketType> requestedItems, final int columnCount) {
@@ -501,11 +544,18 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
             if (each instanceof DataTypeSegment) {
                 DataTypeSegment dataType = (DataTypeSegment) each;
                 String typeName = dataType.getDataTypeName().toUpperCase(Locale.ENGLISH);
-                int jdbcType = getCastDataType(typeName);
-                ShardingSphereColumn column = new ShardingSphereColumn(null, jdbcType, false, false, true, true, false, false);
                 Integer length = dataType.getDataTypeLength().map(optional -> optional.getPrecision()).orElse(null);
+                int jdbcType = "FLOAT".equals(typeName) && null != length && length > 24 ? Types.DOUBLE : getCastDataType(typeName);
+                ShardingSphereColumn column = new ShardingSphereColumn(null, jdbcType, false, false, true, true, false, false);
                 if (Types.CHAR == jdbcType && null == length) {
                     length = 1;
+                }
+                Optional<FieldType> domainType = Types.VARCHAR == jdbcType && null == length ? findDomainType(dataType.getDataTypeName()) : Optional.empty();
+                if (Types.VARCHAR == jdbcType && null == length && !domainType.isPresent()) {
+                    return false;
+                }
+                if (domainType.isPresent()) {
+                    length = domainType.get().getCharacterLength();
                 }
                 boolean blob = Types.BLOB == jdbcType;
                 Integer subtype = null;
@@ -514,12 +564,28 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
                 }
                 String owner = connectionSession.getConnectionContext().getGrantee().getUsername();
                 FirebirdReturnColumnPacket result = new FirebirdReturnColumnPacket(requestedItems, columnCount, LITERAL_TABLE, column, null, null, owner, length, blob, subtype);
-                if (Types.NUMERIC == jdbcType || Types.DECIMAL == jdbcType) {
+                if (domainType.isPresent()) {
+                    setCatalogType(result, domainType.get());
+                } else if (Types.TIME_WITH_TIMEZONE == jdbcType || Types.TIMESTAMP_WITH_TIMEZONE == jdbcType) {
+                    result.setWireType(Types.TIME_WITH_TIMEZONE == jdbcType ? FirebirdBinaryColumnType.TIME_TZ : FirebirdBinaryColumnType.TIMESTAMP_TZ,
+                            0, 0, Types.TIME_WITH_TIMEZONE == jdbcType ? 8 : 12);
+                } else if ("DECFLOAT".equals(typeName)) {
+                    boolean decimal16 = null != length && 16 == length;
+                    result.setWireType(decimal16 ? FirebirdBinaryColumnType.DEC16 : FirebirdBinaryColumnType.DEC34, 0, 0, decimal16 ? 8 : 16);
+                } else if ("INT128".equals(typeName)) {
+                    result.setWireNumericType(FirebirdBinaryColumnType.INT128, 0, 0);
+                } else if (Types.NUMERIC == jdbcType || Types.DECIMAL == jdbcType) {
                     int precision = null == length ? 9 : length;
                     int scale = dataType.getDataTypeLength().flatMap(optional -> optional.getScale()).orElse(0);
                     result.setWireNumericType(getNumericColumnType(precision, jdbcType), Types.NUMERIC == jdbcType ? 1 : 2, -scale);
                 } else if ((Types.CHAR == jdbcType || Types.VARCHAR == jdbcType) && null != length) {
-                    setWireTextType(result, Types.CHAR == jdbcType ? FirebirdBinaryColumnType.TEXT : FirebirdBinaryColumnType.VARYING, length);
+                    int charsetId = findCastCharacterSetId(dataType);
+                    EncodingDefinition encoding = EncodingFactory.getPlatformDefault().getEncodingDefinitionByCharacterSetId(charsetId);
+                    result.setWireTextType(Types.CHAR == jdbcType ? FirebirdBinaryColumnType.TEXT : FirebirdBinaryColumnType.VARYING,
+                            charsetId, length * (null == encoding ? 1 : encoding.getMaxBytesPerChar()));
+                    result.setTargetCharacterSetId(charsetId);
+                } else if (blob) {
+                    result.setWireType(FirebirdBinaryColumnType.BLOB, subtype, 1 == subtype ? findCastCharacterSetId(dataType) : 0, Long.BYTES);
                 }
                 describeColumns.add(result);
                 return true;
@@ -528,24 +594,8 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         return false;
     }
     
-    private void setWireTextType(final FirebirdReturnColumnPacket packet, final FirebirdBinaryColumnType columnType, final int length) {
-        int charsetId = connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get();
-        EncodingDefinition encoding = EncodingFactory.getPlatformDefault().getEncodingDefinitionByCharacterSetId(charsetId);
-        packet.setWireTextType(columnType, charsetId, length * (null == encoding ? 1 : encoding.getMaxBytesPerChar()));
-    }
-    
-    private FirebirdBinaryColumnType getNumericColumnType(final int precision, final int jdbcType) {
-        if (18 < precision) {
-            return FirebirdBinaryColumnType.INT128;
-        }
-        if (9 < precision) {
-            return FirebirdBinaryColumnType.INT64;
-        }
-        return 4 < precision || Types.DECIMAL == jdbcType ? FirebirdBinaryColumnType.LONG : FirebirdBinaryColumnType.SHORT;
-    }
-    
     private int getCastDataType(final String typeName) {
-        if (typeName.startsWith("BLOB")) {
+        if ("BLOB".equals(typeName) || typeName.startsWith("BLOB ")) {
             return Types.BLOB;
         }
         switch (typeName) {
@@ -563,24 +613,87 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
             case "DOUBLE":
                 return Types.DOUBLE;
             case "NUMERIC":
+            case "INT128":
                 return Types.NUMERIC;
             case "DECIMAL":
             case "DEC":
                 return Types.DECIMAL;
             case "CHAR":
             case "CHARACTER":
+            case "NCHAR":
+            case "NATIONAL CHAR":
+            case "NATIONAL CHARACTER":
                 return Types.CHAR;
             case "DATE":
                 return Types.DATE;
             case "TIME":
+            case "TIME WITHOUT TIME ZONE":
                 return Types.TIME;
+            case "TIME WITH TIME ZONE":
+                return Types.TIME_WITH_TIMEZONE;
+            case "TIMESTAMP WITH TIME ZONE":
+                return Types.TIMESTAMP_WITH_TIMEZONE;
+            case "DECFLOAT":
+                return Types.OTHER;
             case "TIMESTAMP":
+            case "TIMESTAMP WITHOUT TIME ZONE":
                 return Types.TIMESTAMP;
             case "BOOLEAN":
                 return Types.BOOLEAN;
             default:
                 return Types.VARCHAR;
         }
+    }
+    
+    private Optional<FieldType> findDomainType(final String domainName) {
+        ShardingSphereDatabase database = ProxyContext.getInstance().getContextManager().getDatabase(connectionSession.getCurrentDatabaseName());
+        for (StorageUnit each : database.getResourceMetaData().getStorageUnits().values()) {
+            Optional<FieldType> result = FirebirdTypeMetadataRegistry.findDomainType(each.getDataSource(), domainName);
+            if (result.isPresent()) {
+                return result;
+            }
+        }
+        return Optional.empty();
+    }
+    
+    private FirebirdBinaryColumnType getNumericColumnType(final int precision, final int jdbcType) {
+        if (18 < precision) {
+            return FirebirdBinaryColumnType.INT128;
+        }
+        if (9 < precision) {
+            return FirebirdBinaryColumnType.INT64;
+        }
+        return 4 < precision || Types.DECIMAL == jdbcType ? FirebirdBinaryColumnType.LONG : FirebirdBinaryColumnType.SHORT;
+    }
+    
+    private int findCastCharacterSetId(final DataTypeSegment dataType) {
+        int connectionCharsetId = connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get();
+        Matcher tokens = CAST_TYPE_TOKENS.matcher(packet.getSQL()).region(dataType.getStartIndex(), dataType.getStopIndex() + 1);
+        int state = 0;
+        while (tokens.find()) {
+            String token = tokens.group();
+            if (token.startsWith("/*") || token.startsWith("--")) {
+                continue;
+            }
+            if (2 == state) {
+                if ("=".equals(token)) {
+                    continue;
+                }
+                EncodingDefinition encoding = EncodingFactory.getPlatformDefault().getEncodingDefinitionByFirebirdName(new IdentifierValue(token).getValue());
+                ShardingSpherePreconditions.checkNotNull(encoding, () -> new InvalidParameterValueException("character set", token));
+                int result = encoding.getFirebirdCharacterSetId();
+                return connectionCharsetId <= 1 || result <= 1 ? result : connectionCharsetId;
+            }
+            int nextState = "CHARACTER".equalsIgnoreCase(token) || "CHAR".equalsIgnoreCase(token) ? 1 : 0;
+            state = 1 == state && "SET".equalsIgnoreCase(token) ? 2 : nextState;
+        }
+        return connectionCharsetId;
+    }
+    
+    private void setWireTextType(final FirebirdReturnColumnPacket packet, final FirebirdBinaryColumnType columnType, final int length) {
+        int charsetId = connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get();
+        EncodingDefinition encoding = EncodingFactory.getPlatformDefault().getEncodingDefinitionByCharacterSetId(charsetId);
+        packet.setWireTextType(columnType, charsetId, length * (null == encoding ? 1 : encoding.getMaxBytesPerChar()));
     }
     
     private Collection<String> getTableNames(final SQLStatementContext sqlStatementContext) {
@@ -706,6 +819,7 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         processColumn(describeColumns, requestedItems, table, column, null, columnAlias, columnCount);
     }
     
+    @HighFrequencyInvocation
     private void processColumn(final Collection<FirebirdReturnColumnPacket> describeColumns, final Collection<FirebirdSQLInfoPacketType> requestedItems, final ShardingSphereTable table,
                                final ShardingSphereColumn column, final IdentifierValue tableAlias, final IdentifierValue columnAlias, final int idx) {
         String tableAliasString = null == tableAlias ? table.getName() : tableAlias.getValue();
@@ -714,7 +828,48 @@ public final class FirebirdPrepareStatementCommandExecutor implements CommandExe
         boolean blobColumn = isBlobColumn(table, column);
         Integer blobSubtype = blobColumn ? resolveBlobSubtype(table, column) : null;
         Integer columnLength = blobColumn ? null : resolveColumnLength(table, column);
-        describeColumns.add(new FirebirdReturnColumnPacket(requestedItems, idx, table, column, tableAliasString, columnAliasString, owner, columnLength, blobColumn, blobSubtype));
+        Optional<FieldType> fieldType = null == table.getName() ? Optional.empty() : findColumnType(table.getName(), column.getName());
+        if (fieldType.isPresent() && (14 == fieldType.get().getType() || 37 == fieldType.get().getType())) {
+            columnLength = fieldType.get().getCharacterLength();
+        }
+        FirebirdReturnColumnPacket result = new FirebirdReturnColumnPacket(requestedItems, idx, table, column, tableAliasString, columnAliasString, owner, columnLength, blobColumn, blobSubtype);
+        fieldType.ifPresent(type -> setCatalogType(result, type));
+        describeColumns.add(result);
+    }
+    
+    private void setCatalogType(final FirebirdReturnColumnPacket packet, final FieldType fieldType) {
+        FirebirdBinaryColumnType type = 261 == fieldType.getType() ? FirebirdBinaryColumnType.BLOB : FirebirdBinaryColumnType.valueOfBLRType(fieldType.getType());
+        if (FirebirdBinaryColumnType.TEXT == type || FirebirdBinaryColumnType.VARYING == type || FirebirdBinaryColumnType.LEGACY_TEXT == type || FirebirdBinaryColumnType.LEGACY_VARYING == type) {
+            int charsetId = connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get();
+            if (0 == charsetId || fieldType.getCharacterSetId() <= 1) {
+                packet.setWireTextType(type, fieldType.getCharacterSetId(), fieldType.getLength());
+            } else {
+                setWireTextType(packet, type, fieldType.getCharacterLength());
+            }
+            packet.setTargetCharacterSetId(fieldType.getCharacterSetId());
+        } else if (FirebirdBinaryColumnType.BLOB == type && 1 == fieldType.getSubType()) {
+            int charsetId = connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get();
+            int scale = fieldType.getCharacterSetId() <= 1 || charsetId <= 1 ? fieldType.getCharacterSetId() : charsetId;
+            packet.setWireType(type, fieldType.getSubType(), scale, fieldType.getLength());
+        } else {
+            packet.setWireType(type, fieldType.getSubType(), fieldType.getScale(), fieldType.getLength());
+        }
+    }
+    
+    private Optional<FieldType> findColumnType(final String tableName, final String columnName) {
+        ShardingSphereDatabase database = ProxyContext.getInstance().getContextManager().getDatabase(connectionSession.getCurrentDatabaseName());
+        Map<String, StorageUnit> storageUnits = database.getResourceMetaData().getStorageUnits();
+        for (DataNodeRuleAttribute each : database.getRuleMetaData().getAttributes(DataNodeRuleAttribute.class)) {
+            Collection<DataNode> nodes = each.getDataNodesByTableName(tableName);
+            if (!nodes.isEmpty()) {
+                DataNode firstNode = nodes.iterator().next();
+                StorageUnit storageUnit = storageUnits.get(firstNode.getDataSourceName());
+                if (null != storageUnit) {
+                    return FirebirdTypeMetadataRegistry.findColumnType(storageUnit.getDataSource(), firstNode.getTableName(), columnName);
+                }
+            }
+        }
+        return storageUnits.isEmpty() ? Optional.empty() : FirebirdTypeMetadataRegistry.findColumnType(storageUnits.values().iterator().next().getDataSource(), tableName, columnName);
     }
     
     private boolean isBlobColumn(final ShardingSphereTable table, final ShardingSphereColumn column) {

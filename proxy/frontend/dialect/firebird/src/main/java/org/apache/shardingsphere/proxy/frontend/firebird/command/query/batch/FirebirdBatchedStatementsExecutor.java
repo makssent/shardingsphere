@@ -22,8 +22,14 @@ import lombok.RequiredArgsConstructor;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNode;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdTypeMetadataRegistry;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException.StatusVectorEntry;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.DateTimeOutOfRangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.NumericOutOfRangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
+import org.apache.shardingsphere.database.protocol.firebird.err.FirebirdStatusVector;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdReturnColumnPacket;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.binder.context.aware.ParameterAware;
 import org.apache.shardingsphere.infra.binder.context.statement.SQLStatementContext;
@@ -49,9 +55,11 @@ import org.apache.shardingsphere.infra.executor.sql.prepare.driver.jdbc.Statemen
 import org.apache.shardingsphere.infra.metadata.database.ShardingSphereDatabase;
 import org.apache.shardingsphere.infra.metadata.database.resource.ResourceMetaData;
 import org.apache.shardingsphere.infra.metadata.database.resource.unit.StorageUnit;
+import org.apache.shardingsphere.infra.route.context.RouteMapper;
 import org.apache.shardingsphere.infra.rule.ShardingSphereRule;
 import org.apache.shardingsphere.infra.session.query.QueryContext;
 import org.apache.shardingsphere.mode.metadata.MetaDataContexts;
+import org.apache.shardingsphere.parser.rule.SQLParserRule;
 import org.apache.shardingsphere.proxy.backend.connector.jdbc.statement.JDBCBackendStatement;
 import org.apache.shardingsphere.proxy.backend.context.BackendExecutorContext;
 import org.apache.shardingsphere.proxy.backend.context.ProxyContext;
@@ -61,15 +69,30 @@ import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.Fire
 import org.apache.shardingsphere.sql.parser.engine.core.database.parser.SQLParserExecutor;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
 import org.firebirdsql.encodings.EncodingFactory;
+import org.firebirdsql.extern.decimal.Decimal128;
+import org.firebirdsql.extern.decimal.Decimal64;
+import org.firebirdsql.gds.ISCConstants;
+import org.firebirdsql.jdbc.JaybirdTypeCodes;
 import org.firebirdsql.jdbc.field.TypeConversionException;
+import org.jspecify.annotations.Nullable;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.sql.BatchUpdateException;
 import java.sql.Connection;
+import java.sql.JDBCType;
+import java.sql.ParameterMetaData;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.time.DateTimeException;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetTime;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -112,7 +135,11 @@ public final class FirebirdBatchedStatementsExecutor {
     
     private final Map<PreparedStatement, List<List<Object>>> pendingBatchParams = new IdentityHashMap<>();
     
-    private final Map<String, List<Integer>> physicalParameterMarkers = new HashMap<>();
+    private final Map<Connection, Map<String, PreparedStatement>> parameterConversions;
+    
+    private final Map<PreparedStatement, ParameterMetaData> parameterMetaDataCache;
+    
+    private final Map<Connection, Boolean> firebirdConnections;
     
     private final Map<String, Map<List<Integer>, String>> textBlobSqlVariants = new HashMap<>();
     
@@ -122,7 +149,7 @@ public final class FirebirdBatchedStatementsExecutor {
     
     private final boolean preserveMessageOrder;
     
-    private final Map<String, RawTextBlob> rawTextBlobs;
+    private final Map<?, RawTextBlob> rawTextBlobs;
     
     private final ExecutionContext anyExecutionContext;
     
@@ -134,15 +161,18 @@ public final class FirebirdBatchedStatementsExecutor {
     }
     
     FirebirdBatchedStatementsExecutor(final ConnectionSession connectionSession, final FirebirdServerPreparedStatement preparedStatement, final List<List<Object>> parameterSets,
-                                      final boolean multiError, final Map<String, RawTextBlob> rawTextBlobs) {
+                                      final boolean multiError, final Map<?, RawTextBlob> rawTextBlobs) {
         this(connectionSession, preparedStatement, parameterSets, multiError, rawTextBlobs, false);
     }
     
     FirebirdBatchedStatementsExecutor(final ConnectionSession connectionSession, final FirebirdServerPreparedStatement preparedStatement, final List<List<Object>> parameterSets,
-                                      final boolean multiError, final Map<String, RawTextBlob> rawTextBlobs, final boolean preserveMessageOrder) {
+                                      final boolean multiError, final Map<?, RawTextBlob> rawTextBlobs, final boolean preserveMessageOrder) {
         jdbcExecutor = new JDBCExecutor(BackendExecutorContext.getInstance().getExecutorEngine(), connectionSession.getConnectionContext());
         this.multiError = multiError;
         this.preserveMessageOrder = preserveMessageOrder;
+        parameterConversions = preserveMessageOrder ? new IdentityHashMap<>(1) : Collections.emptyMap();
+        parameterMetaDataCache = preserveMessageOrder ? new IdentityHashMap<>(1) : Collections.emptyMap();
+        firebirdConnections = preserveMessageOrder ? new IdentityHashMap<>(1) : Collections.emptyMap();
         this.rawTextBlobs = rawTextBlobs;
         this.connectionSession = connectionSession;
         metaDataContexts = ProxyContext.getInstance().getContextManager().getMetaDataContexts();
@@ -205,17 +235,27 @@ public final class FirebirdBatchedStatementsExecutor {
             return executionUnit;
         }
         String sql = sqlUnit.getSql();
-        List<Integer> markers = physicalParameterMarkers.computeIfAbsent(sql, key -> getParameterMarkers(key, storageType));
         List<Object> params = new ArrayList<>(sqlUnit.getParameters());
-        ShardingSpherePreconditions.checkState(markers.size() == params.size(), () -> new IllegalStateException("Physical SQL parameter count does not match its values."));
         List<Integer> charsets = new ArrayList<>(params.size());
+        boolean rewriteSql = false;
         for (int i = 0; i < params.size(); i++) {
             RawTextBlob blob = rawTextBlobs.get(params.get(i));
-            charsets.add(null == blob ? -1 : blob.charsetId);
+            charsets.add(null == blob || null != blob.parameter ? -1 : blob.charsetId);
             if (null != blob) {
-                params.set(i, blob.content);
+                if (null == blob.parameter) {
+                    params.set(i, blob.content);
+                    rewriteSql = true;
+                } else {
+                    params.set(i, getTextColumnValue(sqlUnit, storageUnit, blob, params.get(i)));
+                }
             }
         }
+        if (!rewriteSql) {
+            return new ExecutionUnit(executionUnit.getDataSourceName(), new SQLUnit(sql, params, sqlUnit.getTableRouteMappers()));
+        }
+        long cacheSize = metaDataContexts.getMetaData().getGlobalRuleMetaData().getSingleRule(SQLParserRule.class).getParseTreeCache().getMaximumSize();
+        List<Integer> markers = preparedStatement.getPhysicalParameterMarkers(sql, cacheSize, key -> getParameterMarkers(key, storageType));
+        ShardingSpherePreconditions.checkState(markers.size() == params.size(), () -> new IllegalStateException("Physical SQL parameter count does not match its values."));
         String rewritten = textBlobSqlVariants.computeIfAbsent(sql, key -> new HashMap<>()).computeIfAbsent(charsets, key -> rewriteTextBlobSql(sql, markers, key));
         return new ExecutionUnit(executionUnit.getDataSourceName(), new SQLUnit(rewritten, params, sqlUnit.getTableRouteMappers()));
     }
@@ -231,16 +271,23 @@ public final class FirebirdBatchedStatementsExecutor {
     }
     
     @HighFrequencyInvocation
-    private String rewriteTextBlobSql(final String sql, final List<Integer> markers, final List<Integer> charsets) {
-        StringBuilder rewritten = new StringBuilder(sql);
-        for (int i = markers.size() - 1; i >= 0; i--) {
-            if (charsets.get(i) >= 0) {
-                String charsetName = EncodingFactory.getPlatformDefault().getEncodingDefinitionByCharacterSetId(charsets.get(i)).getFirebirdEncodingName();
-                String replacement = new StringBuilder("CAST(CAST(? AS BLOB SUB_TYPE TEXT CHARACTER SET NONE) AS BLOB SUB_TYPE TEXT CHARACTER SET ").append(charsetName).append(')').toString();
-                rewritten.replace(markers.get(i), markers.get(i) + 1, replacement);
+    private Object getTextColumnValue(final SQLUnit sqlUnit, @Nullable final StorageUnit storageUnit, final RawTextBlob blob, final Object value) {
+        Optional<Integer> charsetId = blob.parameter.findTargetCharacterSetId();
+        if (null != storageUnit && blob.parameter.findTableName().isPresent() && blob.parameter.findColumnName().isPresent()) {
+            String tableName = blob.parameter.findTableName().get();
+            for (RouteMapper each : sqlUnit.getTableRouteMappers()) {
+                if (each.getLogicName().equalsIgnoreCase(tableName)) {
+                    tableName = each.getActualName();
+                    break;
+                }
+            }
+            Optional<Integer> physicalCharset = FirebirdTypeMetadataRegistry.findColumnType(storageUnit.getDataSource(), tableName, blob.parameter.findColumnName().get())
+                    .map(optional -> optional.getCharacterSetId());
+            if (physicalCharset.isPresent()) {
+                charsetId = physicalCharset;
             }
         }
-        return rewritten.toString();
+        return charsetId.isPresent() && charsetId.get() <= 1 ? blob.content : value;
     }
     
     private List<Integer> getParameterMarkers(final String sql, final DatabaseType storageType) {
@@ -256,6 +303,19 @@ public final class FirebirdBatchedStatementsExecutor {
         for (int i = 0; i < node.getChildCount(); i++) {
             collectParameterMarkers(node.getChild(i), markers);
         }
+    }
+    
+    @HighFrequencyInvocation
+    private String rewriteTextBlobSql(final String sql, final List<Integer> markers, final List<Integer> charsets) {
+        StringBuilder rewritten = new StringBuilder(sql);
+        for (int i = markers.size() - 1; i >= 0; i--) {
+            if (charsets.get(i) >= 0) {
+                String charsetName = EncodingFactory.getPlatformDefault().getEncodingDefinitionByCharacterSetId(charsets.get(i)).getFirebirdEncodingName();
+                String replacement = new StringBuilder("CAST(CAST(? AS BLOB SUB_TYPE TEXT CHARACTER SET NONE) AS BLOB SUB_TYPE TEXT CHARACTER SET ").append(charsetName).append(')').toString();
+                rewritten.replace(markers.get(i), markers.get(i) + 1, replacement);
+            }
+        }
+        return rewritten.toString();
     }
     
     private ExecutionContext createExecutionContext(final QueryContext queryContext) {
@@ -330,6 +390,9 @@ public final class FirebirdBatchedStatementsExecutor {
             int paramIndex = eachParams.nextIndex() + 1;
             Object value = eachParams.next();
             try {
+                if (preserveMessageOrder && value instanceof String) {
+                    value = convertBlobParameter(preparedStatement, paramIndex, (String) value);
+                }
                 preparedStatement.setObject(paramIndex, value);
             } catch (final TypeConversionException ex) {
                 if (preserveMessageOrder && value instanceof String) {
@@ -339,6 +402,185 @@ public final class FirebirdBatchedStatementsExecutor {
             }
         }
         preparedStatement.addBatch();
+    }
+    
+    private Object convertBlobParameter(final PreparedStatement statement, final int index, final String value) throws SQLException {
+        ParameterMetaData metadata = getParameterMetaData(statement);
+        int jdbcType = metadata.getParameterType(index);
+        boolean nativeScalar = Types.BOOLEAN == jdbcType || Types.FLOAT == jdbcType || Types.DOUBLE == jdbcType || JaybirdTypeCodes.DECFLOAT == jdbcType
+                || Types.NUMERIC == jdbcType && "INT128".equals(metadata.getParameterTypeName(index));
+        if (nativeScalar && !isFirebirdConnection(statement.getConnection())) {
+            return value;
+        }
+        if (Types.BOOLEAN == jdbcType || Types.FLOAT == jdbcType || Types.DOUBLE == jdbcType) {
+            String typeName = Types.DOUBLE == jdbcType ? "DOUBLE PRECISION" : JDBCType.valueOf(jdbcType).getName();
+            return convertParameterAtServer(statement, jdbcType, typeName, value);
+        }
+        if (JaybirdTypeCodes.DECFLOAT == jdbcType) {
+            String typeName = 16 == metadata.getPrecision(index) ? "DECFLOAT(16)" : "DECFLOAT(34)";
+            return convertParameterAtServer(statement, jdbcType, typeName, value);
+        }
+        if (Types.NUMERIC == jdbcType && "INT128".equals(metadata.getParameterTypeName(index))) {
+            return convertParameterAtServer(statement, jdbcType, "INT128", value);
+        }
+        if (Types.DATE != jdbcType && Types.TIME != jdbcType && Types.TIMESTAMP != jdbcType && Types.TIME_WITH_TIMEZONE != jdbcType && Types.TIMESTAMP_WITH_TIMEZONE != jdbcType) {
+            return value;
+        }
+        int start = 0;
+        int end = value.length();
+        while (start < end && (' ' == value.charAt(start) || '\t' == value.charAt(start))) {
+            start++;
+        }
+        while (end > start && (' ' == value.charAt(end - 1) || '\t' == value.charAt(end - 1))) {
+            end--;
+        }
+        try {
+            if (Types.DATE == jdbcType) {
+                return parseTemporalDate(value, start, end);
+            }
+            if (Types.TIME == jdbcType) {
+                return parseTemporalTime(value, start, end);
+            }
+            if (Types.TIME_WITH_TIMEZONE == jdbcType) {
+                return parseOffsetTime(value, start, end);
+            }
+            if (Types.TIMESTAMP_WITH_TIMEZONE == jdbcType) {
+                return convertParameterAtServer(statement, jdbcType, getTemporalTypeName(jdbcType), value);
+            }
+            int separator = value.indexOf(' ', start);
+            return LocalDateTime.of(parseTemporalDate(value, start, separator), parseTemporalTime(value, separator + 1, end));
+        } catch (final DateTimeException | NumberFormatException ignored) {
+            return convertParameterAtServer(statement, jdbcType, getTemporalTypeName(jdbcType), value);
+        }
+    }
+    
+    private ParameterMetaData getParameterMetaData(final PreparedStatement statement) throws SQLException {
+        ParameterMetaData result = parameterMetaDataCache.get(statement);
+        if (null == result) {
+            result = statement.getParameterMetaData();
+            parameterMetaDataCache.put(statement, result);
+        }
+        return result;
+    }
+    
+    private boolean isFirebirdConnection(final Connection connection) throws SQLException {
+        Boolean result = firebirdConnections.get(connection);
+        if (null == result) {
+            result = connection.getMetaData().getURL().startsWith("jdbc:firebirdsql:");
+            firebirdConnections.put(connection, result);
+        }
+        return result;
+    }
+    
+    private Object convertParameterAtServer(final PreparedStatement statement, final int jdbcType, final String typeName, final String value) throws SQLException {
+        Connection connection = statement.getConnection();
+        Map<String, PreparedStatement> statements = parameterConversions.computeIfAbsent(connection, key -> new HashMap<>());
+        try {
+            PreparedStatement conversion = statements.get(typeName);
+            if (null == conversion) {
+                String sql = new StringBuilder("SELECT CAST(CAST(? AS BLOB SUB_TYPE TEXT CHARACTER SET NONE) AS ").append(typeName).append(") FROM RDB$DATABASE").toString();
+                conversion = connection.prepareStatement(sql);
+                statements.put(typeName, conversion);
+            }
+            conversion.setBytes(1, value.getBytes(StandardCharsets.ISO_8859_1));
+            try (ResultSet resultSet = conversion.executeQuery()) {
+                resultSet.next();
+                switch (jdbcType) {
+                    case Types.DATE:
+                        return resultSet.getObject(1, LocalDate.class);
+                    case Types.TIME:
+                        return resultSet.getObject(1, LocalTime.class);
+                    case Types.TIME_WITH_TIMEZONE:
+                    case Types.TIMESTAMP_WITH_TIMEZONE:
+                        return resultSet.getObject(1, ZonedDateTime.class);
+                    case Types.TIMESTAMP:
+                        return resultSet.getObject(1, LocalDateTime.class);
+                    case JaybirdTypeCodes.DECFLOAT:
+                        return "DECFLOAT(16)".equals(typeName) ? resultSet.getObject(1, Decimal64.class) : resultSet.getObject(1, Decimal128.class);
+                    default:
+                        return resultSet.getObject(1);
+                }
+            }
+        } catch (final SQLException ex) {
+            if (ISCConstants.isc_convert_error == ex.getErrorCode()) {
+                throw new ParameterConversionException(FirebirdBlobParameterConverter.createConversionError(value));
+            }
+            if (ISCConstants.isc_date_range_exceeded == ex.getErrorCode() || ISCConstants.isc_time_range_exceeded == ex.getErrorCode()
+                    || ISCConstants.isc_datetime_range_exceeded == ex.getErrorCode()) {
+                throw new ParameterConversionException(new DateTimeOutOfRangeException(jdbcType));
+            }
+            if (ISCConstants.isc_numeric_out_of_range == ex.getErrorCode()) {
+                throw new ParameterConversionException(new NumericOutOfRangeException());
+            }
+            if (null != ex.getSQLState() && ex.getSQLState().startsWith("22")) {
+                throw createNativeParameterConversionException(ex);
+            }
+            throw ex;
+        }
+    }
+    
+    private ParameterConversionException createNativeParameterConversionException(final SQLException cause) {
+        List<FirebirdStatusVector.Segment> segments = new FirebirdStatusVector(cause).getSegments();
+        Collection<StatusVectorEntry> statusVector = new ArrayList<>(segments.size());
+        for (FirebirdStatusVector.Segment each : segments) {
+            statusVector.add(new StatusVectorEntry(each.getGdsCode(), new ArrayList<>(each.getArguments())));
+        }
+        return new ParameterConversionException(new FirebirdException(cause.getMessage(), cause.getSQLState(), cause.getErrorCode(), statusVector));
+    }
+    
+    private static LocalDate parseTemporalDate(final String value, final int start, final int end) {
+        int first = value.indexOf('-', start);
+        int second = value.indexOf('-', first + 1);
+        ShardingSpherePreconditions.checkState(4 == first - start && second > first + 1 && second - first <= 3 && end > second + 1 && end - second <= 3, NumberFormatException::new);
+        int year = getTemporalPart(value, start, first);
+        ShardingSpherePreconditions.checkState(year > 0, NumberFormatException::new);
+        return LocalDate.of(year, getTemporalPart(value, first + 1, second), getTemporalPart(value, second + 1, end));
+    }
+    
+    private static int getTemporalPart(final String value, final int start, final int end) {
+        int result = 0;
+        for (int i = start; i < end; i++) {
+            int digit = value.charAt(i) - '0';
+            ShardingSpherePreconditions.checkState(digit >= 0 && digit <= 9, NumberFormatException::new);
+            result = result * 10 + digit;
+        }
+        return result;
+    }
+    
+    private static LocalTime parseTemporalTime(final String value, final int start, final int end) {
+        int first = value.indexOf(':', start);
+        int second = value.indexOf(':', first + 1);
+        int decimal = value.indexOf('.', second + 1);
+        int secondsEnd = decimal < 0 ? end : decimal;
+        ShardingSpherePreconditions.checkState(first > start && first - start <= 2 && second > first + 1 && second - first <= 3
+                && secondsEnd > second + 1 && secondsEnd - second <= 3 && (decimal < 0 || end > decimal + 1 && end - decimal <= 5), NumberFormatException::new);
+        int nanos = 0;
+        if (decimal >= 0) {
+            nanos = getTemporalPart(value, decimal + 1, end);
+            for (int i = end - decimal - 1; i < 9; i++) {
+                nanos *= 10;
+            }
+        }
+        return LocalTime.of(getTemporalPart(value, start, first), getTemporalPart(value, first + 1, second), getTemporalPart(value, second + 1, secondsEnd), nanos);
+    }
+    
+    private static OffsetTime parseOffsetTime(final String value, final int start, final int end) {
+        int offset = end - 6;
+        int decimal = value.indexOf('.', start);
+        ShardingSpherePreconditions.checkState(offset > start && ('+' == value.charAt(offset) || '-' == value.charAt(offset)) && ':' == value.charAt(end - 3)
+                && (decimal < 0 || offset > decimal + 1 && offset - decimal <= 5), NumberFormatException::new);
+        return OffsetTime.parse(value.substring(start, end));
+    }
+    
+    private String getTemporalTypeName(final int jdbcType) {
+        switch (jdbcType) {
+            case Types.TIME_WITH_TIMEZONE:
+                return "TIME WITH TIME ZONE";
+            case Types.TIMESTAMP_WITH_TIMEZONE:
+                return "TIMESTAMP WITH TIME ZONE";
+            default:
+                return JDBCType.valueOf(jdbcType).getName();
+        }
     }
     
     private ParameterConversionException createParameterConversionException(final PreparedStatement statement, final int index, final String value, final TypeConversionException cause) {
@@ -351,7 +593,7 @@ public final class FirebirdBatchedStatementsExecutor {
     private boolean isNumericOutOfRange(final PreparedStatement statement, final int index, final String value) {
         try {
             new BigDecimal(value.trim());
-            int type = statement.getParameterMetaData().getParameterType(index);
+            int type = getParameterMetaData(statement).getParameterType(index);
             return Types.NUMERIC == type || Types.DECIMAL == type;
         } catch (final NumberFormatException | SQLException ignored) {
             return false;
@@ -369,10 +611,22 @@ public final class FirebirdBatchedStatementsExecutor {
     }
     
     private void closePreparedStatements() throws SQLException {
-        for (ExecutionGroup<JDBCExecutionUnit> eachGroup : executionGroupContext.getInputGroups()) {
-            for (JDBCExecutionUnit each : eachGroup.getInputs()) {
-                each.getStorageResource().close();
+        try {
+            for (ExecutionGroup<JDBCExecutionUnit> eachGroup : executionGroupContext.getInputGroups()) {
+                for (JDBCExecutionUnit each : eachGroup.getInputs()) {
+                    each.getStorageResource().close();
+                }
             }
+        } finally {
+            for (Map<String, PreparedStatement> each : parameterConversions.values()) {
+                closeParameterConversions(each.values());
+            }
+        }
+    }
+    
+    private void closeParameterConversions(final Collection<PreparedStatement> statements) throws SQLException {
+        for (PreparedStatement each : statements) {
+            each.close();
         }
     }
     
@@ -658,6 +912,13 @@ public final class FirebirdBatchedStatementsExecutor {
         private final byte[] content;
         
         private final int charsetId;
+        
+        @Nullable
+        private final FirebirdReturnColumnPacket parameter;
+        
+        RawTextBlob(final byte[] content, final int charsetId) {
+            this(content, charsetId, null);
+        }
     }
     
     @RequiredArgsConstructor

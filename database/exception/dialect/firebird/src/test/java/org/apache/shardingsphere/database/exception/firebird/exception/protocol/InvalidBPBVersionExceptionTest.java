@@ -22,12 +22,13 @@ import org.junit.jupiter.api.Test;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 
-class BatchDefaultBpbChangeExceptionTest {
+class InvalidBPBVersionExceptionTest {
     
     @Test
     void assertGetMessage() {
-        BatchDefaultBpbChangeException actual = new BatchDefaultBpbChangeException(7);
-        assertThat(actual.getMessage(), is("Cannot change default BLOB parameter buffer after adding BLOB data to batch for statement handle 7"));
-        assertThat(actual.getStatementHandle(), is(7));
+        InvalidBPBVersionException actual = new InvalidBPBVersionException(2, 1);
+        assertThat(actual.getMessage(), is("Wrong version of BLOB parameter buffer 2, should be 1"));
+        assertThat(actual.getVersion(), is(2));
+        assertThat(actual.getExpectedVersion(), is(1));
     }
 }

@@ -26,7 +26,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchMessageCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchRegisterBlobCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchReleaseCommandPacket;
-import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBPBCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSyncCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdBatchBlobSegmentsCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdCancelBlobCommandPacket;
@@ -113,7 +113,7 @@ class FirebirdCommandPacketFactoryTest {
                 Arguments.of("batch_exec", FirebirdCommandPacketType.BATCH_EXEC, FirebirdBatchExecuteCommandPacket.class),
                 Arguments.of("batch_register_blob", FirebirdCommandPacketType.BATCH_REGBLOB, FirebirdBatchRegisterBlobCommandPacket.class),
                 Arguments.of("batch_blob_stream", FirebirdCommandPacketType.BATCH_BLOB_STREAM, FirebirdBatchBlobStreamCommandPacket.class),
-                Arguments.of("batch_set_bpb", FirebirdCommandPacketType.BATCH_SET_BPB, FirebirdBatchSetBpbCommandPacket.class),
+                Arguments.of("batch_set_bpb", FirebirdCommandPacketType.BATCH_SET_BPB, FirebirdBatchSetBPBCommandPacket.class),
                 Arguments.of("batch_release", FirebirdCommandPacketType.BATCH_RLS, FirebirdBatchReleaseCommandPacket.class),
                 Arguments.of("batch_cancel", FirebirdCommandPacketType.BATCH_CANCEL, FirebirdBatchCancelCommandPacket.class),
                 Arguments.of("batch_sync", FirebirdCommandPacketType.BATCH_SYNC, FirebirdBatchSyncCommandPacket.class),

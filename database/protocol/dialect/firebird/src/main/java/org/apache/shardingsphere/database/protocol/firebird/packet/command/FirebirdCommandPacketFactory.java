@@ -28,7 +28,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchMessageCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchRegisterBlobCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchReleaseCommandPacket;
-import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBPBCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSyncCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdBatchBlobSegmentsCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.blob.FirebirdCancelBlobCommandPacket;
@@ -125,7 +125,7 @@ public final class FirebirdCommandPacketFactory {
             case BATCH_BLOB_STREAM:
                 return new FirebirdBatchBlobStreamCommandPacket(payload);
             case BATCH_SET_BPB:
-                return new FirebirdBatchSetBpbCommandPacket(payload);
+                return new FirebirdBatchSetBPBCommandPacket(payload);
             case BATCH_RLS:
                 return new FirebirdBatchReleaseCommandPacket(payload);
             case BATCH_CANCEL:
@@ -197,7 +197,7 @@ public final class FirebirdCommandPacketFactory {
             case BATCH_REGBLOB:
                 return FirebirdBatchRegisterBlobCommandPacket.getLength();
             case BATCH_SET_BPB:
-                return FirebirdBatchSetBpbCommandPacket.getLength(payload);
+                return FirebirdBatchSetBPBCommandPacket.getLength(payload);
             case BATCH_RLS:
                 return FirebirdBatchReleaseCommandPacket.getLength();
             case BATCH_CANCEL:

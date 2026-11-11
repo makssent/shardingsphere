@@ -22,12 +22,12 @@ import org.junit.jupiter.api.Test;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 
-class BatchBlobContinuationBpbExceptionTest {
+class BatchDefaultBPBChangeExceptionTest {
     
     @Test
     void assertGetMessage() {
-        BatchBlobContinuationBpbException actual = new BatchBlobContinuationBpbException(4L);
-        assertThat(actual.getMessage(), is("Batch BLOB continuation contains BLOB parameter buffer of length 4"));
-        assertThat(actual.getBpbLength(), is(4L));
+        BatchDefaultBPBChangeException actual = new BatchDefaultBPBChangeException(7);
+        assertThat(actual.getMessage(), is("Cannot change default BLOB parameter buffer after adding BLOB data to batch for statement handle 7"));
+        assertThat(actual.getStatementHandle(), is(7));
     }
 }

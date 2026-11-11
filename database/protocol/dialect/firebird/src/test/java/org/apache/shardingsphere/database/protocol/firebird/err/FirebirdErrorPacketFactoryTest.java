@@ -22,7 +22,7 @@ import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import org.apache.shardingsphere.database.exception.core.exception.connection.AccessDeniedException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.database.UnknownDatabaseException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBpbTooBigException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBPBTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.UnknownBatchBlobIdException;
@@ -68,8 +68,8 @@ class FirebirdErrorPacketFactoryTest {
     }
     
     @Test
-    void assertNewInstanceWithBatchBpbTooBigException() {
-        assertThat(writeStatusVector(new BatchBpbTooBigException(8L, 4L)),
+    void assertNewInstanceWithBatchBPBTooBigException() {
+        assertThat(writeStatusVector(new BatchBPBTooBigException(8L, 4L)),
                 is("00000001140000f9" + "0000000114000074" + "00000004ffffff98" + "0000000114000367" + "000000011400036a" + "0000000400000008" + "0000000400000004" + "00000000"));
     }
     

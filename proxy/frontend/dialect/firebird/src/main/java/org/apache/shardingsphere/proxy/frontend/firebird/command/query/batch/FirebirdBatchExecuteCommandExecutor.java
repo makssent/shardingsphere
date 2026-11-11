@@ -45,10 +45,13 @@ import org.apache.shardingsphere.proxy.frontend.firebird.command.query.FirebirdS
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.FirebirdBlobParameterConverter;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.blob.cache.FirebirdBlobWriteCache;
 import org.apache.shardingsphere.proxy.frontend.firebird.command.query.transaction.FirebirdTransactionIdGenerator;
+import org.firebirdsql.encodings.EncodingFactory;
+import org.firebirdsql.gds.ISCConstants;
 import org.jspecify.annotations.Nullable;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -119,7 +122,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
     }
     
     private FirebirdBatchCompletion executeParameters(final FirebirdServerPreparedStatement preparedStatement, final List<List<Object>> params, final boolean multiError,
-                                                      final Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs, final boolean preserveMessageOrder) throws SQLException {
+                                                      final Map<?, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs, final boolean preserveMessageOrder) throws SQLException {
         if (params.isEmpty()) {
             return new FirebirdBatchCompletion(0, NO_UPDATE_COUNTS);
         }
@@ -130,7 +133,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
         Map<Long, Long> blobIds = new HashMap<>(batchStatement.getBlobIds());
         List<List<Object>> params = new ArrayList<>(batchStatement.getParameterValues().size());
         Collection<FirebirdBatchCompletion> completions = new ArrayList<>();
-        Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs = new IdentityHashMap<>();
+        Map<Object, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs = new IdentityHashMap<>();
         FirebirdBlobParameterConverter converter = new FirebirdBlobParameterConverter(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get());
         boolean preserveMessageOrder = requiresBlobMessageOrder(batchStatement.getColumnDescriptors(), preparedStatement.getParameterColumns(), converter);
         for (List<Object> each : batchStatement.getParameterValues()) {
@@ -166,8 +169,7 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
         return mergeCompletions(completions);
     }
     
-    private boolean requiresBlobMessageOrder(final List<FirebirdBatchColumnDescriptor> fields, final List<FirebirdReturnColumnPacket> params,
-                                             final FirebirdBlobParameterConverter converter) {
+    private boolean requiresBlobMessageOrder(final List<FirebirdBatchColumnDescriptor> fields, final List<FirebirdReturnColumnPacket> params, final FirebirdBlobParameterConverter converter) {
         for (int i = 0; i < Math.min(fields.size(), params.size()); i++) {
             if (FirebirdBinaryColumnType.BLOB == fields.get(i).getType() && converter.isBackendConversion(params.get(i))) {
                 return true;
@@ -178,10 +180,10 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
     
     private List<Object> bindRowBlobParameters(final List<Object> params, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final List<FirebirdReturnColumnPacket> parameterColumns,
                                                final Map<Long, Long> blobIds, final FirebirdBlobParameterConverter converter,
-                                               final Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs) {
+                                               final Map<Object, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs) {
         List<Object> result = new ArrayList<>(params);
         resolveBatchBlobIds(result, columnDescriptors, blobIds);
-        boolean[] moved = moveReadBlobParameters(result, columnDescriptors, parameterColumns, converter);
+        boolean[] moved = moveReadBlobParameters(result, columnDescriptors, parameterColumns, converter, rawTextBlobs);
         for (int i = 0; i < columnDescriptors.size(); i++) {
             if (!moved[i] && isBlobValue(columnDescriptors.get(i), result.get(i))) {
                 byte[] content = getBlobContent(result.get(i));
@@ -194,7 +196,10 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
                 Object value = converter.convert(content, field, parameter);
                 Optional<String> text = value instanceof byte[] ? converter.findTextBlobForRouting(content, field, parameter) : Optional.empty();
                 if (text.isPresent()) {
-                    rawTextBlobs.put(text.get(), new FirebirdBatchedStatementsExecutor.RawTextBlob(content, converter.getFieldCharsetId(field)));
+                    int charsetId = FirebirdBinaryColumnType.BLOB == parameter.getColumnType()
+                            ? parameter.findTargetCharacterSetId().orElse(converter.getFieldCharsetId(field))
+                            : converter.getFieldCharsetId(field);
+                    rawTextBlobs.put(text.get(), new FirebirdBatchedStatementsExecutor.RawTextBlob(content, charsetId));
                     value = text.get();
                 }
                 result.set(i, value);
@@ -216,14 +221,14 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
     }
     
     private boolean[] moveReadBlobParameters(final List<Object> params, final List<FirebirdBatchColumnDescriptor> columnDescriptors, final List<FirebirdReturnColumnPacket> parameterColumns,
-                                             final FirebirdBlobParameterConverter converter) {
+                                             final FirebirdBlobParameterConverter converter, final Map<Object, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs) {
         boolean[] result = new boolean[columnDescriptors.size()];
         for (int i = Math.min(columnDescriptors.size(), parameterColumns.size()) - 1; i >= 0; i--) {
             if (!isBlobValue(columnDescriptors.get(i), params.get(i))) {
                 continue;
             }
             if (converter.isReadOnMove(columnDescriptors.get(i), parameterColumns.get(i))) {
-                params.set(i, converter.convert(getMovedBlobContent(params.get(i)), columnDescriptors.get(i), parameterColumns.get(i)));
+                params.set(i, convertReadBlobParameter(getMovedBlobContent(params.get(i)), columnDescriptors.get(i), parameterColumns.get(i), converter, rawTextBlobs));
                 result[i] = true;
             }
         }
@@ -232,6 +237,31 @@ public final class FirebirdBatchExecuteCommandExecutor implements CommandExecuto
     
     private boolean isBlobValue(final FirebirdBatchColumnDescriptor columnDescriptor, @Nullable final Object value) {
         return FirebirdBinaryColumnType.BLOB == columnDescriptor.getType() && (value instanceof Long || value instanceof byte[]);
+    }
+    
+    private Object convertReadBlobParameter(final byte[] content, final FirebirdBatchColumnDescriptor field, final FirebirdReturnColumnPacket parameter,
+                                            final FirebirdBlobParameterConverter converter, final Map<Object, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs) {
+        Object result = converter.convert(content, field, parameter);
+        if (FirebirdBinaryColumnType.BLOB == parameter.getColumnType()) {
+            int charsetId = parameter.findTargetCharacterSetId().orElse(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get());
+            if (result instanceof byte[] && charsetId > ISCConstants.CS_BINARY && parameter.findBlobSubType().filter(subType -> ISCConstants.BLOB_SUB_TYPE_TEXT == subType).isPresent()) {
+                rawTextBlobs.put(result, new FirebirdBatchedStatementsExecutor.RawTextBlob((byte[]) result, charsetId));
+            }
+            return result;
+        }
+        byte[] rawContent = result instanceof byte[] ? (byte[]) result : content;
+        Optional<String> text = converter.findTextBlobForRouting(rawContent, field, parameter);
+        if (text.isPresent()) {
+            String routingValue = result instanceof String ? (String) result : text.get();
+            int paddingCharacters = text.get().length() - routingValue.length();
+            if (paddingCharacters > 0) {
+                int spaceBytes = " ".getBytes(EncodingFactory.getPlatformDefault().getEncodingDefinitionByCharacterSetId(converter.getFieldCharsetId(field)).getJavaCharset()).length;
+                rawContent = Arrays.copyOf(rawContent, rawContent.length - paddingCharacters * spaceBytes);
+            }
+            rawTextBlobs.put(routingValue, new FirebirdBatchedStatementsExecutor.RawTextBlob(rawContent, converter.getFieldCharsetId(field), parameter));
+            result = routingValue;
+        }
+        return result;
     }
     
     private byte[] getMovedBlobContent(final Object value) {

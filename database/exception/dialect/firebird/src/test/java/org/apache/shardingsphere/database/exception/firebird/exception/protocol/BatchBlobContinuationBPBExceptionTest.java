@@ -22,13 +22,12 @@ import org.junit.jupiter.api.Test;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 
-class InvalidBpbVersionExceptionTest {
+class BatchBlobContinuationBPBExceptionTest {
     
     @Test
     void assertGetMessage() {
-        InvalidBpbVersionException actual = new InvalidBpbVersionException(2, 1);
-        assertThat(actual.getMessage(), is("Wrong version of BLOB parameter buffer 2, should be 1"));
-        assertThat(actual.getVersion(), is(2));
-        assertThat(actual.getExpectedVersion(), is(1));
+        BatchBlobContinuationBPBException actual = new BatchBlobContinuationBPBException(4L);
+        assertThat(actual.getMessage(), is("Batch BLOB continuation contains BLOB parameter buffer of length 4"));
+        assertThat(actual.getBpbLength(), is(4L));
     }
 }

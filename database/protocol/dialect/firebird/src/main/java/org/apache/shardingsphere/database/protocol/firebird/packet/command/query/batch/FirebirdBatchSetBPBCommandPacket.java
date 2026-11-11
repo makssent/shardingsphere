@@ -21,18 +21,20 @@ import io.netty.buffer.ByteBuf;
 import lombok.Getter;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.FirebirdCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 
 /**
  * Firebird batch set default BLOB parameter buffer command packet.
  */
 @Getter
-public final class FirebirdBatchSetBpbCommandPacket extends FirebirdCommandPacket {
+public final class FirebirdBatchSetBPBCommandPacket extends FirebirdCommandPacket {
     
     private final int statementHandle;
     
     private final ByteBuf bpb;
     
-    public FirebirdBatchSetBpbCommandPacket(final FirebirdPacketPayload payload) {
+    @HighFrequencyInvocation
+    public FirebirdBatchSetBPBCommandPacket(final FirebirdPacketPayload payload) {
         payload.skipReserved(4);
         statementHandle = payload.readInt4();
         bpb = payload.readBuffer();
@@ -48,6 +50,7 @@ public final class FirebirdBatchSetBpbCommandPacket extends FirebirdCommandPacke
      * @param payload Firebird packet payload
      * @return length of packet
      */
+    @HighFrequencyInvocation
     public static int getLength(final FirebirdPacketPayload payload) {
         int length = 8;
         return length + payload.getBufferLength(length);

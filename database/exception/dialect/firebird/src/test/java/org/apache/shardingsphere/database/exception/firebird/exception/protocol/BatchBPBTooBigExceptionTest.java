@@ -17,24 +17,18 @@
 
 package org.apache.shardingsphere.database.exception.firebird.exception.protocol;
 
-import lombok.Getter;
-import org.apache.shardingsphere.database.exception.core.exception.SQLDialectException;
+import org.junit.jupiter.api.Test;
 
-/**
- * Batch BLOB parameter buffer too big exception for Firebird.
- */
-@Getter
-public final class BatchBpbTooBigException extends SQLDialectException {
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
+
+class BatchBPBTooBigExceptionTest {
     
-    private static final long serialVersionUID = 629146471094327439L;
-    
-    private final long bpbLength;
-    
-    private final long availableLength;
-    
-    public BatchBpbTooBigException(final long bpbLength, final long availableLength) {
-        super(String.format("Batch BLOB parameter buffer length %d exceeds available data length %d", bpbLength, availableLength));
-        this.bpbLength = bpbLength;
-        this.availableLength = availableLength;
+    @Test
+    void assertGetMessage() {
+        BatchBPBTooBigException actual = new BatchBPBTooBigException(4L, 2L);
+        assertThat(actual.getMessage(), is("Batch BLOB parameter buffer length 4 exceeds available data length 2"));
+        assertThat(actual.getBpbLength(), is(4L));
+        assertThat(actual.getAvailableLength(), is(2L));
     }
 }

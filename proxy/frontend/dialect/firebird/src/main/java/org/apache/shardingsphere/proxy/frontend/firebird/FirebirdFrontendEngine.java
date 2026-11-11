@@ -27,10 +27,10 @@ import lombok.Getter;
 import org.apache.shardingsphere.database.exception.core.exception.SQLDialectException;
 import org.apache.shardingsphere.database.exception.core.exception.transaction.InTransactionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBPBTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobBufferFormatException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBpbException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBpbTooBigException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchDefaultBpbChangeException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBPBException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchDefaultBPBChangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentExceedsBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
@@ -38,11 +38,11 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchWithoutBlobsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBPBVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchMessageFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
@@ -78,9 +78,9 @@ public final class FirebirdFrontendEngine implements DatabaseProtocolFrontendEng
     private static final Collection<Class<? extends SQLDialectException>> BATCH_EXCEPTION_TYPES = Arrays.asList(
             BatchAlreadyOpenedException.class,
             BatchBlobBufferFormatException.class,
-            BatchBlobContinuationBpbException.class,
-            BatchBpbTooBigException.class,
-            BatchDefaultBpbChangeException.class,
+            BatchBlobContinuationBPBException.class,
+            BatchBPBTooBigException.class,
+            BatchDefaultBPBChangeException.class,
             BatchParametersRequiredException.class,
             BatchSegmentExceedsBlobException.class,
             BatchSegmentTooBigException.class,
@@ -92,7 +92,7 @@ public final class FirebirdFrontendEngine implements DatabaseProtocolFrontendEng
             InvalidBatchHandleException.class,
             InvalidBatchMessageFormatException.class,
             InvalidBatchParameterVersionException.class,
-            InvalidBpbVersionException.class,
+            InvalidBPBVersionException.class,
             InvalidClumpletStructureException.class,
             ParameterConversionException.class,
             RepeatedBatchBlobIdException.class,

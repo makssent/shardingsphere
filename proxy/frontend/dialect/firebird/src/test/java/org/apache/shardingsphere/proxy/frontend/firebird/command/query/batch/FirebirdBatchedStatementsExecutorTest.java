@@ -19,9 +19,12 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch;
 
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.exception.core.exception.SQLDialectException;
+import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ConversionErrorException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.DateTimeOutOfRangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.NumericOutOfRangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.prepare.FirebirdReturnColumnPacket;
 import org.apache.shardingsphere.infra.binder.context.statement.type.dml.InsertStatementContext;
 import org.apache.shardingsphere.infra.config.props.ConfigurationProperties;
 import org.apache.shardingsphere.infra.connection.kernel.KernelProcessor;
@@ -36,10 +39,13 @@ import org.apache.shardingsphere.infra.metadata.database.resource.unit.StorageUn
 import org.apache.shardingsphere.infra.metadata.database.rule.RuleMetaData;
 import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereColumn;
 import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereSchema;
+import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereTable;
 import org.apache.shardingsphere.infra.route.context.RouteContext;
 import org.apache.shardingsphere.infra.session.connection.ConnectionContext;
 import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
 import org.apache.shardingsphere.mode.manager.ContextManager;
+import org.apache.shardingsphere.parser.rule.SQLParserRule;
+import org.apache.shardingsphere.parser.rule.builder.DefaultSQLParserRuleConfigurationBuilder;
 import org.apache.shardingsphere.proxy.backend.connector.ProxyDatabaseConnectionManager;
 import org.apache.shardingsphere.proxy.backend.connector.jdbc.statement.JDBCBackendStatement;
 import org.apache.shardingsphere.proxy.backend.context.ProxyContext;
@@ -57,6 +63,11 @@ import org.apache.shardingsphere.sqltranslator.rule.SQLTranslatorRule;
 import org.apache.shardingsphere.sqltranslator.rule.builder.DefaultSQLTranslatorRuleConfigurationBuilder;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExtension;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockSettings;
+import org.firebirdsql.extern.decimal.Decimal128;
+import org.firebirdsql.extern.decimal.Decimal64;
+import org.firebirdsql.gds.GDSExceptionHelper;
+import org.firebirdsql.gds.ISCConstants;
+import org.firebirdsql.jdbc.JaybirdTypeCodes;
 import org.firebirdsql.jdbc.field.TypeConversionException;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -71,12 +82,21 @@ import org.mockito.MockedConstruction;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.math.BigDecimal;
 import java.sql.BatchUpdateException;
 import java.sql.Connection;
 import java.sql.ParameterMetaData;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -95,9 +115,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -182,6 +204,7 @@ class FirebirdBatchedStatementsExecutorTest {
     @Test
     void assertMultiErrorBatchesValidBackendConversions() throws SQLException {
         PreparedStatement statement = mockSameRoutePreparedStatement();
+        when(statement.getParameterMetaData()).thenReturn(mock(ParameterMetaData.class));
         when(statement.executeBatch()).thenReturn(new int[]{1, 1, 1});
         ContextManager contextManager = mockContextManager();
         when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
@@ -197,6 +220,7 @@ class FirebirdBatchedStatementsExecutorTest {
     @Test
     void assertMultiErrorRetriesFailedPrefixBeforeBackendConversionFailure() throws SQLException {
         PreparedStatement statement = mockSameRoutePreparedStatement();
+        when(statement.getParameterMetaData()).thenReturn(mock(ParameterMetaData.class));
         when(statement.executeBatch()).thenThrow(createFailure(new int[]{1})).thenReturn(new int[]{1});
         doThrow(new TypeConversionException("invalid value", new NumberFormatException())).when(statement).setObject(2, "bad");
         ContextManager contextManager = mockContextManager();
@@ -211,17 +235,359 @@ class FirebirdBatchedStatementsExecutorTest {
     }
     
     private static Stream<Arguments> backendConversionFailureArguments() {
-        return Stream.of(Arguments.of("invalid_numeric", "10", "bad", "20", Types.NUMERIC, new NumberFormatException(), ConversionErrorException.class),
+        return Stream.of(
+                Arguments.of("invalid_numeric", "10", "bad", "20", Types.NUMERIC, new NumberFormatException(), ConversionErrorException.class),
                 Arguments.of("numeric_invalid_mantissa", "10", "bad1e9999", "20", Types.NUMERIC, new NumberFormatException(), ConversionErrorException.class),
                 Arguments.of("decimal_missing_mantissa", "10", "e9999", "20", Types.DECIMAL, new NumberFormatException(), ConversionErrorException.class),
                 Arguments.of("numeric_overflow", "10", "999999999999999999999999", "20", Types.NUMERIC, null, NumericOutOfRangeException.class),
-                Arguments.of("decimal_overflow", "10", "999999999999999999999999", "20", Types.DECIMAL, null, NumericOutOfRangeException.class),
-                Arguments.of("invalid_date", "2001-01-01", "bad", "2001-01-02", Types.DATE, new IllegalArgumentException(), ConversionErrorException.class));
+                Arguments.of("decimal_overflow", "10", "999999999999999999999999", "20", Types.DECIMAL, null, NumericOutOfRangeException.class));
     }
     
     @ParameterizedTest(name = "{0}")
-    @MethodSource("textBlobCharsetArguments")
-    void assertExecuteBatchWithTextBlobCharset(final String name, final int sourceCharset, final String charsetName, final String text) throws SQLException {
+    @MethodSource("temporalValueArguments")
+    void assertExecuteBatchWithTemporalValue(final String name, final int jdbcType, final String value, final Object expected) throws SQLException {
+        PreparedStatement statement = mockSameRoutePreparedStatement();
+        ParameterMetaData parameterMetaData = mock(ParameterMetaData.class);
+        when(statement.getParameterMetaData()).thenReturn(parameterMetaData);
+        when(parameterMetaData.getParameterType(2)).thenReturn(jdbcType);
+        when(statement.executeBatch()).thenReturn(new int[]{1});
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        List<List<Object>> params = Collections.singletonList(Arrays.asList(1, value));
+        FirebirdBatchCompletion actual = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, false, Collections.emptyMap(), true).executeBatch();
+        assertThat(actual.getUpdateCounts(), is(new int[]{1}));
+        verify(statement).setObject(2, expected);
+        verify(statement.getConnection(), never()).prepareStatement(anyString());
+    }
+    
+    private static Stream<Arguments> temporalValueArguments() {
+        return Stream.of(
+                Arguments.of("date", Types.DATE, "2001-01-02", LocalDate.of(2001, 1, 2)),
+                Arguments.of("leap_date", Types.DATE, "2000-2-29", LocalDate.of(2000, 2, 29)),
+                Arguments.of("padded_date", Types.DATE, "\t 2001-01-02 \t", LocalDate.of(2001, 1, 2)),
+                Arguments.of("time", Types.TIME, "12:13:14", LocalTime.of(12, 13, 14)),
+                Arguments.of("fractional_time", Types.TIME, "12:13:14.1234", LocalTime.of(12, 13, 14, 123400000)),
+                Arguments.of("short_fractional_time", Types.TIME, "1:2:3.1", LocalTime.of(1, 2, 3, 100000000)),
+                Arguments.of("offset_time", Types.TIME_WITH_TIMEZONE, "12:13:14.1234+03:00", OffsetTime.of(12, 13, 14, 123400000, ZoneOffset.ofHours(3))),
+                Arguments.of("offset_time_minutes", Types.TIME_WITH_TIMEZONE, "12:13+03:00", OffsetTime.of(12, 13, 0, 0, ZoneOffset.ofHours(3))),
+                Arguments.of("padded_offset_time", Types.TIME_WITH_TIMEZONE, " 12:13:14-04:00 ", OffsetTime.of(12, 13, 14, 0, ZoneOffset.ofHours(-4))),
+                Arguments.of("non_padded_timestamp", Types.TIMESTAMP, "2001-1-2 3:4:5", LocalDateTime.of(2001, 1, 2, 3, 4, 5)),
+                Arguments.of("timestamp", Types.TIMESTAMP, "2001-01-02 12:13:14.1234", LocalDateTime.of(2001, 1, 2, 12, 13, 14, 123400000)));
+    }
+    
+    @ParameterizedTest(name = "{0}: {2}")
+    @MethodSource("nativeTemporalArguments")
+    void assertExecuteBatchWithNativeTemporalValue(final String typeName, final int jdbcType, final String value, final Object expectedFirst, final Object expectedSecond) throws SQLException {
+        PreparedStatement statement = mockSameRoutePreparedStatement();
+        ParameterMetaData parameterMetaData = mock(ParameterMetaData.class);
+        when(statement.getParameterMetaData()).thenReturn(parameterMetaData);
+        when(parameterMetaData.getParameterType(2)).thenReturn(jdbcType);
+        when(statement.executeBatch()).thenReturn(new int[]{1, 1});
+        PreparedStatement conversion = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        String sql = "SELECT CAST(CAST(? AS BLOB SUB_TYPE TEXT CHARACTER SET NONE) AS " + typeName + ") FROM RDB$DATABASE";
+        when(statement.getConnection().prepareStatement(sql)).thenReturn(conversion);
+        when(conversion.executeQuery()).thenReturn(resultSet);
+        doReturn(expectedFirst, expectedSecond).when(resultSet).getObject(1, expectedFirst.getClass());
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        List<List<Object>> params = Arrays.asList(Arrays.asList(1, value), Arrays.asList(2, value));
+        FirebirdBatchCompletion actual = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, false, Collections.emptyMap(), true).executeBatch();
+        assertThat(actual.getUpdateCounts(), is(new int[]{1, 1}));
+        InOrder inOrder = inOrder(statement);
+        inOrder.verify(statement).setObject(2, expectedFirst);
+        inOrder.verify(statement).setObject(2, expectedSecond);
+        verify(statement.getConnection()).prepareStatement(sql);
+        verify(conversion, times(2)).setBytes(1, value.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+        verify(conversion, times(2)).executeQuery();
+        verify(resultSet, times(2)).close();
+        verify(statement).getParameterMetaData();
+        verify(conversion).close();
+    }
+    
+    private static Stream<Arguments> nativeTemporalArguments() {
+        return Stream.of(
+                Arguments.of("DATE", Types.DATE, "today", LocalDate.of(2001, 1, 2), LocalDate.of(2001, 1, 3)),
+                Arguments.of("TIME", Types.TIME, "now", LocalTime.of(12, 13, 14), LocalTime.of(12, 13, 15)),
+                Arguments.of("TIME WITH TIME ZONE", Types.TIME_WITH_TIMEZONE, "now",
+                        ZonedDateTime.of(2001, 1, 2, 12, 13, 14, 0, ZoneId.of("Europe/Paris")), ZonedDateTime.of(2001, 1, 2, 12, 13, 15, 0, ZoneId.of("Europe/Paris"))),
+                Arguments.of("TIME WITH TIME ZONE", Types.TIME_WITH_TIMEZONE, "12:13:14.1234 Europe/Paris",
+                        ZonedDateTime.of(2001, 1, 2, 12, 13, 14, 123400000, ZoneId.of("Europe/Paris")), ZonedDateTime.of(2001, 1, 2, 12, 13, 14, 123400000, ZoneId.of("Europe/Paris"))),
+                Arguments.of("TIMESTAMP WITH TIME ZONE", Types.TIMESTAMP_WITH_TIMEZONE, "now",
+                        ZonedDateTime.of(2001, 1, 2, 12, 13, 14, 0, ZoneId.of("Europe/Paris")), ZonedDateTime.of(2001, 1, 2, 12, 13, 15, 0, ZoneId.of("Europe/Paris"))),
+                Arguments.of("TIMESTAMP WITH TIME ZONE", Types.TIMESTAMP_WITH_TIMEZONE, "2001-01-02 12:13:14.1234+03:00",
+                        ZonedDateTime.of(2001, 1, 2, 12, 13, 14, 123400000, ZoneOffset.ofHours(3)), ZonedDateTime.of(2001, 1, 2, 12, 13, 14, 123400000, ZoneOffset.ofHours(3))),
+                Arguments.of("TIMESTAMP WITH TIME ZONE", Types.TIMESTAMP_WITH_TIMEZONE, "2001-01-02 12:13:14 Europe/Paris",
+                        ZonedDateTime.of(2001, 1, 2, 12, 13, 14, 0, ZoneId.of("Europe/Paris")), ZonedDateTime.of(2001, 1, 2, 12, 13, 14, 0, ZoneId.of("Europe/Paris"))),
+                Arguments.of("TIMESTAMP", Types.TIMESTAMP, "now", LocalDateTime.of(2001, 1, 2, 12, 13, 14), LocalDateTime.of(2001, 1, 2, 12, 13, 15)));
+    }
+    
+    @ParameterizedTest(name = "{0}: {3}")
+    @MethodSource("nativeScalarArguments")
+    void assertExecuteBatchWithNativeScalarValue(final String typeName, final int jdbcType, final int precision, final String first, final String second, final Object expectedFirst,
+                                                 final Object expectedSecond) throws SQLException {
+        PreparedStatement statement = mockSameRoutePreparedStatement();
+        ParameterMetaData parameterMetaData = mock(ParameterMetaData.class);
+        when(statement.getParameterMetaData()).thenReturn(parameterMetaData);
+        when(parameterMetaData.getParameterType(2)).thenReturn(jdbcType);
+        if (JaybirdTypeCodes.DECFLOAT == jdbcType) {
+            when(parameterMetaData.getPrecision(2)).thenReturn(precision);
+        }
+        if (Types.NUMERIC == jdbcType) {
+            when(parameterMetaData.getParameterTypeName(2)).thenReturn(typeName);
+        }
+        when(statement.executeBatch()).thenReturn(new int[]{1, 1});
+        PreparedStatement conversion = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        String sql = "SELECT CAST(CAST(? AS BLOB SUB_TYPE TEXT CHARACTER SET NONE) AS " + typeName + ") FROM RDB$DATABASE";
+        when(statement.getConnection().prepareStatement(sql)).thenReturn(conversion);
+        when(conversion.executeQuery()).thenReturn(resultSet);
+        if (JaybirdTypeCodes.DECFLOAT == jdbcType) {
+            doReturn(expectedFirst, expectedSecond).when(resultSet).getObject(1, expectedFirst.getClass());
+        } else {
+            when(resultSet.getObject(1)).thenReturn(expectedFirst, expectedSecond);
+        }
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        List<List<Object>> params = Arrays.asList(Arrays.asList(1, first), Arrays.asList(2, second));
+        FirebirdBatchCompletion actual = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, false, Collections.emptyMap(), true).executeBatch();
+        assertThat(actual.getUpdateCounts(), is(new int[]{1, 1}));
+        InOrder inOrder = inOrder(statement);
+        inOrder.verify(statement).setObject(2, expectedFirst);
+        inOrder.verify(statement).setObject(2, expectedSecond);
+        verify(statement.getConnection()).prepareStatement(sql);
+        verify(conversion).setBytes(1, first.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+        verify(conversion).setBytes(1, second.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+        verify(conversion, times(2)).executeQuery();
+        verify(resultSet, times(2)).close();
+        verify(statement).getParameterMetaData();
+        verify(conversion).close();
+    }
+    
+    private static Stream<Arguments> nativeScalarArguments() {
+        return Stream.of(
+                Arguments.of("BOOLEAN", Types.BOOLEAN, 0, "true", "false", true, false),
+                Arguments.of("FLOAT", Types.FLOAT, 0, "2.5", "4.5", 2.5F, 4.5F),
+                Arguments.of("DOUBLE PRECISION", Types.DOUBLE, 0, "1e39", "2.5", 1.0000000000000001E39, 2.5D),
+                Arguments.of("INT128", Types.NUMERIC, 0, "0xF", new String(new char[256]).replace('\0', '0') + "1", new BigDecimal("15"), BigDecimal.ONE),
+                Arguments.of("DECFLOAT(16)", JaybirdTypeCodes.DECFLOAT, 16, "2.5", "3.5", Decimal64.valueOf("2.5"), Decimal64.valueOf("3.5")),
+                Arguments.of("DECFLOAT(34)", JaybirdTypeCodes.DECFLOAT, 34, "2.5", "3.5", Decimal128.valueOf("2.5"), Decimal128.valueOf("3.5")),
+                Arguments.of("DECFLOAT(16)", JaybirdTypeCodes.DECFLOAT, 16, "NaN", "Infinity", Decimal64.valueOf("NaN"), Decimal64.valueOf("Infinity")),
+                Arguments.of("DECFLOAT(34)", JaybirdTypeCodes.DECFLOAT, 34, "NaN", "-Infinity", Decimal128.valueOf("NaN"), Decimal128.valueOf("-Infinity")),
+                Arguments.of("DECFLOAT(16)", JaybirdTypeCodes.DECFLOAT, 16, "-0", "0", Decimal64.valueOf("-0"), Decimal64.valueOf("0")),
+                Arguments.of("DECFLOAT(34)", JaybirdTypeCodes.DECFLOAT, 34, "-0", "0", Decimal128.valueOf("-0"), Decimal128.valueOf("0")));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("otherStorageScalarArguments")
+    void assertExecuteBatchWithOtherStorageScalar(final int jdbcType, final String value) throws SQLException {
+        PreparedStatement statement = mockSameRoutePreparedStatement();
+        when(statement.getConnection().getMetaData().getURL()).thenReturn("jdbc:mysql://127.0.0.1/db");
+        ParameterMetaData parameterMetaData = mock(ParameterMetaData.class);
+        when(statement.getParameterMetaData()).thenReturn(parameterMetaData);
+        when(parameterMetaData.getParameterType(2)).thenReturn(jdbcType);
+        when(statement.executeBatch()).thenReturn(new int[]{1, 1});
+        ContextManager contextManager = mockContextManager();
+        StorageUnit storageUnit = contextManager.getMetaDataContexts().getMetaData().getDatabase("db").getResourceMetaData().getStorageUnits().get("ds_0");
+        when(storageUnit.getStorageType()).thenReturn(TypedSPILoader.getService(DatabaseType.class, "MySQL"));
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        List<List<Object>> params = Arrays.asList(Arrays.asList(1, value), Arrays.asList(2, value));
+        FirebirdBatchCompletion actual = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, false, Collections.emptyMap(), true).executeBatch();
+        assertThat(actual.getUpdateCounts(), is(new int[]{1, 1}));
+        verify(statement, times(2)).setObject(2, value);
+        verify(statement.getConnection(), never()).prepareStatement(anyString());
+        verify(statement.getConnection().getMetaData()).getURL();
+    }
+    
+    private static Stream<Arguments> otherStorageScalarArguments() {
+        return Stream.of(Arguments.of(Types.FLOAT, "2.5"), Arguments.of(Types.DOUBLE, "1.25"), Arguments.of(Types.BOOLEAN, "true"));
+    }
+    
+    @ParameterizedTest(name = "{0}: {3}")
+    @MethodSource("nativeScalarFailureArguments")
+    void assertExecuteBatchWithNativeScalarFailure(final String typeName, final int jdbcType, final int precision, final String failure, final int errorCode,
+                                                   final Class<? extends Exception> expectedErrorType) throws SQLException {
+        PreparedStatement statement = mockSameRoutePreparedStatement();
+        ParameterMetaData parameterMetaData = mock(ParameterMetaData.class);
+        when(statement.getParameterMetaData()).thenReturn(parameterMetaData);
+        when(parameterMetaData.getParameterType(2)).thenReturn(jdbcType);
+        if (JaybirdTypeCodes.DECFLOAT == jdbcType) {
+            when(parameterMetaData.getPrecision(2)).thenReturn(precision);
+        }
+        if (Types.NUMERIC == jdbcType) {
+            when(parameterMetaData.getParameterTypeName(2)).thenReturn(typeName);
+        }
+        when(statement.executeBatch()).thenReturn(new int[]{1});
+        PreparedStatement conversion = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        String sql = "SELECT CAST(CAST(? AS BLOB SUB_TYPE TEXT CHARACTER SET NONE) AS " + typeName + ") FROM RDB$DATABASE";
+        when(statement.getConnection().prepareStatement(sql)).thenReturn(conversion);
+        when(conversion.executeQuery()).thenReturn(resultSet).thenThrow(new SQLException(GDSExceptionHelper.getMessage(errorCode).toString(), "22018", errorCode));
+        if (JaybirdTypeCodes.DECFLOAT == jdbcType) {
+            if (16 == precision) {
+                when(resultSet.getObject(1, Decimal64.class)).thenReturn(Decimal64.valueOf("1"));
+            } else {
+                when(resultSet.getObject(1, Decimal128.class)).thenReturn(Decimal128.valueOf("1"));
+            }
+        } else {
+            when(resultSet.getObject(1)).thenReturn(Types.BOOLEAN == jdbcType ? true : BigDecimal.ONE);
+        }
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        String first = Types.BOOLEAN == jdbcType ? "true" : "1";
+        List<List<Object>> params = Arrays.asList(Arrays.asList(1, first), Arrays.asList(2, failure), Arrays.asList(3, first));
+        FirebirdBatchedStatementsExecutor executor = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, true, Collections.emptyMap(), true);
+        ParameterConversionException actual = assertThrows(ParameterConversionException.class, executor::executeBatch);
+        assertThat(actual.getConversionError(), isA(expectedErrorType));
+        if (actual.getConversionError() instanceof SQLException) {
+            assertThat(((SQLException) actual.getConversionError()).getErrorCode(), is(errorCode));
+        }
+        verify(statement).executeBatch();
+        verify(statement, never()).setObject(1, 3);
+        verify(resultSet).close();
+        verify(conversion).close();
+    }
+    
+    private static Stream<Arguments> nativeScalarFailureArguments() {
+        return Stream.of(
+                Arguments.of("BOOLEAN", Types.BOOLEAN, 0, "0", ISCConstants.isc_convert_error, ConversionErrorException.class),
+                Arguments.of("FLOAT", Types.FLOAT, 0, "1e39", ISCConstants.isc_numeric_out_of_range, NumericOutOfRangeException.class),
+                Arguments.of("FLOAT", Types.FLOAT, 0, "ÿ", ISCConstants.isc_convert_error, ConversionErrorException.class),
+                Arguments.of("DOUBLE PRECISION", Types.DOUBLE, 0, "1e309", ISCConstants.isc_numeric_out_of_range, NumericOutOfRangeException.class),
+                Arguments.of("INT128", Types.NUMERIC, 0, "1e39", ISCConstants.isc_numeric_out_of_range, NumericOutOfRangeException.class),
+                Arguments.of("DECFLOAT(16)", JaybirdTypeCodes.DECFLOAT, 16, "bad", ISCConstants.isc_decfloat_invalid_operation, FirebirdException.class),
+                Arguments.of("DECFLOAT(34)", JaybirdTypeCodes.DECFLOAT, 34, "1e9999", ISCConstants.isc_decfloat_overflow, FirebirdException.class));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidTemporalArguments")
+    void assertExecuteBatchWithInvalidTemporalValue(final String name, final String typeName, final int jdbcType, final String first, final String failure,
+                                                    final Object expectedFirst) throws SQLException {
+        PreparedStatement statement = mockSameRoutePreparedStatement();
+        ParameterMetaData parameterMetaData = mock(ParameterMetaData.class);
+        when(statement.getParameterMetaData()).thenReturn(parameterMetaData);
+        when(parameterMetaData.getParameterType(2)).thenReturn(jdbcType);
+        when(statement.executeBatch()).thenReturn(new int[]{1});
+        PreparedStatement conversion = mock(PreparedStatement.class);
+        String sql = "SELECT CAST(CAST(? AS BLOB SUB_TYPE TEXT CHARACTER SET NONE) AS " + typeName + ") FROM RDB$DATABASE";
+        when(statement.getConnection().prepareStatement(sql)).thenReturn(conversion);
+        when(conversion.executeQuery()).thenThrow(new SQLException("conversion error", "22018", 335544334));
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        List<List<Object>> params = Arrays.asList(Arrays.asList(1, first), Arrays.asList(2, failure), Arrays.asList(3, first));
+        FirebirdBatchedStatementsExecutor executor = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, true, Collections.emptyMap(), true);
+        ParameterConversionException actual = assertThrows(ParameterConversionException.class, executor::executeBatch);
+        assertThat(actual.getConversionError(), isA(ConversionErrorException.class));
+        assertThat(((ConversionErrorException) actual.getConversionError()).getValue(), is(failure));
+        InOrder inOrder = inOrder(statement);
+        inOrder.verify(statement).setObject(2, expectedFirst);
+        inOrder.verify(statement).addBatch();
+        inOrder.verify(statement).executeBatch();
+        verify(statement, never()).setObject(1, 3);
+        verify(conversion).close();
+    }
+    
+    private static Stream<Arguments> invalidTemporalArguments() {
+        return Stream.of(
+                Arguments.of("invalid_date", "DATE", Types.DATE, "2001-01-02", "bad", LocalDate.of(2001, 1, 2)),
+                Arguments.of("invalid_calendar_date", "DATE", Types.DATE, "2001-01-02", "2026-02-31", LocalDate.of(2001, 1, 2)),
+                Arguments.of("invalid_time", "TIME", Types.TIME, "12:13:14", "25:00:00", LocalTime.of(12, 13, 14)),
+                Arguments.of("invalid_offset_time", "TIME WITH TIME ZONE", Types.TIME_WITH_TIMEZONE, "12:13:14+03:00", "25:00:00+03:00", OffsetTime.of(12, 13, 14, 0, ZoneOffset.ofHours(3))),
+                Arguments.of("invalid_timestamp", "TIMESTAMP", Types.TIMESTAMP, "2001-01-02 12:13:14", "bad", LocalDateTime.of(2001, 1, 2, 12, 13, 14)));
+    }
+    
+    @Test
+    void assertExecuteBatchWithInvalidNativeZonedTimestamp() throws SQLException {
+        PreparedStatement statement = mockSameRoutePreparedStatement();
+        ParameterMetaData parameterMetaData = mock(ParameterMetaData.class);
+        when(statement.getParameterMetaData()).thenReturn(parameterMetaData);
+        when(parameterMetaData.getParameterType(2)).thenReturn(Types.TIMESTAMP_WITH_TIMEZONE);
+        when(statement.executeBatch()).thenReturn(new int[]{1});
+        PreparedStatement conversion = mock(PreparedStatement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        String sql = "SELECT CAST(CAST(? AS BLOB SUB_TYPE TEXT CHARACTER SET NONE) AS TIMESTAMP WITH TIME ZONE) FROM RDB$DATABASE";
+        when(statement.getConnection().prepareStatement(sql)).thenReturn(conversion);
+        when(conversion.executeQuery()).thenReturn(resultSet).thenThrow(new SQLException("conversion error", "22018", ISCConstants.isc_convert_error));
+        ZonedDateTime expected = ZonedDateTime.of(2001, 1, 2, 12, 13, 14, 0, ZoneId.of("Europe/Paris"));
+        when(resultSet.getObject(1, ZonedDateTime.class)).thenReturn(expected);
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        List<List<Object>> params = Arrays.asList(Arrays.asList(1, "now"), Arrays.asList(2, "bad"), Arrays.asList(3, "now"));
+        FirebirdBatchedStatementsExecutor executor = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, true, Collections.emptyMap(), true);
+        ParameterConversionException actual = assertThrows(ParameterConversionException.class, executor::executeBatch);
+        assertThat(actual.getConversionError(), isA(ConversionErrorException.class));
+        assertThat(((ConversionErrorException) actual.getConversionError()).getValue(), is("bad"));
+        InOrder inOrder = inOrder(statement);
+        inOrder.verify(statement).setObject(2, expected);
+        inOrder.verify(statement).addBatch();
+        inOrder.verify(statement).executeBatch();
+        verify(statement, never()).setObject(1, 3);
+        verify(resultSet).close();
+        verify(conversion).close();
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("temporalRangeArguments")
+    void assertExecuteBatchWithTemporalRangeFailure(final String typeName, final int jdbcType, final int errorCode, final String first) throws SQLException {
+        PreparedStatement statement = mockSameRoutePreparedStatement();
+        ParameterMetaData parameterMetaData = mock(ParameterMetaData.class);
+        when(statement.getParameterMetaData()).thenReturn(parameterMetaData);
+        when(parameterMetaData.getParameterType(2)).thenReturn(jdbcType);
+        when(statement.executeBatch()).thenReturn(new int[]{1});
+        PreparedStatement conversion = mock(PreparedStatement.class);
+        String sql = "SELECT CAST(CAST(? AS BLOB SUB_TYPE TEXT CHARACTER SET NONE) AS " + typeName + ") FROM RDB$DATABASE";
+        when(statement.getConnection().prepareStatement(sql)).thenReturn(conversion);
+        when(conversion.executeQuery()).thenThrow(new SQLException("native range failure", "22008", errorCode));
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        List<List<Object>> params = Arrays.asList(Arrays.asList(1, first), Arrays.asList(2, "foo_native_range"), Arrays.asList(3, first));
+        FirebirdBatchedStatementsExecutor executor = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, true, Collections.emptyMap(), true);
+        ParameterConversionException actual = assertThrows(ParameterConversionException.class, executor::executeBatch);
+        assertThat(actual.getConversionError(), isA(DateTimeOutOfRangeException.class));
+        assertThat(((DateTimeOutOfRangeException) actual.getConversionError()).getJdbcType(), is(jdbcType));
+        verify(statement).executeBatch();
+        verify(statement, never()).setObject(1, 3);
+        verify(conversion).close();
+    }
+    
+    private static Stream<Arguments> temporalRangeArguments() {
+        return Stream.of(
+                Arguments.of("DATE", Types.DATE, ISCConstants.isc_date_range_exceeded, "2001-01-02"),
+                Arguments.of("TIME", Types.TIME, ISCConstants.isc_time_range_exceeded, "12:13:14"),
+                Arguments.of("TIME WITH TIME ZONE", Types.TIME_WITH_TIMEZONE, ISCConstants.isc_time_range_exceeded, "12:13:14+03:00"),
+                Arguments.of("TIMESTAMP", Types.TIMESTAMP, ISCConstants.isc_datetime_range_exceeded, "2001-01-02 12:13:14"));
+    }
+    
+    @Test
+    void assertExecuteBatchWithTemporalConnectionFailure() throws SQLException {
+        PreparedStatement statement = mockSameRoutePreparedStatement();
+        ParameterMetaData parameterMetaData = mock(ParameterMetaData.class);
+        when(statement.getParameterMetaData()).thenReturn(parameterMetaData);
+        when(parameterMetaData.getParameterType(2)).thenReturn(Types.DATE);
+        SQLException failure = new SQLException("connection lost", "08006", ISCConstants.isc_network_error);
+        when(statement.getConnection().prepareStatement(anyString())).thenThrow(failure);
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        List<List<Object>> params = Collections.singletonList(Arrays.asList(1, "today"));
+        FirebirdBatchedStatementsExecutor executor = new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, params, true, Collections.emptyMap(), true);
+        SQLException actual = assertThrows(SQLException.class, executor::executeBatch);
+        assertThat(actual, is(failure));
+        verify(statement, never()).executeBatch();
+        verify(statement).close();
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("textColumnCharsetArguments")
+    void assertExecuteBatchWithTextColumnCharset(final String name, final int charsetId, final Object expected) throws SQLException {
         Connection connection = mock(Connection.class, RETURNS_DEEP_STUBS);
         when(connection.getMetaData().getURL()).thenReturn("jdbc:firebirdsql://127.0.0.1/db");
         when(databaseConnectionManager.getConnections(any(), nullable(String.class), anyInt(), anyInt(), any(ConnectionMode.class))).thenReturn(Collections.singletonList(connection));
@@ -233,9 +599,43 @@ class FirebirdBatchedStatementsExecutorTest {
         ContextManager contextManager = mockContextManager();
         when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
         FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
-        String value = new String(text);
-        byte[] originalBytes = {(byte) 0xFF};
+        ShardingSphereTable table = new ShardingSphereTable("t", Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+        ShardingSphereColumn column = new ShardingSphereColumn("col", Types.VARCHAR, false, false, false, true, false, false);
+        FirebirdReturnColumnPacket parameter = new FirebirdReturnColumnPacket(Collections.emptyList(), 2, table, column, null, null, null, 10, false, null);
+        parameter.setTargetCharacterSetId(charsetId);
+        String value = new String("яa");
+        byte[] originalBytes = {(byte) 0xFF, 'a'};
         Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs = new IdentityHashMap<>();
+        rawTextBlobs.put(value, new FirebirdBatchedStatementsExecutor.RawTextBlob(originalBytes, 52, parameter));
+        new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, Collections.singletonList(Arrays.asList(1, value)), false, rawTextBlobs).executeBatch();
+        ArgumentCaptor<Object> actualValue = ArgumentCaptor.forClass(Object.class);
+        verify(statement).setObject(eq(2), actualValue.capture());
+        assertThat(actualValue.getValue(), is(expected));
+        ArgumentCaptor<ExecutionUnit> actualUnit = ArgumentCaptor.forClass(ExecutionUnit.class);
+        verify(backendStatement).createStorageResource(actualUnit.capture(), eq(connection), anyInt(), any(ConnectionMode.class), any(StatementOption.class), nullable(DatabaseType.class));
+        assertThat(actualUnit.getValue().getSqlUnit().getSql(), is("INSERT INTO t (id, col) VALUES (?, ?)"));
+    }
+    
+    private static Stream<Arguments> textColumnCharsetArguments() {
+        return Stream.of(Arguments.of("none", 0, new byte[]{(byte) 0xFF, 'a'}), Arguments.of("utf8", 4, "яa"), Arguments.of("win1251", 52, "яa"));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("textBlobCharsetArguments")
+    void assertExecuteBatchWithTextBlobCharset(final String name, final int sourceCharset, final String charsetName, final Object value) throws SQLException {
+        Connection connection = mock(Connection.class, RETURNS_DEEP_STUBS);
+        when(connection.getMetaData().getURL()).thenReturn("jdbc:firebirdsql://127.0.0.1/db");
+        when(databaseConnectionManager.getConnections(any(), nullable(String.class), anyInt(), anyInt(), any(ConnectionMode.class))).thenReturn(Collections.singletonList(connection));
+        PreparedStatement statement = mock(PreparedStatement.class);
+        when(statement.getConnection()).thenReturn(connection);
+        when(statement.executeBatch()).thenReturn(new int[]{1});
+        when(backendStatement.createStorageResource(any(ExecutionUnit.class), eq(connection), anyInt(), any(ConnectionMode.class), any(StatementOption.class), nullable(DatabaseType.class)))
+                .thenReturn(statement);
+        ContextManager contextManager = mockContextManager();
+        when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+        FirebirdServerPreparedStatement firebirdStatement = new FirebirdServerPreparedStatement("INSERT INTO t (id, col) VALUES (?, ?)", mockInsertStatementContext(), new HintValueContext());
+        byte[] originalBytes = value instanceof byte[] ? (byte[]) value : new byte[]{(byte) 0xFF};
+        Map<Object, FirebirdBatchedStatementsExecutor.RawTextBlob> rawTextBlobs = new IdentityHashMap<>();
         rawTextBlobs.put(value, new FirebirdBatchedStatementsExecutor.RawTextBlob(originalBytes, sourceCharset));
         new FirebirdBatchedStatementsExecutor(mockConnectionSession(), firebirdStatement, Collections.singletonList(Arrays.asList(1, value)), false, rawTextBlobs).executeBatch();
         verify(statement).setObject(2, originalBytes);
@@ -248,7 +648,12 @@ class FirebirdBatchedStatementsExecutorTest {
         return Stream.of(
                 Arguments.of("utf8", 4, "UTF8", "\0"),
                 Arguments.of("ascii", 2, "ASCII", "\0"),
-                Arguments.of("win1251", 52, "WIN1251", "я"));
+                Arguments.of("win1251", 52, "WIN1251", "я"),
+                Arguments.of("raw_utf8", 4, "UTF8", new byte[]{(byte) 0xD1, (byte) 0x8F}),
+                Arguments.of("raw_win1251", 52, "WIN1251", new byte[]{(byte) 0xFF}),
+                Arguments.of("raw_next_without_java_charset", 19, "NEXT", new byte[]{(byte) 0xFF}),
+                Arguments.of("none", 0, "NONE", "\0"),
+                Arguments.of("octets", 1, "OCTETS", "\0"));
     }
     
     @ParameterizedTest(name = "{0}")
@@ -736,7 +1141,8 @@ class FirebirdBatchedStatementsExecutorTest {
         when(result.getMetaDataContexts().getMetaData().containsDatabase(new IdentifierValue("db"))).thenReturn(true);
         when(result.getMetaDataContexts().getMetaData().getDatabase("db")).thenReturn(database);
         when(result.getMetaDataContexts().getMetaData().getDatabase(new IdentifierValue("db"))).thenReturn(database);
-        RuleMetaData globalRuleMetaData = new RuleMetaData(Collections.singleton(new SQLTranslatorRule(new DefaultSQLTranslatorRuleConfigurationBuilder().build())));
+        RuleMetaData globalRuleMetaData = new RuleMetaData(Arrays.asList(new SQLTranslatorRule(new DefaultSQLTranslatorRuleConfigurationBuilder().build()),
+                new SQLParserRule(new DefaultSQLParserRuleConfigurationBuilder().build())));
         when(result.getMetaDataContexts().getMetaData().getGlobalRuleMetaData()).thenReturn(globalRuleMetaData);
         when(result.getMetaDataContexts().getMetaData().getProps()).thenReturn(new ConfigurationProperties(new Properties()));
         return result;

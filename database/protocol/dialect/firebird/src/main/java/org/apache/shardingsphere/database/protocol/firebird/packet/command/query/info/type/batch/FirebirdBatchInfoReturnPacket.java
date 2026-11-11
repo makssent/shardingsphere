@@ -24,6 +24,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.FirebirdInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.common.FirebirdCommonInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.firebirdsql.gds.ISCConstants;
 
 import java.util.AbstractMap.SimpleImmutableEntry;
@@ -52,6 +53,7 @@ public final class FirebirdBatchInfoReturnPacket extends FirebirdPacket {
     private final int maxLength;
     
     @Override
+    @HighFrequencyInvocation
     protected void write(final FirebirdPacketPayload payload) {
         if (maxLength < MIN_BUFFER_LENGTH) {
             writeShortBuffer(payload);

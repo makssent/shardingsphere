@@ -18,9 +18,9 @@
 package org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch;
 
 import io.netty.buffer.Unpooled;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchDefaultBpbChangeException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchDefaultBPBChangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
-import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBPBCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStatement;
 import org.apache.shardingsphere.database.protocol.firebird.packet.generic.FirebirdGenericResponsePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class FirebirdBatchSetBpbCommandExecutorTest {
+class FirebirdBatchSetBPBCommandExecutorTest {
     
     private static final int CONNECTION_ID = 1;
     
@@ -51,7 +51,7 @@ class FirebirdBatchSetBpbCommandExecutorTest {
     private final FirebirdBatchStatementManager manager = FirebirdBatchStatementManager.getInstance();
     
     @Mock
-    private FirebirdBatchSetBpbCommandPacket packet;
+    private FirebirdBatchSetBPBCommandPacket packet;
     
     @Mock
     private ConnectionSession connectionSession;
@@ -72,7 +72,7 @@ class FirebirdBatchSetBpbCommandExecutorTest {
     void assertExecute() {
         manager.registerBatchStatement(CONNECTION_ID, STATEMENT_ID, Collections.emptyList(), 64L, false, false, true);
         when(packet.getBpb()).thenReturn(Unpooled.wrappedBuffer(new byte[]{1, 3, 1, 0}));
-        Collection<DatabasePacket> actual = new FirebirdBatchSetBpbCommandExecutor(packet, connectionSession).execute();
+        Collection<DatabasePacket> actual = new FirebirdBatchSetBPBCommandExecutor(packet, connectionSession).execute();
         assertThat(actual.size(), is(1));
         assertThat(actual.iterator().next(), isA(FirebirdGenericResponsePacket.class));
         FirebirdBatchStatement actualBatchStatement = manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID);
@@ -83,7 +83,7 @@ class FirebirdBatchSetBpbCommandExecutorTest {
     
     @Test
     void assertExecuteWithUnknownBatch() {
-        assertThrows(InvalidBatchHandleException.class, () -> new FirebirdBatchSetBpbCommandExecutor(packet, connectionSession).execute());
+        assertThrows(InvalidBatchHandleException.class, () -> new FirebirdBatchSetBPBCommandExecutor(packet, connectionSession).execute());
     }
     
     @Test
@@ -92,7 +92,7 @@ class FirebirdBatchSetBpbCommandExecutorTest {
         FirebirdBatchStatement batchStatement = manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID);
         batchStatement.appendBlobStream(Unpooled.buffer().writeLong(1L).writeInt(0).writeInt(0), 16L);
         when(packet.getBpb()).thenReturn(Unpooled.wrappedBuffer(new byte[]{1, 3, 1, 0}));
-        assertThrows(BatchDefaultBpbChangeException.class, () -> new FirebirdBatchSetBpbCommandExecutor(packet, connectionSession).execute());
+        assertThrows(BatchDefaultBPBChangeException.class, () -> new FirebirdBatchSetBPBCommandExecutor(packet, connectionSession).execute());
         assertThat(manager.getBatchStatement(CONNECTION_ID, STATEMENT_ID).getDefaultBpb(), is(new byte[]{1, 3, 1, 1}));
     }
 }

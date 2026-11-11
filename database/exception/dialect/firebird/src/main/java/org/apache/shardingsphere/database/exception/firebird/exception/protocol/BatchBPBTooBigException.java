@@ -21,17 +21,20 @@ import lombok.Getter;
 import org.apache.shardingsphere.database.exception.core.exception.SQLDialectException;
 
 /**
- * Batch BLOB continuation with BLOB parameter buffer exception for Firebird.
+ * Batch BLOB parameter buffer too big exception for Firebird.
  */
 @Getter
-public final class BatchBlobContinuationBpbException extends SQLDialectException {
+public final class BatchBPBTooBigException extends SQLDialectException {
     
-    private static final long serialVersionUID = 4022392681864037966L;
+    private static final long serialVersionUID = 629146471094327439L;
     
     private final long bpbLength;
     
-    public BatchBlobContinuationBpbException(final long bpbLength) {
-        super(String.format("Batch BLOB continuation contains BLOB parameter buffer of length %d", bpbLength));
+    private final long availableLength;
+    
+    public BatchBPBTooBigException(final long bpbLength, final long availableLength) {
+        super(String.format("Batch BLOB parameter buffer length %d exceeds available data length %d", bpbLength, availableLength));
         this.bpbLength = bpbLength;
+        this.availableLength = availableLength;
     }
 }

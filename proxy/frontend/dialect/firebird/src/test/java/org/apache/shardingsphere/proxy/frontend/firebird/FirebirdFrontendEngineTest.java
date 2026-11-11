@@ -27,10 +27,10 @@ import org.apache.shardingsphere.database.connector.core.spi.DatabaseTypedSPILoa
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.exception.core.exception.transaction.InTransactionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBPBTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobBufferFormatException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBpbException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBpbTooBigException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchDefaultBpbChangeException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBPBException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchDefaultBPBChangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentExceedsBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
@@ -38,11 +38,11 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchWithoutBlobsException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobFilterNotFoundException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBPBVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchMessageFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidStatementHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
@@ -446,7 +446,9 @@ class FirebirdFrontendEngineTest {
     }
     
     private static Stream<Arguments> provideHandleExceptionParameters() {
-        return Stream.of(Arguments.of("mark when in transaction", false, new Exception("error")), Arguments.of("keep marked when already occurred", true, new Exception("error")),
+        return Stream.of(
+                Arguments.of("mark when in transaction", false, new Exception("error")),
+                Arguments.of("keep marked when already occurred", true, new Exception("error")),
                 Arguments.of("mark SQL execution failure", false, new SQLException("error")));
     }
     
@@ -463,9 +465,9 @@ class FirebirdFrontendEngineTest {
                 Arguments.of("skip when in transaction exception", true, new InTransactionException()),
                 Arguments.of("skip when batch already opened", true, new BatchAlreadyOpenedException(1)),
                 Arguments.of("skip when batch BLOB buffer is invalid", true, new BatchBlobBufferFormatException(1)),
-                Arguments.of("skip when batch blob continuation bpb exception", true, new BatchBlobContinuationBpbException(4L)),
-                Arguments.of("skip when batch bpb too big exception", true, new BatchBpbTooBigException(8L, 4L)),
-                Arguments.of("skip when default bpb cannot change", true, new BatchDefaultBpbChangeException(1)),
+                Arguments.of("skip when batch blob continuation bpb exception", true, new BatchBlobContinuationBPBException(4L)),
+                Arguments.of("skip when batch bpb too big exception", true, new BatchBPBTooBigException(8L, 4L)),
+                Arguments.of("skip when default bpb cannot change", true, new BatchDefaultBPBChangeException(1)),
                 Arguments.of("skip when batch parameters are missing", true, new BatchParametersRequiredException(1)),
                 Arguments.of("skip when batch segment exceeds blob exception", true, new BatchSegmentExceedsBlobException(50, 10)),
                 Arguments.of("skip when batch segment too big exception", true, new BatchSegmentTooBigException(50, 10)),
@@ -477,7 +479,7 @@ class FirebirdFrontendEngineTest {
                 Arguments.of("skip when batch handle is invalid", true, new InvalidBatchHandleException(1)),
                 Arguments.of("skip when batch message format is invalid", true, new InvalidBatchMessageFormatException("invalid length")),
                 Arguments.of("skip when batch parameters have an invalid version", true, new InvalidBatchParameterVersionException(2, 1)),
-                Arguments.of("skip when invalid bpb version exception", true, new InvalidBpbVersionException(2, 1)),
+                Arguments.of("skip when invalid bpb version exception", true, new InvalidBPBVersionException(2, 1)),
                 Arguments.of("skip when BLOB parameter buffer is invalid", true, new InvalidClumpletStructureException("invalid", 1)),
                 Arguments.of("skip when parameter conversion exception", true, new ParameterConversionException(new StringTruncationException(20, 32))),
                 Arguments.of("skip when batch BLOB ID is repeated", true, new RepeatedBatchBlobIdException(1L)),

@@ -20,14 +20,14 @@ package org.apache.shardingsphere.database.protocol.firebird.packet.command.quer
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBPBTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobBufferFormatException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBpbException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBpbTooBigException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBPBException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentExceedsBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSmallDataException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchTooBigException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBPBVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
@@ -160,7 +160,7 @@ class FirebirdBatchStatementTest {
     }
     
     @Test
-    void assertAppendBlobStreamWithSegmentedBlobAndBpb() {
+    void assertAppendBlobStreamWithSegmentedBlobAndBPB() {
         ByteBuf data = createBlobHeader(10L, 14, SEGMENTED_BPB.length);
         data.writeBytes(SEGMENTED_BPB);
         data.writeInt(3);
@@ -175,7 +175,7 @@ class FirebirdBatchStatementTest {
     }
     
     @Test
-    void assertAppendBlobStreamWithBpbSplitAcrossPackets() {
+    void assertAppendBlobStreamWithBPBSplitAcrossPackets() {
         FirebirdBatchStatement batchStatement = createBatchStatement();
         byte[] bpb = {1, 9, 3, 7, 8, 9, 3, 0};
         batchStatement.appendBlobStream(createBlobHeader(1L, bpb.length, bpb.length).writeBytes(bpb, 0, 4), 20L);
@@ -186,24 +186,24 @@ class FirebirdBatchStatementTest {
     }
     
     @ParameterizedTest(name = "{0}")
-    @MethodSource("invalidBpbArguments")
-    void assertRejectInvalidBpb(final String name, final byte[] bpb, final Class<? extends RuntimeException> exceptionType) {
+    @MethodSource("invalidBPBArguments")
+    void assertRejectInvalidBPB(final String name, final byte[] bpb, final Class<? extends RuntimeException> exceptionType) {
         FirebirdBatchStatement batchStatement = createBatchStatement();
         ByteBuf data = createBlobHeader(1L, bpb.length, bpb.length).writeBytes(bpb);
         long length = 16L + (bpb.length + 3L & ~3L);
         assertThrows(exceptionType, () -> batchStatement.appendBlobStream(data, length));
     }
     
-    private static Stream<Arguments> invalidBpbArguments() {
+    private static Stream<Arguments> invalidBPBArguments() {
         return Stream.of(
-                Arguments.of("version", new byte[]{2, 3, 1, 1}, InvalidBpbVersionException.class),
+                Arguments.of("version", new byte[]{2, 3, 1, 1}, InvalidBPBVersionException.class),
                 Arguments.of("missing length", new byte[]{1, 9}, InvalidClumpletStructureException.class),
                 Arguments.of("incomplete value", new byte[]{1, 3, 3, 1}, InvalidClumpletStructureException.class),
                 Arguments.of("integer too long", new byte[]{1, 3, 5, 0, 0, 0, 0, 0}, InvalidClumpletStructureException.class));
     }
     
     @Test
-    void assertRejectedBpbPortionsPreserveTheNextBlobBoundary() {
+    void assertRejectedBPBPortionsPreserveTheNextBlobBoundary() {
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 16L);
         int bpbLength = 4097;
         batchStatement.appendBlobStream(createBlobHeader(1L, bpbLength, bpbLength), 16L);
@@ -244,9 +244,9 @@ class FirebirdBatchStatementTest {
     }
     
     @Test
-    void assertAppendBlobStreamWithDefaultSegmentedBpb() {
+    void assertAppendBlobStreamWithDefaultSegmentedBPB() {
         FirebirdBatchStatement batchStatement = createBatchStatement();
-        batchStatement.getBlobStream().setDefaultBpb(Unpooled.wrappedBuffer(SEGMENTED_BPB));
+        batchStatement.getBlobStream().setDefaultBPB(Unpooled.wrappedBuffer(SEGMENTED_BPB));
         ByteBuf data = createBlobHeader(1L, 4, 0);
         data.writeInt(2);
         data.writeBytes(new byte[]{7, 8});
@@ -256,9 +256,9 @@ class FirebirdBatchStatementTest {
     }
     
     @Test
-    void assertAppendBlobStreamWithDefaultStreamBpb() {
+    void assertAppendBlobStreamWithDefaultStreamBPB() {
         FirebirdBatchStatement batchStatement = createBatchStatement();
-        batchStatement.getBlobStream().setDefaultBpb(Unpooled.wrappedBuffer(new byte[]{1, 3, 4, 1, 0, 0, 0}));
+        batchStatement.getBlobStream().setDefaultBPB(Unpooled.wrappedBuffer(new byte[]{1, 3, 4, 1, 0, 0, 0}));
         ByteBuf data = createBlobHeader(1L, 4, 0);
         data.writeBytes(new byte[]{7, 8, 9, 10});
         byte[] actual = appendBlobStream(batchStatement, data, 20L);
@@ -267,7 +267,7 @@ class FirebirdBatchStatementTest {
     }
     
     @Test
-    void assertAppendBlobStreamWithBpbLongerThanBlob() {
+    void assertAppendBlobStreamWithBPBLongerThanBlob() {
         ByteBuf data = createBlobHeader(1L, 2, 4);
         data.writeBytes(new byte[]{1, 3, 1, 1});
         data.writeBytes(new byte[]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12});
@@ -340,7 +340,7 @@ class FirebirdBatchStatementTest {
     @Test
     void assertReadStreamBlobWithSegmentedContinuation() {
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 1024L);
-        batchStatement.getBlobStream().setDefaultBpb(Unpooled.wrappedBuffer(new byte[]{1, 3, 1, 0}));
+        batchStatement.getBlobStream().setDefaultBPB(Unpooled.wrappedBuffer(new byte[]{1, 3, 1, 0}));
         ByteBuf data = createBlobHeader(1L, 6, 4).writeBytes(new byte[]{1, 3, 1, 1}).writeBytes(new byte[]{1, 2});
         data.writeBytes(createBlobHeader(0L, 4, 0)).writeInt(2).writeBytes(new byte[]{(byte) 0xAA, (byte) 0xBB});
         batchStatement.appendBlobStream(data, 44L);
@@ -369,7 +369,7 @@ class FirebirdBatchStatementTest {
     }
     
     @Test
-    void assertReadStreamBlobWithBpbLongerThanBlob() {
+    void assertReadStreamBlobWithBPBLongerThanBlob() {
         FirebirdBatchStatement batchStatement = new FirebirdBatchStatement(32, Collections.emptyList(), 1024L);
         batchStatement.appendBlobStream(createBlobHeader(1L, 2, 4).writeBytes(new byte[]{1, 3, 1, 1}).writeBytes(new byte[]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}), 32L);
         assertThat(batchStatement.readStreamBlobs().iterator().next().getData().toByteArray(), is(new byte[]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}));
@@ -395,9 +395,9 @@ class FirebirdBatchStatementTest {
     
     private static Stream<Arguments> invalidStreamBlobArguments() {
         return Stream.of(
-                Arguments.of("continuation_with_bpb", createBlobHeader(0L, 4, 4).writeBytes(new byte[]{1, 3, 1, 1}), 20L, BatchBlobContinuationBpbException.class),
+                Arguments.of("continuation_with_bpb", createBlobHeader(0L, 4, 4).writeBytes(new byte[]{1, 3, 1, 1}), 20L, BatchBlobContinuationBPBException.class),
                 Arguments.of("continuation_without_blob", createBlobHeader(0L, 2, 0).writeBytes(new byte[]{1, 2}), 20L, BatchBlobBufferFormatException.class),
-                Arguments.of("incomplete_bpb", createBlobHeader(1L, 12, 8).writeBytes(new byte[]{1, 3, 1, 0}), 20L, BatchBpbTooBigException.class),
+                Arguments.of("incomplete_bpb", createBlobHeader(1L, 12, 8).writeBytes(new byte[]{1, 3, 1, 0}), 20L, BatchBPBTooBigException.class),
                 Arguments.of("segment_exceeds_blob", createBlobHeader(1L, 4, 4).writeBytes(new byte[]{1, 3, 1, 0}).writeBytes(createBlobHeader(0L, 4, 0)).writeBytes(new byte[]{9, 0, 1, 2}), 40L,
                         BatchSegmentExceedsBlobException.class),
                 Arguments.of("incomplete_segment", createBlobHeader(1L, 12, 4).writeBytes(new byte[]{1, 3, 1, 0}).writeInt(6).writeBytes(new byte[]{1, 2}), 24L, BatchSegmentTooBigException.class),

@@ -44,6 +44,7 @@ public final class FirebirdMetaDataLoader implements DialectMetaDataLoader {
         }
         loadBlobColumns(material);
         loadNonFixedLengthColumnSizes(material);
+        new FirebirdTypeMetadataLoader(material).load();
         return Collections.singleton(new SchemaMetaData(material.getDefaultSchemaName(), tableMetaData));
     }
     

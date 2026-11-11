@@ -56,7 +56,9 @@ public enum FirebirdState implements SQLState {
     
     CONVERSION_ERROR("22018"),
     
-    NUMERIC_OUT_OF_RANGE("22003");
+    NUMERIC_OUT_OF_RANGE("22003"),
+    
+    DATETIME_OUT_OF_RANGE("22008");
     
     private final String value;
 }

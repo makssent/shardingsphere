@@ -22,7 +22,7 @@ import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import org.apache.shardingsphere.database.exception.core.exception.SQLDialectException;
 import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBPBVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.FirebirdCommandPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
@@ -87,7 +87,7 @@ class FirebirdBatchBlobStreamCommandPacketTest {
     }
     
     @Test
-    void assertGetLengthWithIncompleteLargeBpb() {
+    void assertGetLengthWithIncompleteLargeBPB() {
         ByteBuf data = Unpooled.buffer();
         writeHeader(data, 1L, Integer.MAX_VALUE, Integer.MAX_VALUE - 3);
         data.writeBytes(new byte[]{1, 3});
@@ -103,12 +103,12 @@ class FirebirdBatchBlobStreamCommandPacketTest {
     private static Stream<Arguments> invalidStreamArguments() {
         return Stream.of(
                 Arguments.of("unaligned_length", Unpooled.buffer(), 6L, DatabaseProtocolException.class),
-                Arguments.of("wrong_bpb_version", createStreamWithBpb(4, new byte[]{2, 3, 1, 0}), 32L, InvalidBpbVersionException.class),
-                Arguments.of("truncated_bpb_clumplet", createStreamWithBpb(4, new byte[]{1, 3, 4, 0}), 32L, InvalidClumpletStructureException.class),
+                Arguments.of("wrong_bpb_version", createStreamWithBPB(4, new byte[]{2, 3, 1, 0}), 32L, InvalidBPBVersionException.class),
+                Arguments.of("truncated_bpb_clumplet", createStreamWithBPB(4, new byte[]{1, 3, 4, 0}), 32L, InvalidClumpletStructureException.class),
                 Arguments.of("segment_exceeds_blob", createStreamWithSegment(4, 3), 24L, DatabaseProtocolException.class));
     }
     
-    private static ByteBuf createStreamWithBpb(final int blobLength, final byte[] bpb) {
+    private static ByteBuf createStreamWithBPB(final int blobLength, final byte[] bpb) {
         ByteBuf result = Unpooled.buffer();
         writeHeader(result, 1L, blobLength, bpb.length);
         result.writeBytes(bpb);

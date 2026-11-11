@@ -19,6 +19,9 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.statemen
 
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdBlobInfoRegistry;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdTypeMetadataRegistry;
+import org.apache.shardingsphere.database.connector.firebird.metadata.data.FirebirdTypeMetadataRegistry.FieldType;
+import org.apache.shardingsphere.database.exception.core.exception.data.InvalidParameterValueException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.database.NoDatabaseSelectedException;
 import org.apache.shardingsphere.database.exception.core.exception.syntax.database.UnknownDatabaseException;
 import org.apache.shardingsphere.database.protocol.firebird.constant.FirebirdConstant;
@@ -38,6 +41,7 @@ import org.apache.shardingsphere.infra.hint.HintValueContext;
 import org.apache.shardingsphere.infra.metadata.ShardingSphereMetaData;
 import org.apache.shardingsphere.infra.metadata.database.ShardingSphereDatabase;
 import org.apache.shardingsphere.infra.metadata.database.resource.ResourceMetaData;
+import org.apache.shardingsphere.infra.metadata.database.resource.unit.StorageUnit;
 import org.apache.shardingsphere.infra.metadata.database.rule.RuleMetaData;
 import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereColumn;
 import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereSchema;
@@ -75,6 +79,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import javax.sql.DataSource;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.sql.Types;
@@ -100,7 +105,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(AutoMockExtension.class)
-@StaticMockSettings(ProxyContext.class)
+@StaticMockSettings({ProxyContext.class, FirebirdTypeMetadataRegistry.class})
 @MockitoSettings(strictness = Strictness.LENIENT)
 class FirebirdPrepareStatementCommandExecutorTest {
     
@@ -413,6 +418,26 @@ class FirebirdPrepareStatementCommandExecutorTest {
         assertThat(actual.get(1).getColumnType(), is(FirebirdBinaryColumnType.BLOB));
     }
     
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("nestedCastArguments")
+    void assertPrepareNestedCast(final String sql, final int firstCharset, final int firstLength) throws SQLException {
+        when(packet.getSQL()).thenReturn(sql);
+        executeAndGetReturnPacket();
+        List<FirebirdReturnColumnPacket> actual = connectionSession.getServerPreparedStatementRegistry().<FirebirdServerPreparedStatement>getPreparedStatement(1).getParameterColumns();
+        assertThat(actual.size(), is(2));
+        assertThat(actual.get(0).getColumnType(), is(FirebirdBinaryColumnType.VARYING));
+        assertThat(actual.get(0).findColumnLength().get(), is(firstLength));
+        assertThat(actual.get(0).findTargetCharacterSetId().get(), is(firstCharset));
+        assertThat(actual.get(1).getColumnType(), is(FirebirdBinaryColumnType.LONG));
+    }
+    
+    private static Stream<Arguments> nestedCastArguments() {
+        return Stream.of(
+                Arguments.of("INSERT INTO foo_tbl (id, content) VALUES (CAST(CAST(? AS VARCHAR(10)) AS INTEGER), CAST(? AS INTEGER))", 4, 10),
+                Arguments.of("UPDATE foo_tbl SET content = CAST(CAST(? AS VARCHAR(5) CHARACTER SET UTF8) AS BLOB SUB_TYPE TEXT) WHERE id = ?", 4, 5),
+                Arguments.of("INSERT INTO foo_tbl (id, content) VALUES (CAST(CAST(CAST(? AS VARCHAR(7) CHARACTER SET OCTETS) AS VARCHAR(9)) AS INTEGER), CAST(? AS INTEGER))", 1, 7));
+    }
+    
     @Test
     void assertPrepareKeepsUpdateCastAndWhereParameterOrder() throws SQLException {
         when(packet.getSQL()).thenReturn("UPDATE foo_tbl SET content = CAST(? AS BLOB SUB_TYPE TEXT) WHERE id = ?");
@@ -434,8 +459,14 @@ class FirebirdPrepareStatementCommandExecutorTest {
     }
     
     private static Stream<Arguments> castBlobSubtypeArguments() {
-        return Stream.of(Arguments.of("BLOB SUB_TYPE TEXT", 1), Arguments.of("BLOB SUB_TYPE  1", 1), Arguments.of("BLOB SUB_TYPE 01", 1),
-                Arguments.of("BLOB SUB_TYPE 0", 0), Arguments.of("BLOB(,1)", 1), Arguments.of("BLOB(80,01)", 1), Arguments.of("BLOB(80,0)", 0));
+        return Stream.of(
+                Arguments.of("BLOB SUB_TYPE TEXT", 1),
+                Arguments.of("BLOB SUB_TYPE  1", 1),
+                Arguments.of("BLOB SUB_TYPE 01", 1),
+                Arguments.of("BLOB SUB_TYPE 0", 0),
+                Arguments.of("BLOB(,1)", 1),
+                Arguments.of("BLOB(80,01)", 1),
+                Arguments.of("BLOB(80,0)", 0));
     }
     
     @ParameterizedTest(name = "{0}")
@@ -457,12 +488,150 @@ class FirebirdPrepareStatementCommandExecutorTest {
     }
     
     private static Stream<Arguments> castNumericArguments() {
-        return Stream.of(Arguments.of("NUMERIC(4,3)", FirebirdBinaryColumnType.SHORT, 1, 3),
+        return Stream.of(
+                Arguments.of("NUMERIC(4,3)", FirebirdBinaryColumnType.SHORT, 1, 3),
                 Arguments.of("NUMERIC(9,3)", FirebirdBinaryColumnType.LONG, 1, 3),
                 Arguments.of("NUMERIC(10,3)", FirebirdBinaryColumnType.INT64, 1, 3),
                 Arguments.of("NUMERIC(19,3)", FirebirdBinaryColumnType.INT128, 1, 3),
                 Arguments.of("DECIMAL(4,3)", FirebirdBinaryColumnType.LONG, 2, 3),
                 Arguments.of("DECIMAL(10,3)", FirebirdBinaryColumnType.INT64, 2, 3));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("castFixedTypeArguments")
+    void assertDescribeCastFixedType(final String typeName, final FirebirdBinaryColumnType expectedType, final int expectedLength) throws SQLException {
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id, content) VALUES (CAST(? AS " + typeName + "), ?)");
+        when(packet.nextItem()).thenReturn(true, true, true, true, true, true, false);
+        when(packet.getCurrentItem()).thenReturn(FirebirdSQLInfoPacketType.STMT_TYPE, FirebirdSQLInfoPacketType.BIND,
+                FirebirdSQLInfoPacketType.TYPE, FirebirdSQLInfoPacketType.TYPE, FirebirdSQLInfoPacketType.LENGTH, FirebirdSQLInfoPacketType.LENGTH,
+                FirebirdSQLInfoPacketType.DESCRIBE_END, FirebirdSQLInfoPacketType.DESCRIBE_END);
+        FirebirdPrepareStatementReturnPacket actual = executeAndGetReturnPacket();
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
+        actual.getDescribeBind().get(0).write(payload);
+        ArgumentCaptor<Integer> actualValues = ArgumentCaptor.forClass(Integer.class);
+        verify(payload, times(2)).writeInt4LE(actualValues.capture());
+        assertThat(actualValues.getAllValues(), is(Arrays.asList(expectedType.getValue() + 1, expectedLength)));
+        assertThat(actual.getDescribeBind().get(0).getColumnType(), is(expectedType));
+    }
+    
+    private static Stream<Arguments> castFixedTypeArguments() {
+        return Stream.of(
+                Arguments.of("INT128", FirebirdBinaryColumnType.INT128, 16),
+                Arguments.of("FLOAT(24)", FirebirdBinaryColumnType.FLOAT, 4),
+                Arguments.of("FLOAT(25)", FirebirdBinaryColumnType.DOUBLE, 8),
+                Arguments.of("FLOAT(53)", FirebirdBinaryColumnType.DOUBLE, 8),
+                Arguments.of("TIME WITH TIME ZONE", FirebirdBinaryColumnType.TIME_TZ, 8),
+                Arguments.of("TIMESTAMP WITH TIME ZONE", FirebirdBinaryColumnType.TIMESTAMP_TZ, 12),
+                Arguments.of("DECFLOAT", FirebirdBinaryColumnType.DEC34, 16),
+                Arguments.of("DECFLOAT(16)", FirebirdBinaryColumnType.DEC16, 8),
+                Arguments.of("DECFLOAT(34)", FirebirdBinaryColumnType.DEC34, 16));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("castDomainArguments")
+    void assertDescribeCastDomain(final String domainName) throws SQLException {
+        DataSource dataSource = mock(DataSource.class);
+        StorageUnit storageUnit = mock(StorageUnit.class);
+        when(storageUnit.getDataSource()).thenReturn(dataSource);
+        ProxyContext.getInstance().getContextManager().getDatabase("foo_db").getResourceMetaData().getStorageUnits().put("foo_ds", storageUnit);
+        when(FirebirdTypeMetadataRegistry.findDomainType(dataSource, domainName)).thenReturn(Optional.of(new FieldType(16, 1, -2, 8, 0, 0)));
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id, content) VALUES (CAST(? AS " + domainName + "), ?)");
+        when(packet.nextItem()).thenReturn(true, true, true, true, true, true, false);
+        when(packet.getCurrentItem()).thenReturn(FirebirdSQLInfoPacketType.STMT_TYPE, FirebirdSQLInfoPacketType.BIND,
+                FirebirdSQLInfoPacketType.TYPE, FirebirdSQLInfoPacketType.TYPE, FirebirdSQLInfoPacketType.LENGTH, FirebirdSQLInfoPacketType.LENGTH,
+                FirebirdSQLInfoPacketType.DESCRIBE_END, FirebirdSQLInfoPacketType.DESCRIBE_END);
+        FirebirdPrepareStatementReturnPacket actual = executeAndGetReturnPacket();
+        assertThat(actual.getDescribeBind().get(0).getColumnType(), is(FirebirdBinaryColumnType.NUMERIC));
+        assertThat(actual.getDescribeBind().get(0).findWireNumericType().get(), is(FirebirdBinaryColumnType.INT64));
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
+        actual.getDescribeBind().get(0).write(payload);
+        ArgumentCaptor<Integer> actualValues = ArgumentCaptor.forClass(Integer.class);
+        verify(payload, times(2)).writeInt4LE(actualValues.capture());
+        assertThat(actualValues.getAllValues(), is(Arrays.asList(581, 8)));
+    }
+    
+    private static Stream<Arguments> castDomainArguments() {
+        return Stream.of(Arguments.of("foo_domain"), Arguments.of("BLOB_DOMAIN"), Arguments.of("BLOB$DOMAIN"));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("catalogTextArguments")
+    void assertDescribeCatalogText(final String name, final int connectionCharset, final int targetCharset, final int fieldLength, final int expectedCharset,
+                                   final int expectedLength) throws SQLException {
+        DataSource dataSource = mock(DataSource.class);
+        StorageUnit storageUnit = mock(StorageUnit.class);
+        when(storageUnit.getDataSource()).thenReturn(dataSource);
+        ShardingSphereDatabase database = ProxyContext.getInstance().getContextManager().getDatabase("foo_db");
+        database.getResourceMetaData().getStorageUnits().put("foo_ds", storageUnit);
+        database.getSchema("foo_db").putTable(new ShardingSphereTable("foo_tbl",
+                Collections.singleton(new ShardingSphereColumn("id", Types.VARCHAR, false, false, true, true, false, false)), Collections.emptyList(), Collections.emptyList()));
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(connectionCharset);
+        when(FirebirdTypeMetadataRegistry.findColumnType(dataSource, "foo_tbl", "id")).thenReturn(Optional.of(new FieldType(37, 0, 0, fieldLength, targetCharset, 5)));
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id) VALUES (?)");
+        when(packet.nextItem()).thenReturn(true, true, true, true, true, true, true, false);
+        when(packet.getCurrentItem()).thenReturn(FirebirdSQLInfoPacketType.STMT_TYPE, FirebirdSQLInfoPacketType.BIND, FirebirdSQLInfoPacketType.TYPE, FirebirdSQLInfoPacketType.TYPE,
+                FirebirdSQLInfoPacketType.SUB_TYPE, FirebirdSQLInfoPacketType.SUB_TYPE, FirebirdSQLInfoPacketType.LENGTH, FirebirdSQLInfoPacketType.LENGTH,
+                FirebirdSQLInfoPacketType.DESCRIBE_END, FirebirdSQLInfoPacketType.DESCRIBE_END);
+        FirebirdPrepareStatementReturnPacket actual = executeAndGetReturnPacket();
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
+        actual.getDescribeBind().get(0).write(payload);
+        verifyTextDescription(payload, FirebirdBinaryColumnType.VARYING, expectedCharset, expectedLength);
+        assertThat(actual.getDescribeBind().get(0).findTargetCharacterSetId().get(), is(targetCharset));
+    }
+    
+    private static Stream<Arguments> catalogTextArguments() {
+        return Stream.of(
+                Arguments.of("none_utf8", 4, 0, 5, 0, 5),
+                Arguments.of("octets_utf8", 4, 1, 5, 1, 5),
+                Arguments.of("win1251_utf8", 4, 52, 5, 4, 20),
+                Arguments.of("utf8_none", 0, 4, 20, 4, 20));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("catalogBlobArguments")
+    void assertDescribeCatalogBlob(final String name, final int connectionCharset, final int targetCharset, final int expectedScale) throws SQLException {
+        DataSource dataSource = mock(DataSource.class);
+        StorageUnit storageUnit = mock(StorageUnit.class);
+        when(storageUnit.getDataSource()).thenReturn(dataSource);
+        ProxyContext.getInstance().getContextManager().getDatabase("foo_db").getResourceMetaData().getStorageUnits().put("foo_ds", storageUnit);
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(connectionCharset);
+        when(FirebirdTypeMetadataRegistry.findColumnType(dataSource, "foo_tbl", "content")).thenReturn(Optional.of(new FieldType(261, 1, 0, 8, targetCharset, 0)));
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (content) VALUES (?)");
+        when(packet.nextItem()).thenReturn(true, true, true, true, true, true, true, true, false);
+        when(packet.getCurrentItem()).thenReturn(FirebirdSQLInfoPacketType.STMT_TYPE, FirebirdSQLInfoPacketType.BIND, FirebirdSQLInfoPacketType.TYPE, FirebirdSQLInfoPacketType.TYPE,
+                FirebirdSQLInfoPacketType.SUB_TYPE, FirebirdSQLInfoPacketType.SUB_TYPE, FirebirdSQLInfoPacketType.SCALE, FirebirdSQLInfoPacketType.SCALE,
+                FirebirdSQLInfoPacketType.LENGTH, FirebirdSQLInfoPacketType.LENGTH, FirebirdSQLInfoPacketType.DESCRIBE_END, FirebirdSQLInfoPacketType.DESCRIBE_END);
+        FirebirdPrepareStatementReturnPacket actual = executeAndGetReturnPacket();
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
+        actual.getDescribeBind().get(0).write(payload);
+        ArgumentCaptor<Integer> actualValues = ArgumentCaptor.forClass(Integer.class);
+        verify(payload, times(4)).writeInt4LE(actualValues.capture());
+        assertThat(actualValues.getAllValues(), is(Arrays.asList(521, 1, expectedScale, 8)));
+        assertThat(actual.getDescribeBind().get(0).findBlobSubType().get(), is(1));
+    }
+    
+    private static Stream<Arguments> catalogBlobArguments() {
+        return Stream.of(
+                Arguments.of("none_utf8", 4, 0, 0),
+                Arguments.of("octets_utf8", 4, 1, 1),
+                Arguments.of("utf8_none", 0, 4, 4),
+                Arguments.of("win1251_none", 0, 52, 52),
+                Arguments.of("win1251_utf8", 4, 52, 4),
+                Arguments.of("utf8_win1251", 52, 4, 52));
+    }
+    
+    @Test
+    void assertDescribeDirectNumericPhysicalType() throws SQLException {
+        DataSource dataSource = mock(DataSource.class);
+        StorageUnit storageUnit = mock(StorageUnit.class);
+        when(storageUnit.getDataSource()).thenReturn(dataSource);
+        ProxyContext.getInstance().getContextManager().getDatabase("foo_db").getResourceMetaData().getStorageUnits().put("foo_ds", storageUnit);
+        when(FirebirdTypeMetadataRegistry.findColumnType(dataSource, "foo_tbl", "id")).thenReturn(Optional.of(new FieldType(26, 1, 0, 16, 0, 0)));
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id, content) VALUES (?, ?)");
+        mockBindTextDescription();
+        FirebirdPrepareStatementReturnPacket actual = executeAndGetReturnPacket();
+        assertThat(actual.getDescribeBind().get(0).getColumnType(), is(FirebirdBinaryColumnType.NUMERIC));
+        assertThat(actual.getDescribeBind().get(0).findWireNumericType().get(), is(FirebirdBinaryColumnType.INT128));
     }
     
     @Test
@@ -504,8 +673,63 @@ class FirebirdPrepareStatementCommandExecutorTest {
     }
     
     private static Stream<Arguments> castTextArguments() {
-        return Stream.of(Arguments.of("CHAR", 4, FirebirdBinaryColumnType.TEXT, 1, 4), Arguments.of("CHARACTER", 52, FirebirdBinaryColumnType.TEXT, 1, 1),
-                Arguments.of("CHAR(7)", 4, FirebirdBinaryColumnType.TEXT, 7, 28), Arguments.of("VARCHAR(7)", 52, FirebirdBinaryColumnType.VARYING, 7, 7));
+        return Stream.of(
+                Arguments.of("CHAR", 4, FirebirdBinaryColumnType.TEXT, 1, 4),
+                Arguments.of("CHARACTER", 52, FirebirdBinaryColumnType.TEXT, 1, 1),
+                Arguments.of("CHAR(7)", 4, FirebirdBinaryColumnType.TEXT, 7, 28),
+                Arguments.of("VARCHAR(7)", 52, FirebirdBinaryColumnType.VARYING, 7, 7));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("castTextCharsetArguments")
+    void assertDescribeCastTextCharset(final String name, final String typeName, final int charsetId, final int bytes) throws SQLException {
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (id, content) VALUES (CAST(? AS " + typeName + "), ?)");
+        mockBindTextDescription();
+        FirebirdPrepareStatementReturnPacket actual = executeAndGetReturnPacket();
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
+        actual.getDescribeBind().get(0).write(payload);
+        verifyTextDescription(payload, FirebirdBinaryColumnType.VARYING, charsetId, bytes);
+    }
+    
+    private static Stream<Arguments> castTextCharsetArguments() {
+        return Stream.of(
+                Arguments.of("none", "VARCHAR(3) CHARACTER SET NONE", 0, 3),
+                Arguments.of("octets", "VARCHAR(3) CHARACTER SET OCTETS", 1, 3),
+                Arguments.of("win1251", "VARCHAR(3) CHARACTER SET WIN1251", 4, 12),
+                Arguments.of("comment", "VARCHAR(3) /* CHARACTER SET UTF8 */ CHARACTER SET NONE", 0, 3));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("castBlobCharsetArguments")
+    void assertDescribeCastBlobCharset(final String name, final String typeName, final int charsetId) throws SQLException {
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (content) VALUES (CAST(? AS " + typeName + "))");
+        when(packet.nextItem()).thenReturn(true, true, true, true, true, true, true, true, false);
+        when(packet.getCurrentItem()).thenReturn(FirebirdSQLInfoPacketType.STMT_TYPE, FirebirdSQLInfoPacketType.BIND, FirebirdSQLInfoPacketType.TYPE, FirebirdSQLInfoPacketType.TYPE,
+                FirebirdSQLInfoPacketType.SUB_TYPE, FirebirdSQLInfoPacketType.SUB_TYPE, FirebirdSQLInfoPacketType.SCALE, FirebirdSQLInfoPacketType.SCALE,
+                FirebirdSQLInfoPacketType.LENGTH, FirebirdSQLInfoPacketType.LENGTH, FirebirdSQLInfoPacketType.DESCRIBE_END, FirebirdSQLInfoPacketType.DESCRIBE_END);
+        FirebirdPrepareStatementReturnPacket actual = executeAndGetReturnPacket();
+        FirebirdPacketPayload payload = mock(FirebirdPacketPayload.class);
+        actual.getDescribeBind().get(0).write(payload);
+        ArgumentCaptor<Integer> actualValues = ArgumentCaptor.forClass(Integer.class);
+        verify(payload, times(4)).writeInt4LE(actualValues.capture());
+        assertThat(actualValues.getAllValues(), is(Arrays.asList(521, 1, charsetId, 8)));
+    }
+    
+    private static Stream<Arguments> castBlobCharsetArguments() {
+        return Stream.of(
+                Arguments.of("default", "BLOB SUB_TYPE TEXT", 4),
+                Arguments.of("utf8", "BLOB SUB_TYPE TEXT CHARACTER SET UTF8", 4),
+                Arguments.of("none", "BLOB SUB_TYPE TEXT CHARACTER SET NONE", 0),
+                Arguments.of("octets", "BLOB SUB_TYPE TEXT CHARACTER SET OCTETS", 1),
+                Arguments.of("win1251", "BLOB SUB_TYPE TEXT CHARACTER SET WIN1251", 4));
+    }
+    
+    @Test
+    void assertDescribeCastWithUnknownCharset() throws SQLException {
+        when(packet.getSQL()).thenReturn("INSERT INTO foo_tbl (content) VALUES (CAST(? AS VARCHAR(3) CHARACTER SET foo_charset))");
+        mockBindTextDescription();
+        InvalidParameterValueException actual = assertThrows(InvalidParameterValueException.class, this::executeAndGetReturnPacket);
+        assertThat(actual.getParameterValue(), is("foo_charset"));
     }
     
     private void mockBindTextDescription() {

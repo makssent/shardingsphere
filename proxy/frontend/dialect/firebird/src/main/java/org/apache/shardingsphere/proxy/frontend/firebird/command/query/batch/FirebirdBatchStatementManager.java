@@ -20,10 +20,10 @@ package org.apache.shardingsphere.proxy.frontend.firebird.command.query.batch;
 import io.netty.buffer.ByteBufUtil;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBPBTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobBufferFormatException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBpbException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBpbTooBigException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchDefaultBpbChangeException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBPBException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchDefaultBPBChangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentExceedsBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSmallDataException;
@@ -39,7 +39,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchColumnDescriptor;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchMessageCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchRegistry;
-import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBPBCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStatement;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchStreamBlob;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
@@ -171,13 +171,13 @@ public final class FirebirdBatchStatementManager {
      * @param connectionId connection ID
      * @param packet batch set default BLOB parameter buffer packet
      * @throws InvalidBatchHandleException if batch statement does not exist
-     * @throws BatchDefaultBpbChangeException if batch already contains BLOB stream data
+     * @throws BatchDefaultBPBChangeException if batch already contains BLOB stream data
      */
-    void setDefaultBpb(final int connectionId, final FirebirdBatchSetBpbCommandPacket packet) {
+    void setDefaultBPB(final int connectionId, final FirebirdBatchSetBPBCommandPacket packet) {
         FirebirdBatchStatement batchStatement = getBatchStatement(connectionId, packet.getStatementHandle());
         ShardingSpherePreconditions.checkNotNull(batchStatement, () -> new InvalidBatchHandleException(packet.getStatementHandle()));
-        batchStatement.getBlobStream().setDefaultBpb(packet.getBpb());
-        ShardingSpherePreconditions.checkState(0L == batchStatement.getBlobStreamSize(), () -> new BatchDefaultBpbChangeException(packet.getStatementHandle()));
+        batchStatement.getBlobStream().setDefaultBPB(packet.getBpb());
+        ShardingSpherePreconditions.checkState(0L == batchStatement.getBlobStreamSize(), () -> new BatchDefaultBPBChangeException(packet.getStatementHandle()));
         batchStatement.setDefaultBpb(ByteBufUtil.getBytes(packet.getBpb()));
     }
     
@@ -190,8 +190,8 @@ public final class FirebirdBatchStatementManager {
      * @param connectionCharsetId character set ID of the connection
      * @throws BatchSmallDataException if a BLOB header is incomplete
      * @throws BatchBlobBufferFormatException if a continuation has no BLOB to continue
-     * @throws BatchBlobContinuationBpbException if a BLOB continuation contains a BLOB parameter buffer
-     * @throws BatchBpbTooBigException if a BLOB parameter buffer is incomplete
+     * @throws BatchBlobContinuationBPBException if a BLOB continuation contains a BLOB parameter buffer
+     * @throws BatchBPBTooBigException if a BLOB parameter buffer is incomplete
      * @throws RepeatedBatchBlobIdException if batch BLOB ID is already registered
      * @throws BatchSegmentExceedsBlobException if a BLOB segment exceeds its BLOB
      * @throws BatchSegmentTooBigException if a BLOB segment is incomplete

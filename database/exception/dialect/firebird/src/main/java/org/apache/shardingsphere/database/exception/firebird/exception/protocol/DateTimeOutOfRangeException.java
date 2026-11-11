@@ -18,20 +18,17 @@
 package org.apache.shardingsphere.database.exception.firebird.exception.protocol;
 
 import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.exception.core.exception.SQLDialectException;
 
 /**
- * Batch default BLOB parameter buffer change exception for Firebird.
+ * Range error for a Firebird DATE, TIME or TIMESTAMP value.
  */
+@RequiredArgsConstructor
 @Getter
-public final class BatchDefaultBpbChangeException extends SQLDialectException {
+public final class DateTimeOutOfRangeException extends SQLDialectException {
     
-    private static final long serialVersionUID = 4270683575242049763L;
+    private static final long serialVersionUID = 8472906242905921748L;
     
-    private final int statementHandle;
-    
-    public BatchDefaultBpbChangeException(final int statementHandle) {
-        super(String.format("Cannot change default BLOB parameter buffer after adding BLOB data to batch for statement handle %d", statementHandle));
-        this.statementHandle = statementHandle;
-    }
+    private final int jdbcType;
 }

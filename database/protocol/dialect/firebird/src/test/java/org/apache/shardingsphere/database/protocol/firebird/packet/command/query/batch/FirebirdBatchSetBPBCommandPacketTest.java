@@ -29,18 +29,18 @@ import java.nio.charset.StandardCharsets;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 
-class FirebirdBatchSetBpbCommandPacketTest {
+class FirebirdBatchSetBPBCommandPacketTest {
     
     @Test
     void assertConstructor() {
-        FirebirdBatchSetBpbCommandPacket actual = new FirebirdBatchSetBpbCommandPacket(new FirebirdPacketPayload(createPacket(), StandardCharsets.UTF_8));
+        FirebirdBatchSetBPBCommandPacket actual = new FirebirdBatchSetBPBCommandPacket(new FirebirdPacketPayload(createPacket(), StandardCharsets.UTF_8));
         assertThat(actual.getStatementHandle(), is(7));
         assertThat(ByteBufUtil.getBytes(actual.getBpb()), is(new byte[]{1, 3, 1, 0, 0}));
     }
     
     @Test
     void assertGetLength() {
-        assertThat(FirebirdBatchSetBpbCommandPacket.getLength(new FirebirdPacketPayload(createPacket(), StandardCharsets.UTF_8)), is(20));
+        assertThat(FirebirdBatchSetBPBCommandPacket.getLength(new FirebirdPacketPayload(createPacket(), StandardCharsets.UTF_8)), is(20));
     }
     
     private ByteBuf createPacket() {

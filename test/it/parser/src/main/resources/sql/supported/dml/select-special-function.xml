@@ -357,6 +357,7 @@
     <sql-case id="select_cast_with_placeholder_mysql" value="SELECT CAST(? AS UNSIGNED) FROM t_order" case-types="placeholder" db-types="MySQL,Hive,Presto" />
     <sql-case id="select_cast_with_placeholder_clickhouse" value="SELECT CAST(? AS INT8) FROM t_order" case-types="placeholder" db-types="ClickHouse" />
     <sql-case id="select_cast_with_placeholder_standard" value="SELECT CAST(? AS INT) FROM t_order" case-types="placeholder" db-types="SQL92,Firebird,SQLServer" />
+    <sql-case id="select_nested_cast_firebird" value="SELECT CAST(CAST(? AS VARCHAR(10)) AS INTEGER) FROM RDB$DATABASE" case-types="placeholder" db-types="Firebird" />
     <sql-case id="select_interval_with_placeholder" value="SELECT INTERVAL ? DAY FROM t_order" case-types="placeholder" db-types="MySQL,ClickHouse,SQL92,Firebird" />
     <sql-case id="select_split_by_string" value="SELECT SPLIT_BY_STRING('apple::banana::cherry', '::')" db-types="Doris" />
     <sql-case id="select_split_by_string_with_column" value="SELECT SPLIT_BY_STRING(order_notes, '::') FROM t_order" db-types="Doris" />

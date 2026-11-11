@@ -120,6 +120,12 @@ public enum FirebirdVendorError implements VendorError {
     
     CONVERSION_ERROR(FirebirdState.CONVERSION_ERROR, ISCConstants.isc_convert_error, "conversion error from string \"%s\""),
     
+    DATE_OUT_OF_RANGE(FirebirdState.DATETIME_OUT_OF_RANGE, ISCConstants.isc_date_range_exceeded, "value exceeds the range for valid dates"),
+    
+    TIME_OUT_OF_RANGE(FirebirdState.DATETIME_OUT_OF_RANGE, ISCConstants.isc_time_range_exceeded, "value exceeds the range for a valid time"),
+    
+    TIMESTAMP_OUT_OF_RANGE(FirebirdState.DATETIME_OUT_OF_RANGE, ISCConstants.isc_datetime_range_exceeded, "value exceeds the range for valid timestamps"),
+    
     MALFORMED_STRING(XOpenSQLState.DATA_EXCEPTION, ISCConstants.isc_malformed_string, "Malformed string");
     
     private final SQLState sqlState;

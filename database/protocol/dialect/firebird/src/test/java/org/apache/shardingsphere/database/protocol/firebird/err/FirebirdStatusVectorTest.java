@@ -20,6 +20,7 @@ package org.apache.shardingsphere.database.protocol.firebird.err;
 import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException.StatusVectorEntry;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
+import org.apache.shardingsphere.database.protocol.payload.PacketPayload;
 import org.firebirdsql.gds.ISCConstants;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -84,7 +85,7 @@ class FirebirdStatusVectorTest {
                 Arrays.asList(new StatusVectorEntry(ISCConstants.isc_dsql_error, Collections.emptyList()), new StatusVectorEntry(ISCConstants.isc_batch_big_bpb, Arrays.asList(8, "0:63"))));
         FirebirdStatusVector vector = new FirebirdStatusVector(ex);
         assertThat(vector.getGdsCode(), is(ISCConstants.isc_dsql_error));
-        vector.write(payload);
+        vector.write((PacketPayload) payload);
         InOrder inOrder = inOrder(payload);
         inOrder.verify(payload).writeInt4(ISCConstants.isc_arg_gds);
         inOrder.verify(payload).writeInt4(ISCConstants.isc_dsql_error);

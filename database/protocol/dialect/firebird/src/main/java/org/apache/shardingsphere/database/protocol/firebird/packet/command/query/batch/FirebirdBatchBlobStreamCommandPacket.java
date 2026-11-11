@@ -20,7 +20,7 @@ package org.apache.shardingsphere.database.protocol.firebird.packet.command.quer
 import io.netty.buffer.ByteBuf;
 import lombok.Getter;
 import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBPBVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.FirebirdCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
@@ -62,7 +62,7 @@ public final class FirebirdBatchBlobStreamCommandPacket extends FirebirdCommandP
      * @return length of packet, or -1 if the packet is incomplete
      * @throws DatabaseProtocolException when stream portion is invalid
      * @throws InvalidClumpletStructureException when BLOB parameter buffer of stream portion has invalid structure
-     * @throws InvalidBpbVersionException when BLOB parameter buffer of stream portion has wrong version
+     * @throws InvalidBPBVersionException when BLOB parameter buffer of stream portion has wrong version
      */
     public static int getLength(final FirebirdPacketPayload payload, final FirebirdBatchBlobStream blobStream) {
         ByteBuf data = payload.getByteBuf();

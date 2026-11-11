@@ -513,7 +513,7 @@ class FirebirdPacketCodecEngineTest {
     }
     
     @Test
-    void assertDecodeBlobStreamWithSegmentedDefaultBpb() {
+    void assertDecodeBlobStreamWithSegmentedDefaultBPB() {
         ByteBuf setBpb = Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_SET_BPB.getValue()).writeInt(BATCH_STATEMENT_HANDLE).writeInt(4).writeBytes(new byte[]{1, 3, 1, 0});
         ByteBuf in = Unpooled.wrappedUnmodifiableBuffer(setBpb, buildBlobStream(20, buildBlobHeader(1L, 4, 0).writeInt(2).writeZero(2)), createCommandPacket(FirebirdCommandPacketType.BATCH_EXEC, 12));
         List<Object> actualOut = new LinkedList<>();
@@ -533,7 +533,7 @@ class FirebirdPacketCodecEngineTest {
     }
     
     @Test
-    void assertDecodeWithInvalidSetBpb() {
+    void assertDecodeWithInvalidSetBPB() {
         EmbeddedChannel channel = new EmbeddedChannel(new PacketCodec(new FirebirdPacketCodecEngine()));
         channel.attr(CommonConstants.CHARSET_ATTRIBUTE_KEY).set(StandardCharsets.UTF_8);
         channel.writeInbound(Unpooled.buffer().writeInt(FirebirdCommandPacketType.BATCH_SET_BPB.getValue()).writeInt(BATCH_STATEMENT_HANDLE).writeInt(0));

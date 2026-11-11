@@ -6527,6 +6527,32 @@
         </from>
     </select>
 
+    <select sql-case-id="select_nested_cast_firebird" parameters="1" parameter-marker-count="1">
+        <projections start-index="7" stop-index="45">
+            <expression-projection text="CAST(CAST(? AS VARCHAR(10)) AS INTEGER)" start-index="7" stop-index="45">
+                <expr>
+                    <function function-name="CAST" text="CAST(CAST(? AS VARCHAR(10)) AS INTEGER)" start-index="7" stop-index="45">
+                        <parameter>
+                            <function function-name="CAST" text="CAST(? AS VARCHAR(10))" start-index="12" stop-index="33">
+                                <parameter>
+                                    <data-type value="VARCHAR" start-index="22" stop-index="32" length-present="true">
+                                        <dataLength precision="10" />
+                                    </data-type>
+                                </parameter>
+                            </function>
+                        </parameter>
+                        <parameter>
+                            <data-type value="INTEGER" start-index="38" stop-index="44" />
+                        </parameter>
+                    </function>
+                </expr>
+            </expression-projection>
+        </projections>
+        <from>
+            <simple-table name="RDB$DATABASE" start-index="52" stop-index="63" />
+        </from>
+    </select>
+
     <select sql-case-id="select_interval_with_placeholder">
         <projections start-index="7" stop-index="22">
             <expression-projection text="INTERVAL ? DAY" start-index="7" stop-index="22">

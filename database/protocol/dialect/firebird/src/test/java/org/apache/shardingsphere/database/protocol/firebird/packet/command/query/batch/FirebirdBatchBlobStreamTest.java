@@ -19,7 +19,7 @@ package org.apache.shardingsphere.database.protocol.firebird.packet.command.quer
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBPBVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.FirebirdCommandPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
@@ -59,14 +59,14 @@ class FirebirdBatchBlobStreamTest {
     }
     
     @ParameterizedTest(name = "{0}")
-    @MethodSource("invalidStructureBpbArguments")
-    void assertSetDefaultBpbWithInvalidStructure(final String name, final byte[] bpb, final String expectedReason, final int expectedData) {
-        InvalidClumpletStructureException actual = assertThrows(InvalidClumpletStructureException.class, () -> new FirebirdBatchBlobStream().setDefaultBpb(Unpooled.wrappedBuffer(bpb)));
+    @MethodSource("invalidStructureBPBArguments")
+    void assertSetDefaultBPBWithInvalidStructure(final String name, final byte[] bpb, final String expectedReason, final int expectedData) {
+        InvalidClumpletStructureException actual = assertThrows(InvalidClumpletStructureException.class, () -> new FirebirdBatchBlobStream().setDefaultBPB(Unpooled.wrappedBuffer(bpb)));
         assertThat(actual.getReason(), is(expectedReason));
         assertThat(actual.getData(), is(expectedData));
     }
     
-    private static Stream<Arguments> invalidStructureBpbArguments() {
+    private static Stream<Arguments> invalidStructureBPBArguments() {
         return Stream.of(
                 Arguments.of("empty_bpb", new byte[0], "empty buffer", 0),
                 Arguments.of("clumplet_without_length", new byte[]{1, 4}, "buffer end before end of clumplet - no length component", 1),
@@ -76,8 +76,8 @@ class FirebirdBatchBlobStreamTest {
     }
     
     @Test
-    void assertSetDefaultBpbWithWrongVersion() {
-        InvalidBpbVersionException actual = assertThrows(InvalidBpbVersionException.class, () -> new FirebirdBatchBlobStream().setDefaultBpb(Unpooled.wrappedBuffer(new byte[]{2, 3, 1, 0})));
+    void assertSetDefaultBPBWithWrongVersion() {
+        InvalidBPBVersionException actual = assertThrows(InvalidBPBVersionException.class, () -> new FirebirdBatchBlobStream().setDefaultBPB(Unpooled.wrappedBuffer(new byte[]{2, 3, 1, 0})));
         assertThat(actual.getVersion(), is(2));
         assertThat(actual.getExpectedVersion(), is(1));
     }

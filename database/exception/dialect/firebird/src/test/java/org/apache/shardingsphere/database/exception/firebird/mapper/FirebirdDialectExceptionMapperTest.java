@@ -32,10 +32,10 @@ import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdE
 import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException.StatusVectorEntry;
 import org.apache.shardingsphere.database.exception.firebird.exception.connection.LoginErrorException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBPBTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobBufferFormatException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBpbException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBpbTooBigException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchDefaultBpbChangeException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBPBException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchDefaultBPBChangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentExceedsBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
@@ -46,12 +46,13 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobTruncationException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.CannotUpdateOldBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ConversionErrorException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.DateTimeOutOfRangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBPBVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchMessageFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
@@ -76,6 +77,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -188,15 +190,15 @@ class FirebirdDialectExceptionMapperTest {
     }
     
     @Test
-    void assertConvertWithBatchDefaultBpbChange() {
-        SQLException actual = mapper.convert(new BatchDefaultBpbChangeException(42));
+    void assertConvertWithBatchDefaultBPBChange() {
+        SQLException actual = mapper.convert(new BatchDefaultBPBChangeException(42));
         assertSQLException(actual, FirebirdVendorError.BATCH_DEFAULT_BPB_CHANGE);
         assertDynamicSQLStatusVector(actual, Collections.singletonList(ISCConstants.isc_batch_defbpb));
     }
     
     @Test
-    void assertConvertWithBatchBlobContinuationBpb() {
-        SQLException actual = mapper.convert(new BatchBlobContinuationBpbException(4L));
+    void assertConvertWithBatchBlobContinuationBPB() {
+        SQLException actual = mapper.convert(new BatchBlobContinuationBPBException(4L));
         assertFirebirdSQLException(actual, "22000", ISCConstants.isc_batch_blob_buf, "Blob buffer format error; Blob continuation should not contain BPB");
         assertDynamicSQLStatusVector(actual, Collections.singletonList(ISCConstants.isc_batch_blob_buf), Collections.singletonList(ISCConstants.isc_batch_cont_bpb));
     }
@@ -215,8 +217,8 @@ class FirebirdDialectExceptionMapperTest {
     }
     
     @Test
-    void assertConvertWithInvalidBpbVersion() {
-        SQLException actual = mapper.convert(new InvalidBpbVersionException(2, 1));
+    void assertConvertWithInvalidBPBVersion() {
+        SQLException actual = mapper.convert(new InvalidBPBVersionException(2, 1));
         assertSQLException(actual, FirebirdVendorError.INVALID_BPB_VERSION, 2, 1);
         assertStatusVector(actual, Collections.singletonList(Arrays.asList(ISCConstants.isc_bpb_version, 2, 1)));
     }
@@ -229,8 +231,8 @@ class FirebirdDialectExceptionMapperTest {
     }
     
     @Test
-    void assertConvertWithBatchBpbTooBig() {
-        SQLException actual = mapper.convert(new BatchBpbTooBigException(4L, 2L));
+    void assertConvertWithBatchBPBTooBig() {
+        SQLException actual = mapper.convert(new BatchBPBTooBigException(4L, 2L));
         assertFirebirdSQLException(actual, "22000", ISCConstants.isc_batch_blob_buf, "Blob buffer format error; Size of BPB (4) greater than remaining data (2)");
         assertDynamicSQLStatusVector(actual, Collections.singletonList(ISCConstants.isc_batch_blob_buf), Arrays.asList(ISCConstants.isc_batch_big_bpb, 4, 2));
     }
@@ -270,6 +272,34 @@ class FirebirdDialectExceptionMapperTest {
         assertStatusVector(actual, Arrays.asList(Collections.singletonList(ISCConstants.isc_arith_except), Collections.singletonList(ISCConstants.isc_numeric_out_of_range)));
     }
     
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dateTimeRangeArguments")
+    void assertConvertWithDateTimeOutOfRange(final String name, final int jdbcType, final int errorCode, final String message) {
+        SQLException actual = mapper.convert(new DateTimeOutOfRangeException(jdbcType));
+        assertThat(actual.getSQLState(), is("22008"));
+        assertThat(actual.getErrorCode(), is(errorCode));
+        assertThat(actual.getMessage(), is(message));
+    }
+    
+    private static Stream<Arguments> dateTimeRangeArguments() {
+        return Stream.of(
+                Arguments.of("date", Types.DATE, ISCConstants.isc_date_range_exceeded, "value exceeds the range for valid dates"),
+                Arguments.of("time", Types.TIME, ISCConstants.isc_time_range_exceeded, "value exceeds the range for a valid time"),
+                Arguments.of("time_with_zone", Types.TIME_WITH_TIMEZONE, ISCConstants.isc_time_range_exceeded, "value exceeds the range for a valid time"),
+                Arguments.of("timestamp_with_zone", Types.TIMESTAMP_WITH_TIMEZONE, ISCConstants.isc_datetime_range_exceeded, "value exceeds the range for valid timestamps"),
+                Arguments.of("timestamp", Types.TIMESTAMP, ISCConstants.isc_datetime_range_exceeded, "value exceeds the range for valid timestamps"));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("dateTimeRangeArguments")
+    void assertConvertWithParameterDateTimeOutOfRange(final String name, final int jdbcType, final int errorCode, final String message) {
+        SQLException actual = mapper.convert(new ParameterConversionException(new DateTimeOutOfRangeException(jdbcType)));
+        assertThat(actual.getSQLState(), is("22008"));
+        assertThat(actual.getErrorCode(), is(errorCode));
+        assertThat(actual.getMessage(), is(message));
+        assertStatusVector(actual, Arrays.asList(Collections.singletonList(ISCConstants.isc_dsql_error), Arrays.asList(ISCConstants.isc_sqlerr, -303), Collections.singletonList(errorCode)));
+    }
+    
     @Test
     void assertConvertWithConversionError() {
         SQLException actual = mapper.convert(new ConversionErrorException("foo_value"));
@@ -296,6 +326,25 @@ class FirebirdDialectExceptionMapperTest {
         SQLException actual = mapper.convert(new ParameterConversionException(new InvalidSegstrIdException(1L)));
         assertStatusVector(actual, Arrays.asList(Collections.singletonList(ISCConstants.isc_dsql_error), Arrays.asList(ISCConstants.isc_sqlerr, -303),
                 Collections.singletonList(ISCConstants.isc_bad_segstr_id)));
+    }
+    
+    @Test
+    void assertConvertWithNativeParameterConversion() {
+        SQLException actual = mapper.convert(new ParameterConversionException(new SQLException("decimal float overflow", "22003", ISCConstants.isc_decfloat_overflow)));
+        assertFirebirdSQLException(actual, "22003", ISCConstants.isc_decfloat_overflow, "decimal float overflow");
+        assertStatusVector(actual, Arrays.asList(Collections.singletonList(ISCConstants.isc_dsql_error), Arrays.asList(ISCConstants.isc_sqlerr, -303),
+                Collections.singletonList(ISCConstants.isc_decfloat_overflow)));
+    }
+    
+    @Test
+    void assertConvertWithNativeParameterStatusVector() {
+        SQLException cause = new FirebirdException("native numeric range failure", "22003", ISCConstants.isc_numeric_out_of_range,
+                Arrays.asList(new FirebirdException.StatusVectorEntry(ISCConstants.isc_arith_except, Collections.emptyList()),
+                        new FirebirdException.StatusVectorEntry(ISCConstants.isc_numeric_out_of_range, Collections.emptyList())));
+        SQLException actual = mapper.convert(new ParameterConversionException(cause));
+        assertFirebirdSQLException(actual, "22003", ISCConstants.isc_numeric_out_of_range, "native numeric range failure");
+        assertStatusVector(actual, Arrays.asList(Collections.singletonList(ISCConstants.isc_dsql_error), Arrays.asList(ISCConstants.isc_sqlerr, -303),
+                Collections.singletonList(ISCConstants.isc_arith_except), Collections.singletonList(ISCConstants.isc_numeric_out_of_range)));
     }
     
     private void assertFirebirdSQLException(final SQLException actual, final String expectedSQLState, final int expectedErrorCode, final String expectedMessage) {

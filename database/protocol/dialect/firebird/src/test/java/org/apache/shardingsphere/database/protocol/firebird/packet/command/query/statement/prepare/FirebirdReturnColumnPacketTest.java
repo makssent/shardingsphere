@@ -21,6 +21,7 @@ import org.apache.shardingsphere.database.exception.core.exception.protocol.Data
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.FirebirdBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.info.type.sql.FirebirdSQLInfoPacketType;
 import org.apache.shardingsphere.database.protocol.firebird.payload.FirebirdPacketPayload;
+import org.apache.shardingsphere.database.protocol.payload.PacketPayload;
 import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereColumn;
 import org.apache.shardingsphere.infra.metadata.database.schema.model.ShardingSphereTable;
 import org.jspecify.annotations.Nullable;
@@ -105,7 +106,7 @@ class FirebirdReturnColumnPacketTest {
         FirebirdReturnColumnPacket packet = createPacket(Arrays.asList(FirebirdSQLInfoPacketType.TYPE, FirebirdSQLInfoPacketType.SUB_TYPE,
                 FirebirdSQLInfoPacketType.SCALE, FirebirdSQLInfoPacketType.LENGTH), Types.NUMERIC, null, false, null);
         packet.setWireNumericType(FirebirdBinaryColumnType.SHORT, 1, -3);
-        packet.write(payload);
+        packet.write((PacketPayload) payload);
         verify(payload).writeInt4LE(FirebirdBinaryColumnType.SHORT.getValue() + 1);
         verify(payload).writeInt4LE(1);
         verify(payload).writeInt4LE(-3);
@@ -118,7 +119,7 @@ class FirebirdReturnColumnPacketTest {
         FirebirdReturnColumnPacket packet = createPacket(Arrays.asList(FirebirdSQLInfoPacketType.TYPE, FirebirdSQLInfoPacketType.SUB_TYPE,
                 FirebirdSQLInfoPacketType.LENGTH), Types.CHAR, 7, false, null);
         packet.setWireTextType(FirebirdBinaryColumnType.TEXT, 4, 28);
-        packet.write(payload);
+        packet.write((PacketPayload) payload);
         verify(payload).writeInt4LE(FirebirdBinaryColumnType.TEXT.getValue() + 1);
         verify(payload).writeInt4LE(4);
         verify(payload).writeInt4LE(28);
@@ -141,7 +142,9 @@ class FirebirdReturnColumnPacketTest {
     }
     
     private static Stream<Arguments> assertGetColumnTypeArguments() {
-        return Stream.of(Arguments.of("jdbc_type", Types.VARCHAR, false, FirebirdBinaryColumnType.VARYING), Arguments.of("blob_column", Types.VARCHAR, true, FirebirdBinaryColumnType.BLOB),
+        return Stream.of(
+                Arguments.of("jdbc_type", Types.VARCHAR, false, FirebirdBinaryColumnType.VARYING),
+                Arguments.of("blob_column", Types.VARCHAR, true, FirebirdBinaryColumnType.BLOB),
                 Arguments.of("integer_column", Types.INTEGER, false, FirebirdBinaryColumnType.LONG));
     }
     

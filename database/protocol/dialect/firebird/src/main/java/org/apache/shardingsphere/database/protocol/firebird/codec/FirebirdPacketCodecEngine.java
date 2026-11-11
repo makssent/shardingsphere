@@ -36,7 +36,7 @@ import org.apache.shardingsphere.database.protocol.firebird.packet.command.query
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchCreateCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchMessageCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchRegistry;
-import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBpbCommandPacket;
+import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdBatchSetBPBCommandPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.batch.FirebirdParseBatchBlr;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdAllocateStatementPacket;
 import org.apache.shardingsphere.database.protocol.firebird.packet.command.query.statement.FirebirdFreeStatementPacket;
@@ -247,14 +247,14 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
         if (FirebirdCommandPacketType.BATCH_CREATE == commandType) {
             batchBlobStreams.put(buffer.getInt(buffer.readerIndex() + MESSAGE_TYPE_LENGTH), new FirebirdBatchBlobStream());
         } else if (FirebirdCommandPacketType.BATCH_SET_BPB == commandType) {
-            trackDefaultBpb(context, buffer, packetLength, charset);
+            trackDefaultBPB(context, buffer, packetLength, charset);
         } else if (FirebirdCommandPacketType.FREE_STATEMENT == commandType) {
             discardFreedStatement(buffer);
         }
     }
     
-    private void trackDefaultBpb(final ChannelHandlerContext context, final ByteBuf buffer, final int packetLength, final Charset charset) {
-        FirebirdBatchSetBpbCommandPacket packet = new FirebirdBatchSetBpbCommandPacket(new FirebirdPacketPayload(buffer.slice(buffer.readerIndex(), packetLength), charset));
+    private void trackDefaultBPB(final ChannelHandlerContext context, final ByteBuf buffer, final int packetLength, final Charset charset) {
+        FirebirdBatchSetBPBCommandPacket packet = new FirebirdBatchSetBPBCommandPacket(new FirebirdPacketPayload(buffer.slice(buffer.readerIndex(), packetLength), charset));
         FirebirdBatchBlobStream blobStream = batchBlobStreams.get(packet.getStatementHandle());
         if (null == blobStream && shouldRetainBatchState(context, packet.getStatementHandle())) {
             blobStream = new FirebirdBatchBlobStream();
@@ -263,7 +263,7 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
         if (null == blobStream) {
             blobStream = new FirebirdBatchBlobStream();
         }
-        blobStream.setDefaultBpb(packet.getBpb());
+        blobStream.setDefaultBPB(packet.getBpb());
     }
     
     private boolean shouldRetainBatchState(final ChannelHandlerContext context, final int statementHandle) {
@@ -283,7 +283,6 @@ public final class FirebirdPacketCodecEngine implements DatabasePacketCodecEngin
     
     private void discardFreedStatement(final ByteBuf buffer) {
         int option = buffer.getInt(buffer.readerIndex() + MESSAGE_TYPE_LENGTH * 2);
-        // The wire stream belongs to the statement and survives releasing its batch.
         if (FirebirdFreeStatementPacket.DROP == option) {
             int statementHandle = buffer.getInt(buffer.readerIndex() + MESSAGE_TYPE_LENGTH);
             batchBlobStreams.remove(statementHandle);

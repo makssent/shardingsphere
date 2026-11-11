@@ -24,6 +24,7 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidTransactionHandleException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.MalformedStringException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ParameterConversionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.RepeatedBatchBlobIdException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.StringTruncationException;
@@ -75,6 +76,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -83,6 +85,7 @@ import java.util.stream.Stream;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
+import static org.hamcrest.Matchers.sameInstance;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -844,8 +847,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(packet.getStatementHandle()).thenReturn(STATEMENT_ID);
         when(packet.getTransactionHandle()).thenReturn(transactionId);
         byte[] bpb = {1, 1, 1, 1, 2, 1, 1, 4, 1, 4, 5, 1, 53, 3, 1, 0};
-        ByteBuf stream = Unpooled.buffer().writeLong(1L).writeInt(25).writeInt(bpb.length).writeBytes(bpb)
-                .writeInt(2).writeByte('a').writeByte(0xC3).writeInt(0).writeInt(1).writeByte(0xA9);
+        ByteBuf stream = Unpooled.buffer().writeLong(1L).writeInt(25).writeInt(bpb.length).writeBytes(bpb).writeInt(2).writeByte('a').writeByte(0xC3).writeInt(0).writeInt(1).writeByte(0xA9);
         FirebirdBatchStatement batchStatement = createStreamBlobBatchStatement(stream, 44L);
         stream.release();
         batchStatement.addParameterValues(Collections.singletonList(1L));
@@ -968,6 +970,40 @@ class FirebirdBatchExecuteCommandExecutorTest {
         }
     }
     
+    @ParameterizedTest
+    @MethodSource("getScalarTextBlobPaddingArguments")
+    @SuppressWarnings("unchecked")
+    void assertExecuteWithScalarTextBlobPaddingPreservesRawPrefix(final int charsetId, final Charset charset, final String expectedValue) throws SQLException, ReflectiveOperationException {
+        FirebirdReturnColumnPacket parameter = createParameterColumn(Types.VARCHAR, 2);
+        parameter.setTargetCharacterSetId(4);
+        mockBlobParameterBatch(Collections.singletonList(Collections.singletonList(10L)), Collections.singletonList(parameter));
+        when(connectionSession.getAttributeMap().attr(FirebirdConstant.CONNECTION_CHARSET_ID).get()).thenReturn(0);
+        ByteBuf blr = Unpooled.buffer().writeByte(BlrConstants.blr_version5).writeByte(BlrConstants.blr_begin).writeByte(BlrConstants.blr_message).writeByte(0).writeShortLE(2)
+                .writeByte(BlrConstants.blr_blob2).writeShortLE(1).writeShortLE(charsetId).writeByte(BlrConstants.blr_short).writeByte(0)
+                .writeByte(BlrConstants.blr_end).writeByte(BlrConstants.blr_eoc);
+        when(batchStatement.getColumnDescriptors()).thenReturn(FirebirdParseBatchBlr.parse(blr, blr.readableBytes()).getFields());
+        blr.release();
+        when(batchStatement.getBlobIds()).thenReturn(Collections.singletonMap(10L, 10L));
+        when(blobWriteCache.useBlobData(CONNECTION_ID, 10L, transactionId)).thenReturn(Optional.of((expectedValue + "  ").getBytes(charset)));
+        List<List<Object>> actualParams = new ArrayList<>(1);
+        Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob> actualRawTextBlobs = new HashMap<>();
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+            actualRawTextBlobs.putAll((Map<String, FirebirdBatchedStatementsExecutor.RawTextBlob>) context.arguments().get(4));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
+        })) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
+            new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
+            assertThat(actualParams, is(Collections.singletonList(Collections.<Object>singletonList(expectedValue))));
+            byte[] actualContent = (byte[]) Plugins.getMemberAccessor().get(FirebirdBatchedStatementsExecutor.RawTextBlob.class.getDeclaredField("content"), actualRawTextBlobs.get(expectedValue));
+            assertThat(actualContent, is(expectedValue.getBytes(charset)));
+        }
+    }
+    
+    private static Stream<Arguments> getScalarTextBlobPaddingArguments() {
+        return Stream.of(Arguments.of(52, Charset.forName("windows-1251"), "яa"), Arguments.of(4, StandardCharsets.UTF_8, "яa"), Arguments.of(2, StandardCharsets.US_ASCII, "ab"));
+    }
+    
     @Test
     @SuppressWarnings("unchecked")
     void assertExecuteWithParameterConversionFailure() {
@@ -993,14 +1029,120 @@ class FirebirdBatchExecuteCommandExecutorTest {
     }
     
     @Test
-    void assertExecuteWithInvalidBlobForConvertedParameter() {
-        mockBlobParameterBatch(Collections.singletonList(Collections.singletonList(10L)), Collections.singletonList(createParameterColumn(Types.VARCHAR, 20)));
+    @SuppressWarnings("unchecked")
+    void assertExecuteWithMalformedRawBlob() {
+        FirebirdReturnColumnPacket parameter = createParameterColumn(Types.BLOB, null);
+        parameter.setWireType(FirebirdBinaryColumnType.BLOB, 1, 4, Long.BYTES);
+        mockBlobParameterBatch(Arrays.asList(Collections.singletonList(10L), Collections.singletonList(11L), Collections.singletonList(12L)), Collections.singletonList(parameter));
+        when(batchStatement.isMultiError()).thenReturn(true);
+        byte[] content = "ok".getBytes(StandardCharsets.US_ASCII);
+        when(blobWriteCache.useBlobData(CONNECTION_ID, 10L, transactionId)).thenReturn(Optional.of(content));
+        when(blobWriteCache.useBlobData(CONNECTION_ID, 11L, transactionId)).thenReturn(Optional.of(new byte[]{(byte) 0xFF}));
+        List<List<Object>> actualParams = new ArrayList<>(1);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
+        })) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
+            ParameterConversionException actual = assertThrows(ParameterConversionException.class, () -> new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute());
+            assertThat(actual.getConversionError(), isA(MalformedStringException.class));
+            assertThat(mockedExecutor.constructed().size(), is(1));
+            assertThat(actualParams, is(Collections.singletonList(Collections.<Object>singletonList(content))));
+            verify(blobWriteCache, never()).useBlobData(CONNECTION_ID, 12L, transactionId);
+            verify(batchStatement, never()).reset();
+        }
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("rawTextBlobBindingArguments")
+    @SuppressWarnings("unchecked")
+    void assertExecuteWithRawTextBlobCharset(final String name, final int charsetId, final byte[] content) throws SQLException, ReflectiveOperationException {
+        FirebirdReturnColumnPacket parameter = createTextBlobParameter(charsetId);
+        mockBlobParameterBatch(Collections.singletonList(Collections.singletonList(10L)), Collections.singletonList(parameter));
+        when(blobWriteCache.useBlobData(CONNECTION_ID, 10L, transactionId)).thenReturn(Optional.of(content));
+        List<List<Object>> actualParams = new ArrayList<>(1);
+        Map<Object, FirebirdBatchedStatementsExecutor.RawTextBlob> actualRawTextBlobs = new IdentityHashMap<>();
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+            actualRawTextBlobs.putAll((Map<Object, FirebirdBatchedStatementsExecutor.RawTextBlob>) context.arguments().get(4));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
+        })) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
+            new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
+            assertThat(actualParams.get(0).get(0), sameInstance(content));
+            FirebirdBatchedStatementsExecutor.RawTextBlob actual = actualRawTextBlobs.get(content);
+            assertThat(Plugins.getMemberAccessor().get(FirebirdBatchedStatementsExecutor.RawTextBlob.class.getDeclaredField("content"), actual), sameInstance(content));
+            assertThat(Plugins.getMemberAccessor().get(FirebirdBatchedStatementsExecutor.RawTextBlob.class.getDeclaredField("charsetId"), actual), is(charsetId));
+        }
+    }
+    
+    private static FirebirdReturnColumnPacket createTextBlobParameter(final int charsetId) {
+        FirebirdReturnColumnPacket result = createParameterColumn(Types.BLOB, null);
+        result.setWireType(FirebirdBinaryColumnType.BLOB, 1, charsetId, Long.BYTES);
+        return result;
+    }
+    
+    private static Stream<Arguments> rawTextBlobBindingArguments() {
+        return Stream.of(
+                Arguments.of("utf8", 4, "я".getBytes(StandardCharsets.UTF_8)),
+                Arguments.of("win1251", 52, new byte[]{(byte) 0xC0, (byte) 0xFF}),
+                Arguments.of("next_without_java_charset", 19, new byte[]{(byte) 0xFF}));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("rawTextBlobTargetArguments")
+    @SuppressWarnings("unchecked")
+    void assertExecuteWithRawTextBlobTarget(final String name, final int sourceCharsetId, final int targetCharsetId, final byte[] content) throws SQLException, ReflectiveOperationException {
+        mockBlobParameterBatch(Collections.singletonList(Collections.singletonList(10L)), Collections.singletonList(createTextBlobParameter(targetCharsetId)));
+        ByteBuf blr = Unpooled.buffer().writeByte(BlrConstants.blr_version5).writeByte(BlrConstants.blr_begin).writeByte(BlrConstants.blr_message).writeByte(0).writeShortLE(2)
+                .writeByte(BlrConstants.blr_blob2).writeShortLE(1).writeShortLE(sourceCharsetId).writeByte(BlrConstants.blr_short).writeByte(0)
+                .writeByte(BlrConstants.blr_end).writeByte(BlrConstants.blr_eoc);
+        when(batchStatement.getColumnDescriptors()).thenReturn(FirebirdParseBatchBlr.parse(blr, blr.readableBytes()).getFields());
+        blr.release();
+        when(batchStatement.getBlobIds()).thenReturn(Collections.singletonMap(10L, 10L));
+        when(blobWriteCache.useBlobData(CONNECTION_ID, 10L, transactionId)).thenReturn(Optional.of(content));
+        List<List<Object>> actualParams = new ArrayList<>(1);
+        Map<Object, FirebirdBatchedStatementsExecutor.RawTextBlob> actualRawTextBlobs = new IdentityHashMap<>(1);
+        try (MockedConstruction<FirebirdBatchedStatementsExecutor> ignored = mockConstruction(FirebirdBatchedStatementsExecutor.class, (mock, context) -> {
+            actualParams.addAll((List<List<Object>>) context.arguments().get(2));
+            actualRawTextBlobs.putAll((Map<Object, FirebirdBatchedStatementsExecutor.RawTextBlob>) context.arguments().get(4));
+            when(mock.executeBatch()).thenReturn(new FirebirdBatchCompletion(1, new int[]{1}));
+        })) {
+            when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
+            new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute();
+            assertThat(actualParams.get(0).get(0), is("\0"));
+            FirebirdBatchedStatementsExecutor.RawTextBlob actual = actualRawTextBlobs.get(actualParams.get(0).get(0));
+            assertThat(Plugins.getMemberAccessor().get(FirebirdBatchedStatementsExecutor.RawTextBlob.class.getDeclaredField("content"), actual), sameInstance(content));
+            assertThat(Plugins.getMemberAccessor().get(FirebirdBatchedStatementsExecutor.RawTextBlob.class.getDeclaredField("charsetId"), actual), is(targetCharsetId));
+        }
+    }
+    
+    private static Stream<Arguments> rawTextBlobTargetArguments() {
+        return Stream.of(
+                Arguments.of("utf8_to_none", 4, 0, new byte[]{(byte) 0xFF}),
+                Arguments.of("utf8_to_octets", 4, 1, new byte[]{(byte) 0xFF}),
+                Arguments.of("sjis_to_none", 5, 0, new byte[]{(byte) 0x80}),
+                Arguments.of("sjis_to_octets", 5, 1, new byte[]{(byte) 0x80}));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidMovedBlobArguments")
+    void assertExecuteWithInvalidBlobForConvertedParameter(final String name, final FirebirdReturnColumnPacket parameter) {
+        mockBlobParameterBatch(Collections.singletonList(Collections.singletonList(10L)), Collections.singletonList(parameter));
         try (MockedConstruction<FirebirdBatchedStatementsExecutor> mockedExecutor = mockConstruction(FirebirdBatchedStatementsExecutor.class)) {
             when(FirebirdBlobWriteCache.getInstance()).thenReturn(blobWriteCache);
             ParameterConversionException actual = assertThrows(ParameterConversionException.class, () -> new FirebirdBatchExecuteCommandExecutor(packet, connectionSession).execute());
             assertThat(actual.getConversionError(), isA(InvalidSegstrIdException.class));
             assertTrue(mockedExecutor.constructed().isEmpty());
         }
+    }
+    
+    private static Stream<Arguments> invalidMovedBlobArguments() {
+        return Stream.of(
+                Arguments.of("scalar", createParameterColumn(Types.VARCHAR, 20)),
+                Arguments.of("utf8", createTextBlobParameter(4)),
+                Arguments.of("next_without_java_charset", createTextBlobParameter(19)),
+                Arguments.of("gbk_without_callback", createTextBlobParameter(67)));
     }
     
     @Test
@@ -1028,7 +1170,7 @@ class FirebirdBatchExecuteCommandExecutorTest {
         when(preparedStatement.getParameterColumns()).thenReturn(parameterColumns);
     }
     
-    private FirebirdReturnColumnPacket createParameterColumn(final int dataType, @Nullable final Integer length) {
+    private static FirebirdReturnColumnPacket createParameterColumn(final int dataType, @Nullable final Integer length) {
         ShardingSphereTable table = new ShardingSphereTable("foo_tbl", Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
         return new FirebirdReturnColumnPacket(Collections.emptyList(), 1, table, new ShardingSphereColumn("foo_col", dataType, false, false, true, true, false, true), null, null, null, length, false,
                 null);

@@ -30,10 +30,10 @@ import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdE
 import org.apache.shardingsphere.database.exception.firebird.exception.FirebirdException.StatusVectorEntry;
 import org.apache.shardingsphere.database.exception.firebird.exception.connection.LoginErrorException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchAlreadyOpenedException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBPBTooBigException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobBufferFormatException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBpbException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBpbTooBigException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchDefaultBpbChangeException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchBlobContinuationBPBException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchDefaultBPBChangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchParametersRequiredException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentExceedsBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BatchSegmentTooBigException;
@@ -44,12 +44,13 @@ import org.apache.shardingsphere.database.exception.firebird.exception.protocol.
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.BlobTruncationException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.CannotUpdateOldBlobException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ConversionErrorException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.DateTimeOutOfRangeException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.ExcessTransactionsException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBPBVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchBlobPolicyException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchMessageFormatException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBatchParameterVersionException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrHandleException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidSegstrIdException;
@@ -70,6 +71,7 @@ import org.apache.shardingsphere.infra.exception.generic.UnknownSQLException;
 import org.firebirdsql.gds.ISCConstants;
 
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -176,10 +178,10 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
         if (sqlDialectException instanceof InvalidBatchBlobPolicyException) {
             return toDynamicSQLException(FirebirdVendorError.INVALID_BATCH_BLOB_POLICY, ((InvalidBatchBlobPolicyException) sqlDialectException).getMethodName());
         }
-        if (sqlDialectException instanceof BatchDefaultBpbChangeException) {
+        if (sqlDialectException instanceof BatchDefaultBPBChangeException) {
             return toDynamicSQLException(FirebirdVendorError.BATCH_DEFAULT_BPB_CHANGE);
         }
-        if (sqlDialectException instanceof BatchBlobContinuationBpbException) {
+        if (sqlDialectException instanceof BatchBlobContinuationBPBException) {
             return toBlobBufferFormatException(FirebirdVendorError.BATCH_BLOB_CONTINUATION_BPB, ISCConstants.isc_batch_cont_bpb);
         }
         if (sqlDialectException instanceof BatchBlobBufferFormatException) {
@@ -189,15 +191,15 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
             InvalidClumpletStructureException ex = (InvalidClumpletStructureException) sqlDialectException;
             return toSQLException(FirebirdVendorError.INVALID_CLUMPLET_STRUCTURE, ex.getReason(), ex.getData());
         }
-        if (sqlDialectException instanceof InvalidBpbVersionException) {
-            InvalidBpbVersionException ex = (InvalidBpbVersionException) sqlDialectException;
+        if (sqlDialectException instanceof InvalidBPBVersionException) {
+            InvalidBPBVersionException ex = (InvalidBPBVersionException) sqlDialectException;
             return toFirebirdException(FirebirdVendorError.INVALID_BPB_VERSION, ex.getVersion(), ex.getExpectedVersion());
         }
         if (sqlDialectException instanceof BatchSmallDataException) {
             return toBlobBufferFormatException(FirebirdVendorError.BATCH_SMALL_DATA, ISCConstants.isc_batch_small_data, ((BatchSmallDataException) sqlDialectException).getBufferName());
         }
-        if (sqlDialectException instanceof BatchBpbTooBigException) {
-            BatchBpbTooBigException ex = (BatchBpbTooBigException) sqlDialectException;
+        if (sqlDialectException instanceof BatchBPBTooBigException) {
+            BatchBPBTooBigException ex = (BatchBPBTooBigException) sqlDialectException;
             return toBlobBufferFormatException(FirebirdVendorError.BATCH_BPB_TOO_BIG, ISCConstants.isc_batch_big_bpb, (int) ex.getBpbLength(), (int) ex.getAvailableLength());
         }
         if (sqlDialectException instanceof BatchSegmentExceedsBlobException) {
@@ -215,6 +217,9 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
         if (sqlDialectException instanceof BlobTruncationException) {
             return toArithmeticException(FirebirdVendorError.BLOB_TRUNCATION);
         }
+        if (sqlDialectException instanceof DateTimeOutOfRangeException) {
+            return toDateTimeOutOfRangeException(((DateTimeOutOfRangeException) sqlDialectException).getJdbcType());
+        }
         if (sqlDialectException instanceof NumericOutOfRangeException) {
             return toArithmeticException(FirebirdVendorError.NUMERIC_OUT_OF_RANGE);
         }
@@ -225,7 +230,8 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
             return toSQLException(FirebirdVendorError.MALFORMED_STRING);
         }
         if (sqlDialectException instanceof ParameterConversionException) {
-            return toParameterConversionException(convert(((ParameterConversionException) sqlDialectException).getConversionError()));
+            Exception conversionError = ((ParameterConversionException) sqlDialectException).getConversionError();
+            return toParameterConversionException(conversionError instanceof SQLException ? (SQLException) conversionError : convert((SQLDialectException) conversionError));
         }
         return new UnknownSQLException(sqlDialectException).toSQLException();
     }
@@ -274,6 +280,18 @@ public final class FirebirdDialectExceptionMapper implements SQLDialectException
     private SQLException toArithmeticException(final VendorError vendorError) {
         return new FirebirdException(vendorError.getReason(), vendorError.getSqlState().getValue(), vendorError.getVendorCode(),
                 Arrays.asList(ARITHMETIC_EXCEPTION, new StatusVectorEntry(vendorError.getVendorCode(), Collections.emptyList())));
+    }
+    
+    private SQLException toDateTimeOutOfRangeException(final int jdbcType) {
+        switch (jdbcType) {
+            case Types.DATE:
+                return toSQLException(FirebirdVendorError.DATE_OUT_OF_RANGE);
+            case Types.TIME:
+            case Types.TIME_WITH_TIMEZONE:
+                return toSQLException(FirebirdVendorError.TIME_OUT_OF_RANGE);
+            default:
+                return toSQLException(FirebirdVendorError.TIMESTAMP_OUT_OF_RANGE);
+        }
     }
     
     private SQLException toParameterConversionException(final SQLException conversionError) {

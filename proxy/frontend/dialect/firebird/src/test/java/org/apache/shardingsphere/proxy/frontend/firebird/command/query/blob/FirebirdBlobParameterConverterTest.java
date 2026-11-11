@@ -46,6 +46,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.sql.Types;
 import java.util.Collections;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -59,6 +60,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FirebirdBlobParameterConverterTest {
     
     private static final int NONE = 0;
+    
+    private static final int ASCII = 2;
     
     private static final int UTF8 = 4;
     
@@ -80,8 +83,14 @@ class FirebirdBlobParameterConverterTest {
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("backendConversionArguments")
-    void assertIsBackendConversion(final String name, final FirebirdReturnColumnPacket parameter, final boolean expected) {
-        assertThat(new FirebirdBlobParameterConverter(UTF8).isBackendConversion(parameter), is(expected));
+    void assertIsBackendConversion(final String name, final FirebirdReturnColumnPacket parameter) {
+        assertTrue(new FirebirdBlobParameterConverter(UTF8).isBackendConversion(parameter));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("frontendConversionArguments")
+    void assertIsBackendConversionWithFrontendConversion(final String name, final FirebirdReturnColumnPacket parameter) {
+        assertFalse(new FirebirdBlobParameterConverter(UTF8).isBackendConversion(parameter));
     }
     
     @ParameterizedTest(name = "{0}")
@@ -90,10 +99,67 @@ class FirebirdBlobParameterConverterTest {
         assertThat(new FirebirdBlobParameterConverter(connectionCharsetId).convert(content, field, createBlobParameter(1)), is(expected));
     }
     
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("blobDestinationArguments")
+    void assertConvertWithBlobDestinationCharset(final String name, final int charsetId, final Object expected) {
+        FirebirdReturnColumnPacket parameter = createBlobParameter(1);
+        parameter.setWireType(FirebirdBinaryColumnType.BLOB, 1, charsetId, Long.BYTES);
+        assertThat(new FirebirdBlobParameterConverter(UTF8).convert(new byte[]{(byte) 0xFF}, createField(1, WIN1251), parameter), is(expected));
+    }
+    
+    private static Stream<Arguments> blobDestinationArguments() {
+        return Stream.of(Arguments.of("none", NONE, new byte[]{(byte) 0xFF}), Arguments.of("octets", 1, new byte[]{(byte) 0xFF}), Arguments.of("utf8", UTF8, "я"));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("rawBlobRoutingArguments")
+    void assertFindTextBlobForRoutingWithRawDestination(final String name, final int charsetId, final int connectionCharsetId) {
+        FirebirdReturnColumnPacket parameter = createBlobParameter(1);
+        parameter.setWireType(FirebirdBinaryColumnType.BLOB, 1, charsetId, Long.BYTES);
+        assertThat(new FirebirdBlobParameterConverter(connectionCharsetId).findTextBlobForRouting(new byte[]{(byte) 0xFF}, createField(1, WIN1251), parameter), is(Optional.of("я")));
+    }
+    
+    private static Stream<Arguments> rawBlobRoutingArguments() {
+        return Stream.of(Arguments.of("none_utf8", NONE, UTF8), Arguments.of("octets_utf8", 1, UTF8), Arguments.of("none_ascii", NONE, ASCII));
+    }
+    
     @Test
     void assertConvertToSameCharsetTextBlobPreservesBytes() {
         byte[] content = {(byte) 0xFF};
         assertThat(new FirebirdBlobParameterConverter(UTF8).convert(content, createField(1, UTF8), createBlobParameter(1)), sameInstance(content));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("rawTextBlobArguments")
+    void assertConvertRawTextBlob(final String name, final FirebirdBatchColumnDescriptor field, final byte[] content, final int charsetId) {
+        assertThat(new FirebirdBlobParameterConverter(UTF8).convert(content, field, createTextBlobParameter(charsetId)), sameInstance(content));
+    }
+    
+    private static FirebirdReturnColumnPacket createTextBlobParameter(final int charsetId) {
+        FirebirdReturnColumnPacket result = createBlobParameter(1);
+        result.setWireType(FirebirdBinaryColumnType.BLOB, 1, charsetId, Long.BYTES);
+        return result;
+    }
+    
+    private static Stream<Arguments> rawTextBlobArguments() {
+        return Stream.of(
+                Arguments.of("none_text", createField(1, NONE), "яé".getBytes(StandardCharsets.UTF_8), UTF8),
+                Arguments.of("octets_text", createField(1, 1), "яé".getBytes(StandardCharsets.UTF_8), UTF8),
+                Arguments.of("binary", createField(0, NONE), "яé".getBytes(StandardCharsets.UTF_8), UTF8),
+                Arguments.of("empty", createField(1, NONE), new byte[0], UTF8),
+                Arguments.of("large", createField(1, NONE), new byte[20000], UTF8),
+                Arguments.of("ascii", createField(1, NONE), new byte[]{0, 127}, ASCII),
+                Arguments.of("unicode_fss", createField(1, NONE), new byte[]{(byte) 0xF0, (byte) 0x9F, (byte) 0x98, (byte) 0x80}, 3),
+                Arguments.of("sjis_pair", createField(1, NONE), new byte[]{(byte) 0x81, 0}, 5),
+                Arguments.of("sjis_single", createField(1, NONE), new byte[]{(byte) 0xA0, (byte) 0xF0}, 5),
+                Arguments.of("eucj_pair", createField(1, NONE), new byte[]{(byte) 0x80, 0x20}, 6),
+                Arguments.of("ksc_pair", createField(1, NONE), new byte[]{(byte) 0xA1, 0x20}, 44),
+                Arguments.of("big5_pair", createField(1, NONE), new byte[]{(byte) 0xA1, 0x20}, 56),
+                Arguments.of("big5_single", createField(1, NONE), new byte[]{(byte) 0x80, (byte) 0xFF}, 56),
+                Arguments.of("gb2312_pair", createField(1, NONE), new byte[]{(byte) 0xA1, (byte) 0xFE}, 57),
+                Arguments.of("gbk", createField(1, NONE), new byte[]{(byte) 0x80}, 67),
+                Arguments.of("cp943c", createField(1, NONE), new byte[]{(byte) 0x80}, 68),
+                Arguments.of("next_without_java_charset", createField(1, NONE), new byte[]{(byte) 0xFF}, 19));
     }
     
     @Test
@@ -131,6 +197,33 @@ class FirebirdBlobParameterConverterTest {
         assertThat(actualError.getActualLength(), is(5));
     }
     
+    @Test
+    void assertFindTextBlobForRoutingWithRawText() {
+        FirebirdReturnColumnPacket parameter = createParameter(Types.VARCHAR, 10);
+        parameter.setTargetCharacterSetId(0);
+        byte[] content = {(byte) 0xFF, 'a'};
+        assertThat(new FirebirdBlobParameterConverter(UTF8).findTextBlobForRouting(content, createField(1, UTF8), parameter).get(), is("\0a"));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("destinationCharsetArguments")
+    void assertConvertToTextWithDestinationCharset(final String name, final int connectionCharsetId, final int charsetId, final Object expected) {
+        FirebirdReturnColumnPacket parameter = createParameter(Types.VARCHAR, 10);
+        parameter.setTargetCharacterSetId(charsetId);
+        byte[] content = {(byte) 0xFF, 'a'};
+        Object actual = new FirebirdBlobParameterConverter(connectionCharsetId).convert(content, createField(1, WIN1251), parameter);
+        assertThat(actual, is(expected));
+    }
+    
+    private static Stream<Arguments> destinationCharsetArguments() {
+        return Stream.of(
+                Arguments.of("none", 0, 0, new byte[]{(byte) 0xFF, 'a'}),
+                Arguments.of("utf8", 0, 4, "яa"),
+                Arguments.of("win1251", 0, 52, "яa"),
+                Arguments.of("utf8_to_none", 4, 0, new byte[]{(byte) 0xFF, 'a'}),
+                Arguments.of("utf8_to_octets", 4, 1, new byte[]{(byte) 0xFF, 'a'}));
+    }
+    
     @ParameterizedTest(name = "{0}")
     @MethodSource("integerArguments")
     void assertConvertToInteger(final String name, final int dataType, final String value, final Number expected) {
@@ -149,7 +242,8 @@ class FirebirdBlobParameterConverterTest {
     }
     
     private static Stream<Arguments> numericBlobArguments() {
-        return Stream.of(Arguments.of("spaces", Types.NUMERIC, FirebirdBinaryColumnType.INT64, "  -12.34  ", "-12.34"),
+        return Stream.of(
+                Arguments.of("spaces", Types.NUMERIC, FirebirdBinaryColumnType.INT64, "  -12.34  ", "-12.34"),
                 Arguments.of("invalid_mantissa", Types.NUMERIC, FirebirdBinaryColumnType.INT64, "bad1e9999", "bad1e9999"),
                 Arguments.of("missing_mantissa", Types.DECIMAL, FirebirdBinaryColumnType.INT64, "e9999", "e9999"),
                 Arguments.of("repeated_point", Types.NUMERIC, FirebirdBinaryColumnType.INT64, "1.2.3e9999", "1.2.3e9999"),
@@ -206,6 +300,14 @@ class FirebirdBlobParameterConverterTest {
                 Arguments.of("other_type", createField(0, NONE), createParameter(Types.VARCHAR, 20)),
                 Arguments.of("numeric_type", createField(0, NONE), createParameter(Types.INTEGER, null)),
                 Arguments.of("blob_filter", createField(99, NONE), createBlobParameter(1)),
+                Arguments.of("none_text_blob", createField(1, NONE), createBlobParameter(1)),
+                Arguments.of("octets_text_blob", createField(1, 1), createBlobParameter(1)),
+                Arguments.of("untyped_blob", createField(0, NONE), createBlobParameter(1)),
+                Arguments.of("raw_blob_without_java_charset", createField(0, NONE), createTextBlobParameter(19)),
+                Arguments.of("raw_blob_without_validation_callback", createField(0, NONE), createTextBlobParameter(67)),
+                Arguments.of("next_to_utf8", createField(1, 19), createTextBlobParameter(UTF8)),
+                Arguments.of("utf8_to_next", createField(1, UTF8), createTextBlobParameter(19)),
+                Arguments.of("next_to_win1251", createField(1, 19), createTextBlobParameter(WIN1251)),
                 Arguments.of("text_blob_in_other_charset", createField(1, WIN1251), createBlobParameter(1)));
     }
     
@@ -214,15 +316,19 @@ class FirebirdBlobParameterConverterTest {
                 Arguments.of("text_blob_in_connection_charset", createField(1, UTF8), createBlobParameter(1), UTF8),
                 Arguments.of("text_blob_in_dynamic_charset", createField(1, 127), createBlobParameter(1), UTF8),
                 Arguments.of("text_blob_without_connection_charset", createField(1, WIN1251), createBlobParameter(1), NONE),
-                Arguments.of("untyped_blob", createField(0, NONE), createBlobParameter(1), UTF8),
                 Arguments.of("binary_blob_parameter", createField(1, WIN1251), createBlobParameter(0), UTF8));
     }
     
     private static Stream<Arguments> backendConversionArguments() {
-        return Stream.of(Arguments.of("numeric", createParameter(Types.NUMERIC, null), true), Arguments.of("decimal", createParameter(Types.DECIMAL, null), true),
-                Arguments.of("double", createParameter(Types.DOUBLE, null), true), Arguments.of("date", createParameter(Types.DATE, null), true),
-                Arguments.of("integer", createParameter(Types.INTEGER, null), false), Arguments.of("text", createParameter(Types.VARCHAR, 20), false),
-                Arguments.of("blob", createBlobParameter(1), false));
+        return Stream.of(
+                Arguments.of("numeric", createParameter(Types.NUMERIC, null)),
+                Arguments.of("decimal", createParameter(Types.DECIMAL, null)),
+                Arguments.of("double", createParameter(Types.DOUBLE, null)),
+                Arguments.of("date", createParameter(Types.DATE, null)));
+    }
+    
+    private static Stream<Arguments> frontendConversionArguments() {
+        return Stream.of(Arguments.of("integer", createParameter(Types.INTEGER, null)), Arguments.of("text", createParameter(Types.VARCHAR, 20)), Arguments.of("blob", createBlobParameter(1)));
     }
     
     private static FirebirdReturnColumnPacket createBlobParameter(final int subType) {
@@ -272,7 +378,23 @@ class FirebirdBlobParameterConverterTest {
     
     private static Stream<Arguments> failedConversionArguments() {
         return Stream.of(
+                Arguments.of("next_to_utf8", createField(1, 19), new byte[]{(byte) 0xC3, (byte) 0xA9}, createTextBlobParameter(UTF8), UTF8, UnsupportedBlobFilterException.class),
+                Arguments.of("utf8_to_next", createField(1, UTF8), new byte[]{'a'}, createTextBlobParameter(19), UTF8, UnsupportedBlobFilterException.class),
+                Arguments.of("next_to_win1251", createField(1, 19), new byte[]{'a'}, createTextBlobParameter(WIN1251), UTF8, UnsupportedBlobFilterException.class),
                 Arguments.of("malformed_text", createField(1, UTF8), new byte[]{(byte) 0xFF, (byte) 0xFE}, createParameter(Types.VARCHAR, 20), UTF8, MalformedStringException.class),
+                Arguments.of("malformed_none_blob", createField(1, NONE), new byte[]{(byte) 0xFF}, createBlobParameter(1), UTF8, MalformedStringException.class),
+                Arguments.of("malformed_octets_blob", createField(1, 1), new byte[]{(byte) 0xFF}, createBlobParameter(1), UTF8, MalformedStringException.class),
+                Arguments.of("malformed_binary_blob", createField(0, NONE), new byte[]{(byte) 0xFF}, createBlobParameter(1), UTF8, MalformedStringException.class),
+                Arguments.of("incomplete_none_blob", createField(1, NONE), new byte[]{(byte) 0xC3}, createBlobParameter(1), UTF8, MalformedStringException.class),
+                Arguments.of("malformed_ascii_blob", createField(1, NONE), new byte[]{(byte) 0x80}, createTextBlobParameter(ASCII), UTF8, MalformedStringException.class),
+                Arguments.of("malformed_fss_blob", createField(1, NONE), new byte[]{(byte) 0xFF}, createTextBlobParameter(3), UTF8, MalformedStringException.class),
+                Arguments.of("incomplete_sjis_blob", createField(1, NONE), new byte[]{(byte) 0x80}, createTextBlobParameter(5), UTF8, MalformedStringException.class),
+                Arguments.of("incomplete_eucj_blob", createField(1, NONE), new byte[]{(byte) 0x8F, (byte) 0xA2, (byte) 0xAF}, createTextBlobParameter(6), UTF8, MalformedStringException.class),
+                Arguments.of("incomplete_ksc_blob", createField(1, NONE), new byte[]{(byte) 0x80}, createTextBlobParameter(44), UTF8, MalformedStringException.class),
+                Arguments.of("incomplete_big5_blob", createField(1, NONE), new byte[]{(byte) 0xA1}, createTextBlobParameter(56), UTF8, MalformedStringException.class),
+                Arguments.of("incomplete_gb2312_blob", createField(1, NONE), new byte[]{(byte) 0xA1}, createTextBlobParameter(57), UTF8, MalformedStringException.class),
+                Arguments.of("gb2312_second_byte", createField(1, NONE), new byte[]{(byte) 0xA1, 0x20}, createTextBlobParameter(57), UTF8, MalformedStringException.class),
+                Arguments.of("gb2312_first_byte", createField(1, NONE), new byte[]{(byte) 0x80}, createTextBlobParameter(57), UTF8, MalformedStringException.class),
                 Arguments.of("transliteration", createField(1, UTF8), "中".getBytes(StandardCharsets.UTF_8), createParameter(Types.VARCHAR, 20), WIN1251, TransliterationFailedException.class),
                 Arguments.of("integer_transliteration", createField(1, UTF8), "é".getBytes(StandardCharsets.UTF_8), createParameter(Types.INTEGER, null), UTF8, TransliterationFailedException.class),
                 Arguments.of("blob_truncation", createField(1, UTF8), new byte[65536], createParameter(Types.VARCHAR, null), UTF8, BlobTruncationException.class),

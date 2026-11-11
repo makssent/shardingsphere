@@ -25,7 +25,7 @@ import lombok.AllArgsConstructor;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import org.apache.shardingsphere.database.exception.core.exception.protocol.DatabaseProtocolException;
-import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBpbVersionException;
+import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidBPBVersionException;
 import org.apache.shardingsphere.database.exception.firebird.exception.protocol.InvalidClumpletStructureException;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.exception.ShardingSpherePreconditions;
@@ -90,7 +90,7 @@ public final class FirebirdBatchBlobStream {
     
     private int segmentRemaining;
     
-    private BpbReader bpb = new BpbReader();
+    private BPBReader bpb = new BPBReader();
     
     /**
      * Copy stream state.
@@ -108,9 +108,9 @@ public final class FirebirdBatchBlobStream {
      *
      * @param defaultBpb default BLOB parameter buffer
      * @throws InvalidClumpletStructureException when BLOB parameter buffer has invalid structure
-     * @throws InvalidBpbVersionException when BLOB parameter buffer has wrong version
+     * @throws InvalidBPBVersionException when BLOB parameter buffer has wrong version
      */
-    public void setDefaultBpb(final ByteBuf defaultBpb) {
+    public void setDefaultBPB(final ByteBuf defaultBpb) {
         defaultSegmented = isSegmented(ByteBufUtil.getBytes(defaultBpb));
     }
     
@@ -124,7 +124,7 @@ public final class FirebirdBatchBlobStream {
      * @return whether the packet data holds the whole stream portion; if not, the stream state and the reader index of the data are undefined
      * @throws DatabaseProtocolException when stream portion is invalid
      * @throws InvalidClumpletStructureException when BLOB parameter buffer of stream portion has invalid structure
-     * @throws InvalidBpbVersionException when BLOB parameter buffer of stream portion has wrong version
+     * @throws InvalidBPBVersionException when BLOB parameter buffer of stream portion has wrong version
      */
     boolean skip(final ByteBuf data, final long length) {
         return read(data, length, SKIPPING_HANDLER);
@@ -144,7 +144,7 @@ public final class FirebirdBatchBlobStream {
      * @throws IndexOutOfBoundsException when packet data is incomplete
      * @throws DatabaseProtocolException when stream portion is invalid
      * @throws InvalidClumpletStructureException when BLOB parameter buffer of stream portion has invalid structure
-     * @throws InvalidBpbVersionException when BLOB parameter buffer of stream portion has wrong version
+     * @throws InvalidBPBVersionException when BLOB parameter buffer of stream portion has wrong version
      */
     byte[] read(final ByteBuf data, final long length, final long limit, final LongFunction<? extends RuntimeException> limitException) {
         int maxCapacity = (int) Math.min(Integer.MAX_VALUE, limit);
@@ -189,7 +189,7 @@ public final class FirebirdBatchBlobStream {
                 if (data.readableBytes() < bpbLength) {
                     return false;
                 }
-                readBpb(data, (int) bpbLength, handler);
+                readBPB(data, (int) bpbLength, handler);
                 remains -= bpbLength;
                 continue;
             }
@@ -225,21 +225,21 @@ public final class FirebirdBatchBlobStream {
         blobRemaining = blobLength;
         bpbRemaining = bpbLength;
         segmentRemaining = 0;
-        bpb = new BpbReader();
+        bpb = new BPBReader();
         if (0L == bpbLength) {
             segmented = defaultSegmented;
         }
         handler.onBlobHeader(batchBlobId, blobLength, bpbLength);
     }
     
-    private void readBpb(final ByteBuf data, final int length, final Handler handler) {
+    private void readBPB(final ByteBuf data, final int length, final Handler handler) {
         ByteBuf chunk = data.readSlice(length);
         bpb.read(chunk, bpbRemaining - length);
         bpbRemaining -= length;
         blobRemaining = Integer.toUnsignedLong((int) (blobRemaining - length));
         if (0L == bpbRemaining) {
             segmented = bpb.isSegmented();
-            bpb = new BpbReader();
+            bpb = new BPBReader();
         }
         handler.onBytes(chunk);
     }
@@ -268,7 +268,7 @@ public final class FirebirdBatchBlobStream {
     
     static boolean isSegmented(final byte[] bpb) {
         ShardingSpherePreconditions.checkState(bpb.length > 0, () -> new InvalidClumpletStructureException("empty buffer", 0));
-        ShardingSpherePreconditions.checkState(ISCConstants.isc_bpb_version1 == bpb[0], () -> new InvalidBpbVersionException(bpb[0] & 0xFF, ISCConstants.isc_bpb_version1));
+        ShardingSpherePreconditions.checkState(ISCConstants.isc_bpb_version1 == bpb[0], () -> new InvalidBPBVersionException(bpb[0] & 0xFF, ISCConstants.isc_bpb_version1));
         int index = 1;
         while (index < bpb.length) {
             int valueLength = getClumpletValueLength(bpb, index);
@@ -289,7 +289,7 @@ public final class FirebirdBatchBlobStream {
         return result;
     }
     
-    private static final class BpbReader {
+    private static final class BPBReader {
         
         private int version = -1;
         
@@ -307,8 +307,8 @@ public final class FirebirdBatchBlobStream {
         
         private int errorData;
         
-        private BpbReader copy() {
-            BpbReader result = new BpbReader();
+        private BPBReader copy() {
+            BPBReader result = new BPBReader();
             result.version = version;
             result.tag = tag;
             result.valueLength = valueLength;
@@ -364,7 +364,7 @@ public final class FirebirdBatchBlobStream {
         }
         
         private boolean isSegmented() {
-            ShardingSpherePreconditions.checkState(ISCConstants.isc_bpb_version1 == version, () -> new InvalidBpbVersionException(version, ISCConstants.isc_bpb_version1));
+            ShardingSpherePreconditions.checkState(ISCConstants.isc_bpb_version1 == version, () -> new InvalidBPBVersionException(version, ISCConstants.isc_bpb_version1));
             ShardingSpherePreconditions.checkState(null == error, () -> new InvalidClumpletStructureException(error, errorData));
             ShardingSpherePreconditions.checkState(-1 == tag, () -> new InvalidClumpletStructureException("buffer end before end of clumplet - no length component", 1));
             return segmented;

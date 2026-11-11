@@ -24,7 +24,7 @@ import org.apache.shardingsphere.database.exception.core.exception.SQLDialectExc
  * Invalid BLOB parameter buffer version exception for Firebird.
  */
 @Getter
-public final class InvalidBpbVersionException extends SQLDialectException {
+public final class InvalidBPBVersionException extends SQLDialectException {
     
     private static final long serialVersionUID = -7319528840214457826L;
     
@@ -32,7 +32,7 @@ public final class InvalidBpbVersionException extends SQLDialectException {
     
     private final int expectedVersion;
     
-    public InvalidBpbVersionException(final int version, final int expectedVersion) {
+    public InvalidBPBVersionException(final int version, final int expectedVersion) {
         super(String.format("Wrong version of BLOB parameter buffer %d, should be %d", version, expectedVersion));
         this.version = version;
         this.expectedVersion = expectedVersion;
